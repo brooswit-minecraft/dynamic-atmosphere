@@ -1,0 +1,86 @@
+// This subproject is the Minecraft-free half of the split described in the
+// repo README. It applies ONLY the plain java-library plugin — no NeoForge
+// or ModDevGradle plugin is applied here, and no dependency below may ever
+// resolve to a `net.minecraft` or `net.neoforged` artifact. The
+// `verifyNoMinecraft` task (see below) enforces that at build time.
+plugins {
+    id "java-library"
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    testImplementation platform("org.junit:junit-bom:5.11.4")
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+}
+
+test {
+    useJUnitPlatform()
+}
+
+// Fails the build if any resolved component of this subproject's main/test
+// compile or runtime classpaths comes from Minecraft or NeoForge. This is
+// the build-enforced half of item 5 in SICKOS-36: a rule, not a convention.
+//
+// Rule: a resolved component fails the check if its group is "net.minecraft"
+// or "net.neoforged" OR STARTS WITH either of those followed by a dot (so a
+// subgroup like net.neoforged.fancymodloader is caught too), OR its module
+// (artifact) name contains "minecraft" or "neoforge" (case-insensitive).
+// That catches the vanilla Minecraft artifact (group net.minecraft), every
+// NeoForge/FML artifact (group net.neoforged and its subgroups, e.g.
+// net.neoforged.fancymodloader), and any renamed/shaded artifact that still
+// carries "minecraft"/"neoforge" in its name — while not catching unrelated
+// libraries that happen to share no such token.
+//
+// Known limitation, deliberately not covered: a dependency added as a raw
+// local file (files(...) / flatDir), rather than a Maven group:artifact:
+// version coordinate, has no group/artifact identity for this check to
+// inspect, so it cannot be caught here. That is not the realistic accidental
+// leak this task exists to catch — nobody accidentally adds Minecraft or
+// NeoForge as a bare local jar path — and it is why the JUnit test below
+// exists as a second, independent line of defense that checks the actual
+// runtime classpath rather than Gradle's dependency metadata.
+def verifyNoMinecraftOn = { Configuration cfg, String label ->
+    def offenders = cfg.resolvedConfiguration.resolvedArtifacts.collect { it.moduleVersion.id }
+        .findAll { id ->
+            def group = id.group?.toLowerCase() ?: ""
+            def name = id.name?.toLowerCase() ?: ""
+            group == "net.minecraft" || group.startsWith("net.minecraft.") ||
+                group == "net.neoforged" || group.startsWith("net.neoforged.") ||
+                name.contains("minecraft") || name.contains("neoforge")
+        }
+    if (!offenders.isEmpty()) {
+        throw new GradleException(
+            "verifyNoMinecraft: ${label} of :engine resolved Minecraft/NeoForge component(s), " +
+            "which must never be reachable from this Minecraft-free subproject: " +
+            offenders.collect { "${it.group}:${it.name}:${it.version}" }.join(", ")
+        )
+    }
+    logger.lifecycle("verifyNoMinecraft: ${label} clean (${cfg.resolvedConfiguration.resolvedArtifacts.size()} artifact(s) checked)")
+}
+
+tasks.register("verifyNoMinecraft") {
+    group = "verification"
+    description = "Fails if Minecraft or NeoForge is resolvable on :engine's compile or runtime classpath (main or test)."
+
+    // Resolution must happen at execution time, not configuration time.
+    doLast {
+        verifyNoMinecraftOn(configurations.compileClasspath, "compileClasspath")
+        verifyNoMinecraftOn(configurations.runtimeClasspath, "runtimeClasspath")
+        verifyNoMinecraftOn(configurations.testCompileClasspath, "testCompileClasspath")
+        verifyNoMinecraftOn(configurations.testRuntimeClasspath, "testRuntimeClasspath")
+    }
+}
+
+tasks.named("check") {
+    dependsOn("verifyNoMinecraft")
+}

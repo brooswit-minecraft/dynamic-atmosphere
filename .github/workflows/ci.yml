@@ -1,0 +1,41 @@
+name: CI
+
+# Push to main and every PR, mirroring the trigger shape used by
+# brooswit-minecraft/schematic's reusable-ci.yml (SICKOS-36 carries this
+# repo-independent piece of that CI hygiene over; nothing else applies here).
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege: this workflow only reads the repo and uploads a build
+# artifact, so it never needs anything wider than read access to contents.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Build, test and verify the Minecraft-free classpath
+        # ./gradlew build runs each subproject's own `build` task, which
+        # for :engine includes `check` (unit tests, incl.
+        # ClasspathIsolationTest, plus the verifyNoMinecraft task) and for
+        # :forge compiles and assembles the mod jar against real NeoForge.
+        run: ./gradlew build --no-daemon
+
+      - name: Upload mod jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: dynamic-atmosphere
+          path: forge/build/libs/*.jar
+          if-no-files-found: error
