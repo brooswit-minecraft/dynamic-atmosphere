@@ -11,7 +11,14 @@ plugins {
 }
 
 group = "io.github.brooswitminecraft"
-version = "0.0.1"
+
+// Single source of truth for the shipped version (SICKOS-40 deliverable 4):
+// the release workflow overrides this with `-Pmod_version=<tag with the
+// leading v stripped>`; every other push/PR build (including this one, and
+// ci.yml's `./gradlew build`) falls back to the literal default below, which
+// must always build cleanly on its own.
+def modVersion = (findProperty("mod_version") ?: "0.0.1") as String
+version = modVersion
 
 base {
     archivesName = "dynamicatmosphere"
@@ -48,4 +55,17 @@ dependencies {
 // embedding third-party dependencies, which this isn't.
 tasks.named("jar", Jar) {
     from(project(":engine").sourceSets.main.output)
+}
+
+// Expands `${mod_version}` in neoforge.mods.toml's `version=` line to the
+// same modVersion computed above, so the jar's file name and the version
+// baked into the built jar's mods.toml can never drift apart (SICKOS-40
+// deliverable 4). Scoped to just that one file: nothing else under
+// resources uses `${}` syntax, and this must not touch pack.mcmeta.
+tasks.named("processResources", ProcessResources) {
+    def replaceProperties = [mod_version: modVersion]
+    inputs.properties replaceProperties
+    filesMatching("META-INF/neoforge.mods.toml") {
+        expand replaceProperties
+    }
 }
