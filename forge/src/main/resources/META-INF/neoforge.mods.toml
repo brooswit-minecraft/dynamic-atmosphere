@@ -1,0 +1,25 @@
+modLoader="javafml" #mandatory
+loaderVersion="[4,)" #mandatory
+
+license="MIT"
+
+[[mods]] #mandatory
+modId="dynamicatmosphere" #mandatory
+version="0.0.1" #mandatory
+displayName="Dynamic Atmosphere" #mandatory
+authors="brooswit"
+description='''Shell mod build for the Dynamic Atmosphere / Weather System project (SICKOS). Currently ships no simulation behaviour: see the README for what this repo is for.'''
+
+[[dependencies.dynamicatmosphere]]
+    modId="neoforge"
+    type="required"
+    versionRange="[21.1.0,)"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.dynamicatmosphere]]
+    modId="minecraft"
+    type="required"
+    versionRange="[1.21.1,1.22)"
+    ordering="NONE"
+    side="BOTH"
