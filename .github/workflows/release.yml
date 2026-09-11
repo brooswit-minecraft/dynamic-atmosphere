@@ -136,17 +136,25 @@ jobs:
         id: injar
         env:
           JAR_FILE: ${{ steps.jar.outputs.file }}
+          # A release tag is operator-controlled and shell metacharacters
+          # are legal in a git tag name (confirmed: `git check-ref-format`
+          # accepts refs/tags/v1.0.0'; id ;', `$(id)`, and `` `id` `` alike).
+          # Point 7 above requires this value reach the shell only through
+          # env:/a quoted variable, never interpolated straight into a
+          # run: body — this step was the one place that rule wasn't
+          # actually followed; fixed here rather than just noted.
+          RESOLVED_VERSION: ${{ steps.ver.outputs.version }}
         run: |
           in_jar_version=$(unzip -p "$JAR_FILE" META-INF/neoforge.mods.toml | sed -n 's/^version="\(.*\)" .*/\1/p')
           echo "version=$in_jar_version" >> "$GITHUB_OUTPUT"
           {
             echo "## Release build"
-            echo "- resolved version (from tag/input): \`${{ steps.ver.outputs.version }}\`"
+            echo "- resolved version (from tag/input): \`$RESOLVED_VERSION\`"
             echo "- jar file: \`$JAR_FILE\`"
             echo "- version read back out of the jar's neoforge.mods.toml: \`$in_jar_version\`"
           } >> "$GITHUB_STEP_SUMMARY"
-          if [ "$in_jar_version" != "${{ steps.ver.outputs.version }}" ]; then
-            echo "::error::Version mismatch: resolved '${{ steps.ver.outputs.version }}' but the built jar's neoforge.mods.toml says '$in_jar_version'."
+          if [ "$in_jar_version" != "$RESOLVED_VERSION" ]; then
+            echo "::error::Version mismatch: resolved '$RESOLVED_VERSION' but the built jar's neoforge.mods.toml says '$in_jar_version'."
             exit 1
           fi
 

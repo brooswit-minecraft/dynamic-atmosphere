@@ -67,8 +67,9 @@ env:
   SOURCE_URL: https://github.com/brooswit-minecraft/dynamic-atmosphere
   ISSUES_URL: https://github.com/brooswit-minecraft/dynamic-atmosphere/issues
 
-  # SICKOS-40 calls: see modrinth/README.md in this repo (or the ticket
-  # comment) for the one-line reasoning behind each. Categories drawn from
+  # SICKOS-40 calls: see the root README.md's "Releasing to Modrinth"
+  # section (or the ticket comment) for the one-line reasoning behind each.
+  # Categories drawn from
   # Modrinth's live project_type=mod category list (there is no
   # weather/atmosphere category) — re-fetch
   # https://api.modrinth.com/v2/tag/category before trusting this list is
@@ -177,7 +178,7 @@ jobs:
             echo "### LIVE project create"
             echo "- exit code: \`$ec\`"
             if [ -n "$project_id" ]; then
-              echo "- **created project id: \`$project_id\`** — record this as repo variable \`MODRINTH_PROJECT_ID\` (needs repo admin; this workflow does not set it itself, see modrinth/README.md)"
+              echo "- **created project id: \`$project_id\`** — record this as repo variable \`MODRINTH_PROJECT_ID\` (needs repo admin; this workflow does not set it itself, see the root README.md's \"Releasing to Modrinth\" section)"
             fi
             echo '```'
             echo "-- stdout --"; cat create.stdout.log

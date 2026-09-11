@@ -150,6 +150,28 @@ flags) is a live check below, not a restated value that will go stale.
   with the version wired in from the trigger; only the `release` trigger
   ever publishes to Modrinth for real.
 
+### Listing decisions (categories, client/server side)
+
+`modrinth-draft-create.yml` hardcodes these; changing them means changing
+the workflow, not a config file. Reasoning, so the next person doesn't have
+to reconstruct it or dig up the SICKOS-40 ticket:
+
+- **Categories: `game-mechanics`, `mobs`.** Modrinth has no weather or
+  atmosphere category (checked live against
+  `https://api.modrinth.com/v2/tag/category` for `project_type=mod`, 19
+  categories total, re-check before trusting this is unchanged).
+  `game-mechanics` because the mod's core purpose is a generic, data-driven
+  mechanic, not decoration or world generation. `mobs` because the design
+  spec's own headline Purpose examples include Zombie Fog changing zombie
+  spawn behavior — a first-class example, not a buried side effect, even
+  though Zombie Fog isn't in the Phase 1 MVP.
+- **`--client-side required --server-side required`.** The simulation is
+  server-authoritative (material state, movement, and thresholds are all
+  world state), and the MVP's whole deliverable is a perceivable, rendered
+  atmosphere — a client without the mod isn't getting the point of it. The
+  current repo has no vanilla-fallback path, so this wasn't relaxed to
+  `optional` on a guess.
+
 ### What must exist first
 
 Both workflows read `secrets.MODRINTH_TOKEN` and `vars.MODRINTH_PROJECT_ID`
