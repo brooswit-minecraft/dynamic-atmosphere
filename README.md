@@ -141,9 +141,11 @@ flags) is a live check below, not a restated value that will go stale.
 ### The two workflows
 
 - **`.github/workflows/modrinth-draft-create.yml`** — one-shot. Creates the
-  Modrinth project as a DRAFT. Already run for `dynamic-atmosphere` unless
-  this ticket's own writeup says otherwise; you should not need to run it
-  again. workflow_dispatch only.
+  Modrinth project as a DRAFT. NOT run yet for `dynamic-atmosphere`: it is
+  blocked on `MODRINTH_TOKEN` not being set on this repo (see "What must
+  exist first" below). Whoever eventually runs the live create should record
+  the project id it prints as the repo variable `MODRINTH_PROJECT_ID`.
+  workflow_dispatch only.
 - **`.github/workflows/release.yml`** — the actual release path. Triggers on
   `release: types: [published]` (a real GitHub Release) and on
   `workflow_dispatch` (a dry run only — see below). Both build the mod jar
@@ -174,23 +176,33 @@ to reconstruct it or dig up the SICKOS-40 ticket:
 
 ### What must exist first
 
-Both workflows read `secrets.MODRINTH_TOKEN` and `vars.MODRINTH_PROJECT_ID`
-on THIS repo (`brooswit-minecraft/dynamic-atmosphere`), never a value copied
-from another repo. Check what is currently set with:
+The two workflows do NOT read the same things, and they do not fail the same
+way when something is missing — this is not one shared behaviour, it's two:
+
+- **`modrinth-draft-create.yml`** reads only `secrets.MODRINTH_TOKEN`. It
+  never reads `MODRINTH_PROJECT_ID` at all (there is nothing to read yet —
+  this is the workflow that creates the project id in the first place). If
+  `MODRINTH_TOKEN` is missing, its live-create step does not degrade: it
+  hard-fails loudly (`::error::` + non-zero exit). That is deliberate for a
+  one-shot, irreversible create, not a bug to fix.
+- **`release.yml`** reads both `secrets.MODRINTH_TOKEN` and
+  `vars.MODRINTH_PROJECT_ID`. If either is missing, its Modrinth-writing
+  steps degrade on purpose — printing which one is missing in the job
+  summary and skipping the write, rather than failing. The jar still builds
+  and the CI build/test job is unaffected either way.
+
+Both read from THIS repo (`brooswit-minecraft/dynamic-atmosphere`), never a
+value copied from another repo. Check what is currently set with:
 
 ```
 gh secret list -R brooswit-minecraft/dynamic-atmosphere
 gh variable list -R brooswit-minecraft/dynamic-atmosphere
 ```
 
-- If `MODRINTH_TOKEN` is missing: every Modrinth-writing step in both
-  workflows degrades on purpose — it prints which of `MODRINTH_TOKEN` /
-  `MODRINTH_PROJECT_ID` is missing in the job summary and skips the write,
-  rather than failing with a raw API error. The jar still builds and the CI
-  build/test job is unaffected. Setting it needs a repo secret write
+- If `MODRINTH_TOKEN` is missing: setting it needs a repo secret write
   (`gh secret set MODRINTH_TOKEN -R brooswit-minecraft/dynamic-atmosphere`),
   which needs repo admin.
-- If `MODRINTH_PROJECT_ID` is missing: same degrade. Set it as a repo
+- If `MODRINTH_PROJECT_ID` is missing: set it as a repo
   variable (`gh variable set MODRINTH_PROJECT_ID -R
   brooswit-minecraft/dynamic-atmosphere`) once the draft project exists —
   `modrinth-draft-create.yml`'s live-create step prints the created id

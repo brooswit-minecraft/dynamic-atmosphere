@@ -197,14 +197,14 @@ jobs:
         if: steps.modrinth_check.outputs.has_modrinth == 'true'
 
       # --- Dry run (workflow_dispatch path) --------------------------------
-      # See file header points 1 and 5. Needs no MODRINTH_TOKEN (--dry-run
-      # never touches ctx.transport — verified against rinth's source at the
-      # pinned tag), so this is exercisable before MODRINTH_PROJECT_ID or
-      # MODRINTH_TOKEN exist on this repo. This IS gated on has_modrinth
-      # anyway (matching schematic) so the dry run's own project-id
-      # resolution has a real value to print, not a placeholder.
+      # See file header points 1 and 5. The rinth dry-run COMMAND itself
+      # needs no MODRINTH_TOKEN (--dry-run never touches ctx.transport —
+      # verified against rinth's source at the pinned tag). This STEP is
+      # nonetheless deliberately gated on has_modrinth (matching schematic),
+      # so the dry run prints a real project id rather than a placeholder.
       - name: Dry-run Modrinth publish
         if: steps.modrinth_check.outputs.has_modrinth == 'true' && github.event_name != 'release'
+        shell: bash
         env:
           PROJECT_ID: ${{ vars.MODRINTH_PROJECT_ID }}
           JAR_FILE: ${{ steps.jar.outputs.file }}

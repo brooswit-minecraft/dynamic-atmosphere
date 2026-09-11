@@ -112,6 +112,7 @@ jobs:
       # would send.
       - name: Dry-run project create
         if: inputs.confirm != 'CREATE-DRAFT-PROJECT'
+        shell: bash
         run: |
           bunx --bun "$RINTH_REF" --json project create \
             --slug "$SLUG" \
@@ -166,7 +167,7 @@ jobs:
             --category "$CATEGORY_2" \
             --source-url "$SOURCE_URL" \
             --issues-url "$ISSUES_URL" \
-            > >(tee create.stdout.log) 2> >(tee create.stderr.log >&2)
+            > create.stdout.log 2> create.stderr.log
           ec=$?
           set -e
           echo "exit_code=$ec" >> "$GITHUB_OUTPUT"
