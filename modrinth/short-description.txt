@@ -1,0 +1,1 @@
+A NeoForge mod for Minecraft 1.21.1 that will simulate weather and atmosphere as physical materials moving through the world; it is early and not yet playable.
