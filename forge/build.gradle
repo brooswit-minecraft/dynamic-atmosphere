@@ -1,0 +1,51 @@
+// This subproject is the NeoForge-facing half of the split described in
+// the repo README: everything Minecraft/NeoForge-specific lives here. It
+// depends on the Minecraft-free :engine subproject and packages that
+// subproject's compiled classes directly into this mod's jar (see the
+// `jar` task override below) so NeoForge's classloader can reach them at
+// runtime — a plain `implementation project(':engine')` alone would NOT do
+// that; it only puts :engine on this project's own compile/runtime
+// classpath, not inside the artifact NeoForge loads.
+plugins {
+    id "net.neoforged.moddev" version "2.0.146"
+}
+
+group = "io.github.brooswitminecraft"
+version = "0.0.1"
+
+base {
+    archivesName = "dynamicatmosphere"
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+neoForge {
+    // Matches the sickos pack's pinned NeoForge version for Minecraft
+    // 1.21.1 (brooswit-minecraft/sickos pack.toml, [versions].neoforge).
+    version = "21.1.248"
+
+    mods {
+        dynamicatmosphere {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+dependencies {
+    implementation project(":engine")
+}
+
+// Embeds :engine's compiled classes directly into this mod's jar, at the
+// jar's root (not nested), so they are on the classpath NeoForge loads the
+// mod from. This is the "include the engine subproject's output in the mod
+// jar directly" option named in SICKOS-36 item 2, chosen over jarJar
+// because :engine is our own first-party code with no independent version
+// of its own to track — jarJar's nested-jar/versioning machinery exists for
+// embedding third-party dependencies, which this isn't.
+tasks.named("jar", Jar) {
+    from(project(":engine").sourceSets.main.output)
+}
