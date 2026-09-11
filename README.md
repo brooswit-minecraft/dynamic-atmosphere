@@ -130,3 +130,115 @@ NeoForge instance is. To repeat it:
 
 See the PR/ticket for this change for the actual quoted log lines from the
 last time this was run.
+
+## Releasing to Modrinth
+
+This section is the runbook for the NEXT time someone cuts a version. It
+assumes nothing about this repo beyond what is in it right now; anything
+that could drift (a rinth tag, a secret's exact state, a workflow's exact
+flags) is a live check below, not a restated value that will go stale.
+
+### The two workflows
+
+- **`.github/workflows/modrinth-draft-create.yml`** — one-shot. Creates the
+  Modrinth project as a DRAFT. Already run for `dynamic-atmosphere` unless
+  this ticket's own writeup says otherwise; you should not need to run it
+  again. workflow_dispatch only.
+- **`.github/workflows/release.yml`** — the actual release path. Triggers on
+  `release: types: [published]` (a real GitHub Release) and on
+  `workflow_dispatch` (a dry run only — see below). Both build the mod jar
+  with the version wired in from the trigger; only the `release` trigger
+  ever publishes to Modrinth for real.
+
+### What must exist first
+
+Both workflows read `secrets.MODRINTH_TOKEN` and `vars.MODRINTH_PROJECT_ID`
+on THIS repo (`brooswit-minecraft/dynamic-atmosphere`), never a value copied
+from another repo. Check what is currently set with:
+
+```
+gh secret list -R brooswit-minecraft/dynamic-atmosphere
+gh variable list -R brooswit-minecraft/dynamic-atmosphere
+```
+
+- If `MODRINTH_TOKEN` is missing: every Modrinth-writing step in both
+  workflows degrades on purpose — it prints which of `MODRINTH_TOKEN` /
+  `MODRINTH_PROJECT_ID` is missing in the job summary and skips the write,
+  rather than failing with a raw API error. The jar still builds and the CI
+  build/test job is unaffected. Setting it needs a repo secret write
+  (`gh secret set MODRINTH_TOKEN -R brooswit-minecraft/dynamic-atmosphere`),
+  which needs repo admin.
+- If `MODRINTH_PROJECT_ID` is missing: same degrade. Set it as a repo
+  variable (`gh variable set MODRINTH_PROJECT_ID -R
+  brooswit-minecraft/dynamic-atmosphere`) once the draft project exists —
+  `modrinth-draft-create.yml`'s live-create step prints the created id
+  prominently (job summary + a `rinth-project-create-json` artifact) for a
+  human to record; it does not set the variable itself.
+
+### Dry run first, always
+
+`workflow_dispatch` on `release.yml` never publishes for real, no matter
+what you type — the live publish step is gated on `github.event_name ==
+'release'`, not on any input. Dispatch it (Actions tab, or `gh workflow run
+release.yml -R brooswit-minecraft/dynamic-atmosphere -f version=0.0.2-dryrun`)
+with a literal test version such as:
+
+```
+version: 0.0.2-dryrun
+```
+
+Read the job summary: it shows the resolved version, the jar file built,
+the version read back out of that jar's `neoforge.mods.toml` (these two
+must agree — the job fails loudly if they don't), and — if
+`MODRINTH_TOKEN`/`MODRINTH_PROJECT_ID` are both set — the exact JSON payload
+`rinth publish --dry-run` would have sent, with no network write made.
+
+### Cutting a real release
+
+1. Confirm `MODRINTH_TOKEN` and `MODRINTH_PROJECT_ID` are both set (above).
+2. Create a GitHub Release with a tag shaped `vN` (for example `v0.1.0`) —
+   the workflow strips the leading `v`. Publishing the release (not saving a
+   draft) is what fires `release.yml` on `release: types: [published]`.
+3. That run builds the jar with the release's version baked in throughout
+   (Gradle `version`, the jar file name, and the in-jar
+   `neoforge.mods.toml` `version=` — all one source of truth, see
+   `forge/build.gradle`), then runs `rinth publish` for real: loader
+   `neoforge`, game version `1.21.1`, channel derived as `beta` if the
+   version contains a hyphen else `release`, changelog taken from the GitHub
+   Release body.
+4. `rinth` itself refuses to publish a duplicate `version_number` before any
+   upload — republishing the same tag by accident fails loudly rather than
+   silently overwriting.
+
+### Verifying what actually landed
+
+Human-readable `rinth project get`/`rinth versions list` output omits
+`description` and `body` entirely (`formatProject` in rinth's
+`src/commands/project.ts` — read it at whichever tag you have pinned rather
+than trusting this line). Always add the global `--json` flag:
+
+```
+bunx --bun github:brooswit-minecraft/rinth#<pinned tag> --json project get dynamic-atmosphere
+bunx --bun github:brooswit-minecraft/rinth#<pinned tag> --json versions list dynamic-atmosphere
+```
+
+check the pin actually in use in `release.yml`'s `RINTH_REF` before trusting
+the tag above — this line will drift. From `project get`, at minimum
+confirm: `status` (must stay `draft` unless someone has deliberately
+submitted it, see below), `description`, `body`, `license`, `source_url`,
+`issues_url`, `categories`. From `versions list`, confirm the new version's
+`version_number`, `game_versions`, `loaders`, and `version_type` match what
+was just published.
+
+### Submitting for review is a separate, deliberate, human-gated act
+
+Nothing in this repo's workflows calls `rinth project submit` or sets
+`requested_status`, anywhere, ever — verify this yourself before trusting
+it: `grep -rn "submit\|requested_status" .github/`. That is deliberate, not
+an oversight: submitting moves the project out of `draft` and into
+Modrinth's moderation queue, which is a one-way, queue-position-costing
+action a release workflow must never take on anyone's behalf. When the
+project is actually ready for review, a human runs `rinth project submit
+<slug>` by hand, having first confirmed (by reading `project get --json`'s
+`status`, `body`, and the published versions) that what is about to go in
+front of a moderator is what they intend to ship.

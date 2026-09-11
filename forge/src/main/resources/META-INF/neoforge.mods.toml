@@ -5,7 +5,7 @@ license="MIT"
 
 [[mods]] #mandatory
 modId="dynamicatmosphere" #mandatory
-version="0.0.1" #mandatory
+version="${mod_version}" #mandatory
 displayName="Dynamic Atmosphere" #mandatory
 authors="brooswit"
 description='''Shell mod build for the Dynamic Atmosphere / Weather System project (SICKOS). Currently ships no simulation behaviour: see the README for what this repo is for.'''
