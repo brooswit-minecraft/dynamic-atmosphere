@@ -1,1 +1,1 @@
-An early NeoForge 1.21.1 cloud and fog visual spike, proving automated delivery and in-game execution before the full atmospheric simulation.
+Water-depth-driven fog patches and lightweight cloud effects for NeoForge 1.21.1. An early, bounded visual prototype with no world reset required.

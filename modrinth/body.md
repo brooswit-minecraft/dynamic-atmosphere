@@ -1,15 +1,17 @@
 # Dynamic Atmosphere
 
-A small atmospheric **delivery spike** for Minecraft **1.21.1 / NeoForge**.
+A small atmospheric mod in alpha for Minecraft **1.21.1 / NeoForge**.
 
-This first alpha adds lightweight cloud/fog particle effects near players and
-operator commands to demonstrate that the mod is executing. It is deliberately
-small so we can test the complete build, release, modpack, and server lifecycle.
+Fog patches build up over water near players, with deeper water producing denser
+fog. Lightweight high-terrain cloud effects and operator demonstration commands
+are also included. This is an incremental visual prototype, not a complete
+weather simulation.
 
 ## Current Scope
 
 - Server-driven visual effects using Minecraft's existing particles.
 - Bounded work near players, without forcing chunks to load.
+- Persistent water-fog patches with bounded state and particle output.
 - `/dynamicatmosphere status` and `/dynamicatmosphere demo` for operators.
 - No world generation changes or world reset required.
 

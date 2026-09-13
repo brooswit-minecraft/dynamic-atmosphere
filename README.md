@@ -3,10 +3,11 @@
 Minecraft 1.21.1, NeoForge 21.1.250, Java 21. Mod ID: `dynamicatmosphere`.
 MIT licensed.
 
-## First Alpha: Delivery Spike
+## Water Fog Alpha
 
-This version adds small vanilla cloud/fog particle effects near players. Its
-purpose is to prove build, release, modpack delivery, and actual runtime execution.
+This version adds persistent, bounded fog patches over water near players.
+Deeper water produces denser fog. Patches build up and fade rather than existing
+only for a single sampling pass. The original high-terrain cloud effect remains.
 It is **not** the planned terrain-aware atmospheric simulation. No precipitation,
 pollution, gas transport, or world generation changes are included yet.
 
