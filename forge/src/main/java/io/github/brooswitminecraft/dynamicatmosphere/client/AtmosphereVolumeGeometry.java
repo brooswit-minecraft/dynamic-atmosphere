@@ -40,6 +40,12 @@ public final class AtmosphereVolumeGeometry {
             16, 16, amount, camera, look);
     }
 
+    static List<Slice> lodSlices(AtmosphereLodHierarchy.Volume volume, float amount, Point camera, Point look) {
+        int size = volume.size();
+        return boxSlices(volume.blockX(), volume.blockY(), volume.blockZ(), size,
+            size == CELL_SIZE ? SLICE_SPACING : size, amount, camera, look);
+    }
+
     private static List<Slice> boxSlices(double x, double y, double z, int size, double spacing,
                                          float amount, Point camera, Point look) {
         Point forward = look.normalized();

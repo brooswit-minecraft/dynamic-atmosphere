@@ -14,9 +14,6 @@ import net.minecraft.client.renderer.RenderType;
 import net.minecraft.world.phys.AABB;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 
-import java.util.List;
-import java.util.ArrayList;
-
 public final class AtmosphereVolumeRenderer extends RenderStateShard {
     private static final int SLICES_PER_BATCH = 4096;
     private static final RenderType VOLUME = RenderType.create(
@@ -35,7 +32,6 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
     private static int renderedCellCount;
     private static int renderedSliceCount;
     private static int renderedCoarseCount;
-    private record Volume(int x, int y, int z, float amount, boolean coarse) { }
 
     static void render(RenderLevelStageEvent event, ClientLevel level, AtmosphereClientCache cache) {
         renderedCellCount = 0;
@@ -47,32 +43,10 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
         var forward = new AtmosphereVolumeGeometry.Point(look.x(), look.y(), look.z());
         int viewChunks = Minecraft.getInstance().options.getEffectiveRenderDistance();
         cache.setView(position.x, position.z, viewChunks);
-        List<AtmosphereClientCache.VisibleCell> visible = cache.visibleDetailed(
-            event.getPartialTick().getGameTimeDeltaPartialTick(false));
-        visible.removeIf(cell -> {
-            AABB bounds = bounds(cell.cell());
-            return !level.getChunkSource().hasChunk(
-                AtmosphereGridLayout.chunkCoordinate(cell.cell().x()),
-                AtmosphereGridLayout.chunkCoordinate(cell.cell().z()))
-                || !AtmosphereClientView.contains(cell.cell(), position.x, position.z, viewChunks)
-                || !event.getFrustum().isVisible(bounds);
-        });
-        var volumes = new ArrayList<Volume>(visible.size());
-        for (var cell : visible) {
-            volumes.add(new Volume(cell.cell().x(), cell.cell().y(), cell.cell().z(), cell.amount(), false));
-        }
-        // Minecraft's existing projection far plane is 4x effective render distance.
-        // Reuse it (and depth) rather than altering the projection for the cached layer.
-        for (var cell : cache.coarseCells()) {
-            if (!AtmosphereClientView.containsChunk(cell.x(), cell.z(), position.x, position.z, viewChunks * 4)) continue;
-            if (AtmosphereClientView.coarseVisible(cell, position.x, position.z, viewChunks,
-                AtmosphereClientView.containsChunk(cell.x(), cell.z(), position.x, position.z, viewChunks)
-                    && level.getChunkSource().hasChunk(cell.x(), cell.z()))
-                && event.getFrustum().isVisible(coarseBounds(cell))) {
-                volumes.add(new Volume(cell.x(), cell.y(), cell.z(), cell.amount(), true));
-            }
-        }
-        if (volumes.isEmpty()) {
+        var selection = cache.lodSelection(position.x, position.y, position.z, viewChunks);
+        double tick = cache.renderTick(event.getPartialTick().getGameTimeDeltaPartialTick(false));
+        double farDistance = viewChunks * 64.0;
+        if (selection.volumes().isEmpty() && selection.unloadedFallbacks().isEmpty()) {
             return;
         }
         if (storage == null) {
@@ -90,30 +64,36 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
             // All slices have identical white RGB and no depth writes, so alpha
             // composition is order-independent. Stream bounded GPU batches without
             // a global slice list or nearest-cell cutoff. Revisit if materials gain colors.
-            for (var cell : volumes) {
-                var slices = cell.coarse()
-                    ? AtmosphereVolumeGeometry.coarseSlices(cell.x(), cell.y(), cell.z(), cell.amount(), camera, forward)
-                    : AtmosphereVolumeGeometry.slices(new AtmosphereClientCache.Cell(cell.x(), cell.y(), cell.z()),
-                        cell.amount(), camera, forward);
-                if (!slices.isEmpty()) {
-                    if (cell.coarse()) renderedCoarseCount++;
-                    else renderedCellCount++;
-                }
-                for (var slice : slices) {
-                    if (vertices == null) {
-                        vertices = buffers.getBuffer(VOLUME);
+            for (int layer = 0; layer < 2; layer++) {
+                var volumes = layer == 0 ? selection.volumes() : selection.unloadedFallbacks();
+                for (var cell : volumes) {
+                    // Chunk sections own fallback membership, so load/unload never double-covers detail.
+                    boolean loaded = level.getChunkSource().hasChunk(
+                        AtmosphereGridLayout.chunkCoordinate(cell.x), AtmosphereGridLayout.chunkCoordinate(cell.z));
+                    if (!AtmosphereLodHierarchy.visibleWhenLoaded(cell, layer == 1, loaded)) continue;
+                    if (AtmosphereLodHierarchy.distanceSquared(cell, position.x, position.y, position.z)
+                        > farDistance * farDistance || !event.getFrustum().isVisible(bounds(cell))) continue;
+                    var slices = AtmosphereVolumeGeometry.lodSlices(cell, cell.amount(tick), camera, forward);
+                    if (!slices.isEmpty()) {
+                        if (cell.level > 0) renderedCoarseCount++;
+                        else renderedCellCount++;
                     }
-                    var polygon = slice.vertices();
-                    for (int i = 1; i < polygon.size() - 1; i++) {
-                        vertex(vertices, polygon.getFirst(), slice.alpha());
-                        vertex(vertices, polygon.get(i), slice.alpha());
-                        vertex(vertices, polygon.get(i + 1), slice.alpha());
-                    }
-                    renderedSliceCount++;
-                    if (++batchSlices == SLICES_PER_BATCH) {
-                        buffers.endBatch(VOLUME);
-                        vertices = null;
-                        batchSlices = 0;
+                    for (var slice : slices) {
+                        if (vertices == null) {
+                            vertices = buffers.getBuffer(VOLUME);
+                        }
+                        var polygon = slice.vertices();
+                        for (int i = 1; i < polygon.size() - 1; i++) {
+                            vertex(vertices, polygon.getFirst(), slice.alpha());
+                            vertex(vertices, polygon.get(i), slice.alpha());
+                            vertex(vertices, polygon.get(i + 1), slice.alpha());
+                        }
+                        renderedSliceCount++;
+                        if (++batchSlices == SLICES_PER_BATCH) {
+                            buffers.endBatch(VOLUME);
+                            vertices = null;
+                            batchSlices = 0;
+                        }
                     }
                 }
             }
@@ -131,19 +111,9 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
         }
     }
 
-    private static AABB bounds(AtmosphereClientCache.Cell cell) {
-        double x = (double) cell.x() * AtmosphereVolumeGeometry.CELL_SIZE;
-        double y = (double) cell.y() * AtmosphereVolumeGeometry.CELL_SIZE;
-        double z = (double) cell.z() * AtmosphereVolumeGeometry.CELL_SIZE;
-        return new AABB(x, y, z, x + AtmosphereGridLayout.CELL_SIZE,
-            y + AtmosphereGridLayout.CELL_SIZE, z + AtmosphereGridLayout.CELL_SIZE);
-    }
-
-    private static AABB coarseBounds(AtmosphereClientView.CoarseCell cell) {
-        double x = (double) cell.x() * 16;
-        double y = (double) cell.y() * 16;
-        double z = (double) cell.z() * 16;
-        return new AABB(x, y, z, x + 16, y + 16, z + 16);
+    private static AABB bounds(AtmosphereLodHierarchy.Volume cell) {
+        double x = cell.blockX(), y = cell.blockY(), z = cell.blockZ();
+        return new AABB(x, y, z, x + cell.size(), y + cell.size(), z + cell.size());
     }
 
     private static void vertex(VertexConsumer vertices, AtmosphereVolumeGeometry.Point point, float alpha) {

@@ -28,6 +28,7 @@ public final class AtmosphereClientCache {
     }
 
     private final Map<Cell, Amount> cells = new LinkedHashMap<>(16, 0.75f, true);
+    private final AtmosphereLodHierarchy lod = new AtmosphereLodHierarchy();
     private final int cellBudget;
     private Predicate<Cell> detailedView = cell -> true;
     private Map<Cell, Update> snapshot;
@@ -63,6 +64,7 @@ public final class AtmosphereClientCache {
 
     public void clear() {
         cells.clear();
+        lod.clear();
         snapshot = null;
         snapshotChunks = null;
         detailedView = cell -> true;
@@ -110,6 +112,7 @@ public final class AtmosphereClientCache {
             if (wholeViewSnapshot) {
                 Map<Cell, Amount> previous = new LinkedHashMap<>(cells);
                 cells.clear();
+                lod.clear();
                 reconcile(previous, snapshot.values());
             } else {
                 var absent = new ArrayList<Update>();
@@ -148,7 +151,9 @@ public final class AtmosphereClientCache {
             int material = Math.clamp(update.amount(), 0, 1_000_000);
             int capacity = Math.clamp(update.capacity(), 0, 1000);
             float fullness = capacity == 0 ? 0 : Math.min(1000, material * 1000.0f / capacity);
-            if (material > 0) cells.putIfAbsent(update.cell(), new Amount(fullness, fullness, tick, material, capacity));
+            if (material > 0 && !cells.containsKey(update.cell())) {
+                put(update.cell(), new Amount(fullness, fullness, tick, material, capacity));
+            }
         }
         trim();
         revision++;
@@ -176,6 +181,7 @@ public final class AtmosphereClientCache {
         while (cells.size() > cellBudget && iterator.hasNext()) {
             var entry = iterator.next();
             if (!detailedView.test(entry.getKey())) {
+                lod.remove(entry.getKey(), tick);
                 iterator.remove();
                 revision++;
             }
@@ -193,16 +199,32 @@ public final class AtmosphereClientCache {
                 continue;
             }
             if (old != null && old.material() == material && old.capacity() == capacity) {
-                cells.put(update.cell(), old);
+                put(update.cell(), old);
                 continue;
             }
-            cells.put(update.cell(), new Amount(old == null ? 0 : old.at(tick), target, tick, material, capacity));
+            put(update.cell(), new Amount(old == null ? 0 : old.at(tick), target, tick, material, capacity));
         }
     }
 
+    private void put(Cell cell, Amount amount) {
+        cells.put(cell, amount);
+        lod.put(cell, amount.from(), amount.target(), amount.since(), tick);
+    }
+
+    AtmosphereLodHierarchy.Selection lodSelection(double x, double y, double z, int viewChunks) {
+        return lod.select(x, y, z, viewChunks, tick);
+    }
+
+    double renderTick(float partialTick) { return tick + Math.clamp(partialTick, 0, 1); }
+
     public void advance() {
         tick++;
-        if (cells.values().removeIf(amount -> amount.material() == 0 && tick - amount.since() >= TRANSITION_TICKS)) revision++;
+        if (cells.entrySet().removeIf(entry -> {
+            Amount amount = entry.getValue();
+            if (amount.material() != 0 || tick - amount.since() < TRANSITION_TICKS) return false;
+            lod.remove(entry.getKey(), tick);
+            return true;
+        })) revision++;
     }
 
     public List<VisibleCell> visibleDetailed(float partialTick) {

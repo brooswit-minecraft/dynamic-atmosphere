@@ -1,3 +1,17 @@
+# 0.9.0-alpha.1
+
+- Add distance-based client rendering LOD. With Minecraft view distance `V` expressed in blocks, render 4x4x4-block volumes below `V/2`, 8x8x8 in `[V/2, V)`, 16x16x16 in `[V, 2V)`, and 32x32x32 in `[2V, 4V]`.
+- Build each coarser volume by recursively averaging eight children, including empty volumes in the average. Render non-overlapping coverage, not coarse parents on top of their finer children.
+- Use fewer rendered volumes and slices at distance; no measured FPS improvement or runtime verification is claimed. Actual performance remains for user verification.
+- Retain the persistent client visual cache and four-times-view reach. Far fog still requires previously seen areas and can be stale; LOD does not load chunks or change server simulation resolution.
+- Preserve 4-block simulation cells, the 250-tick cadence (12.5 seconds at 20 TPS), condensation chance and consumption per check, and cache/render/sync intervals. No data or world reset is required.
+- Existing water-flow and destructive-pressure warnings remain unchanged: back up worlds before upgrading.
+
+- Bound spatial selection work, discard old-view builds after teleport, and provide non-overlapping coarse cached coverage while refining a new view. Preserve same-tick opacity interpolation across packet updates.
+
+Minor pre-1.0 client-rendering feature release. Automated verification runs in CI;
+local tests and performance measurements are intentionally skipped.
+
 # 0.8.1-alpha.1
 
 - Increase the cadence base from 250 to 1000: `1000 * cellSize / 16` ticks, 40 times the original 25-base delay instead of 10 times.

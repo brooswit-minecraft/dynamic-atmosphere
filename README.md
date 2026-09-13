@@ -24,7 +24,7 @@ boundaries and exhausted work/search budgets leave work pending, never authorize
 pressure destruction, and do not discard material.
 Excess that still cannot escape remains blocked and reported, not discarded;
 displacement is not unlimited.
-In 0.8.1-alpha.1, simulation/source cadence is `1000 * cellSize / 16` ticks:
+Retaining the 0.8.1 tuning, simulation/source cadence is `1000 * cellSize / 16` ticks:
 40 times the original 25-base delay, rather than the previous 10 times. Current
 4-block cells use **250 ticks**, or **12.5 seconds** at 20 TPS (previously 62.5
 ticks). Size 1 averages 62.5 ticks, size 16 uses 1000, and size 32 uses 2000.
@@ -93,6 +93,38 @@ per check are unchanged.
 before upgrading.** It changes the world, not just the visual cache. Existing
 destructive-pressure warnings remain unchanged, and no data or world reset is
 required.
+
+## Distance-Based Rendering
+
+The 0.9.0-alpha.1 client rendering feature uses four levels of detail (LOD).
+Let `V` be Minecraft's client view distance expressed in blocks and `d` the
+render distance from the viewer:
+
+| Distance band | Rendered volume size |
+| --- | --- |
+| `d < V/2` | 4x4x4 blocks |
+| `V/2 <= d < V` | 8x8x8 blocks |
+| `V <= d < 2V` | 16x16x16 blocks |
+| `2V <= d <= 4V` | 32x32x32 blocks |
+
+Each coarser volume recursively averages eight children, counting empty volumes
+in that average rather than averaging only occupied children. Coverage does not
+overlap: a coarse parent is not drawn over its finer children. The coarser bands
+reduce the number of rendered volumes and slices at distance; actual performance
+requires user verification, and no measured FPS improvement is claimed here.
+
+Bands use aligned parent decisions, so boundary-crossing volumes can remain finer.
+Selection is cached in 16-block camera regions and queries only nearby cached
+roots, with at most 4,096 selection work units per client tick. Rotation does not
+rebuild it. While a new view is being refined, aligned 32-block cached volumes
+provide temporary coverage; unloaded near chunks use 16-block cached fallback.
+Neither fallback overlaps its detailed descendants.
+
+This changes rendering only. Server simulation still uses 4x4x4-block cells and
+250-tick checks (12.5 seconds at 20 TPS), with unchanged condensation chance and
+consumption per check. Cache/render/sync intervals and persistent data are
+unchanged. Four-times-view cache reach remains, with distant visuals only from
+previously seen areas; LOD does not load distant chunks. No world reset is needed.
 
 ## Persistent Visual Cache
 

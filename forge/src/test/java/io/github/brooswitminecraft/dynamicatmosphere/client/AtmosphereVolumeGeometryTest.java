@@ -6,6 +6,36 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class AtmosphereVolumeGeometryTest {
     @Test
+    void everyLodUsesItsOwnBoundsAndDensityIntegratedOverWorldThickness() {
+        for (int cellX : new int[] {1, 10, 20, 40}) {
+            var tree = new AtmosphereLodHierarchy();
+            tree.put(new AtmosphereClientCache.Cell(cellX, 0, 0), 1000, 1000, 0, 0);
+            var volume = tree.select(0, 0, 0, 4, 0).volumes().getFirst();
+            var camera = new AtmosphereVolumeGeometry.Point(volume.blockX() + volume.size() / 2.0,
+                volume.size() / 2.0, -2);
+            var slices = AtmosphereVolumeGeometry.lodSlices(volume, 500, camera,
+                new AtmosphereVolumeGeometry.Point(0, 0, 1));
+            assertFalse(slices.isEmpty());
+            assertTrue(slices.size() <= (volume.size() == 4 ? 9 : 3));
+            double transmission = 1;
+            for (var slice : slices) {
+                transmission *= 1 - slice.alpha();
+                for (var point : slice.vertices()) {
+                    assertTrue(Math.abs(point.x()) <= volume.size() / 2.0 + 1e-6);
+                    assertTrue(Math.abs(point.y()) <= volume.size() / 2.0 + 1e-6);
+                    assertTrue(point.z() > 2 && point.z() < volume.size() + 2);
+                }
+            }
+            assertEquals(Math.exp(-0.3 * volume.size() / 4), transmission, 1e-6);
+            var inside = AtmosphereVolumeGeometry.lodSlices(volume, 500,
+                new AtmosphereVolumeGeometry.Point(camera.x(), camera.y(), volume.size() / 2.0),
+                new AtmosphereVolumeGeometry.Point(0, 0, 1));
+            assertFalse(inside.isEmpty());
+            assertTrue(inside.stream().allMatch(slice -> slice.depth() > 0 && slice.depth() < volume.size() / 2.0));
+        }
+    }
+
+    @Test
     void coarseGeometryUsesSixteenBlockBoundsAndAtMostThreePlanes() {
         var camera = new AtmosphereVolumeGeometry.Point(-24, -8, -24);
         var slices = AtmosphereVolumeGeometry.coarseSlices(-1, -1, -1, 500, camera,
