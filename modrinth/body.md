@@ -21,6 +21,7 @@ This is an incremental alpha, not a complete weather simulation.
 
 ## Current Scope
 
+- In 0.9.1-alpha.1, coarse LOD and cached fallback volumes take Minecraft's current fog/horizon color; nearby 4-block detail stays white. Cached spatial back-to-front ordering handles mixed colors with bounded GPU batches. Simulation, opacity, protocol, and persistent data are unchanged.
 - New in 0.9.0-alpha.1: distance-based rendering LOD. With Minecraft client view distance `V` in blocks, use 4x4x4-block volumes below `V/2`, 8x8x8 in `[V/2, V)`, 16x16x16 in `[V, 2V)`, and 32x32x32 in `[2V, 4V]`.
 - Coarser volumes recursively average eight children, including empty volumes. Coverage is non-overlapping: coarse parents are not rendered over their finer children. Fewer volumes and slices are rendered at distance; actual performance needs user verification, with no measured FPS or runtime-verification claim.
 - Boundary-crossing parents can remain finer. Selection is cached in 16-block camera regions, spatially queried and budgeted; rotation does not rebuild it. New views temporarily use aligned 32-block cached coverage while refining, and unloaded near chunks retain a 16-block fallback, never overlaid with detail.
@@ -60,7 +61,7 @@ not terrain-clipped volumetric fog.
 Install the same version on **both server and client**, or in a NeoForge 1.21.1
 single-player instance. No extra graphics dependency is required. This requirement
 starts with 0.3.0-alpha.1; older releases were particle-only.
-**0.9.0-alpha.1 retains protocol 5: update both sides; earlier protocols are
+**0.9.1-alpha.1 retains protocol 5: update both sides; earlier protocols are
 incompatible.** Multi-packet snapshots complete atomically, with world identity,
 snapshot scope, and chunk freshness separating live observations from cached
 visual history.

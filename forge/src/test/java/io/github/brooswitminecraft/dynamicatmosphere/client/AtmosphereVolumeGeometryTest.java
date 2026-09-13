@@ -6,6 +6,85 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class AtmosphereVolumeGeometryTest {
     @Test
+    void onlyCoarseVolumesUseCurrentFogColorIncludingUnloadedFallbacks() {
+        for (float channel : new float[] {0, 0.15f, 0.7f, 1}) {
+            assertEquals(1, AtmosphereVolumeGeometry.colorChannel(0, channel));
+            for (int level = 1; level <= 3; level++) {
+                assertEquals(channel, AtmosphereVolumeGeometry.colorChannel(level, channel));
+            }
+        }
+        assertEquals(0, AtmosphereVolumeGeometry.colorChannel(1, -1));
+        assertEquals(1, AtmosphereVolumeGeometry.colorChannel(1, 2));
+    }
+
+    @Test
+    void nearColoredFallbackIsDrawnAfterWhiteDetailBehindIt() {
+        var tree = new AtmosphereLodHierarchy();
+        tree.put(new AtmosphereClientCache.Cell(1, 0, 0), 500, 500, 0, 0);
+        tree.put(new AtmosphereClientCache.Cell(6, 0, 0), 500, 500, 0, 0);
+        var selected = tree.select(40, 2, 2, 4, 0);
+        var white = selected.volumes().stream().filter(v -> v.x == 1).findFirst().orElseThrow();
+        var fallback = selected.unloadedFallbacks().stream().filter(v -> v.x == 4).findFirst().orElseThrow();
+        assertTrue(AtmosphereVolumeGeometry.backToFront(white, fallback,
+            AtmosphereVolumeGeometry.cameraCell(new AtmosphereVolumeGeometry.Point(40, 2, 2))) < 0);
+    }
+
+    @Test
+    void spatialPainterOrderIsBackToFrontAlongRaysAcrossMixedLodAndNegativeRoots() {
+        var tree = new AtmosphereLodHierarchy();
+        for (int x = -8; x < 16; x++) {
+            for (int z = -8; z < 16; z++) tree.put(new AtmosphereClientCache.Cell(x, 0, z), 500, 500, 0, 0);
+        }
+        var selected = tree.select(2, 2, 2, 4, 0).volumes();
+        assertTrue(selected.stream().anyMatch(v -> v.level == 0));
+        assertTrue(selected.stream().anyMatch(v -> v.level > 0));
+        for (var camera : List.of(new AtmosphereVolumeGeometry.Point(2, 2, 2),
+            new AtmosphereVolumeGeometry.Point(-35, 2, 21), new AtmosphereVolumeGeometry.Point(70, 2, 70))) {
+            var ordered = new java.util.ArrayList<>(selected);
+            ordered.sort((a, b) -> AtmosphereVolumeGeometry.backToFront(a, b, AtmosphereVolumeGeometry.cameraCell(camera)));
+            for (var ray : List.of(new AtmosphereVolumeGeometry.Point(1, 0, 0),
+                new AtmosphereVolumeGeometry.Point(-1, 0, 0), new AtmosphereVolumeGeometry.Point(0, 0, 1),
+                new AtmosphereVolumeGeometry.Point(0, 0, -1), new AtmosphereVolumeGeometry.Point(1, 0, 0.7),
+                new AtmosphereVolumeGeometry.Point(-1, 0, -0.7))) {
+                double previousNear = Double.POSITIVE_INFINITY;
+                for (var volume : ordered) {
+                    double[] interval = rayInterval(volume, camera, ray);
+                    if (interval == null) continue;
+                    assertTrue(interval[1] <= previousNear + 1e-7, "Far volume must precede nearer volume on the same ray");
+                    previousNear = interval[0];
+                }
+            }
+        }
+    }
+
+    private static double[] rayInterval(AtmosphereLodHierarchy.Volume volume, AtmosphereVolumeGeometry.Point camera,
+                                         AtmosphereVolumeGeometry.Point ray) {
+        double near = 0, far = Double.POSITIVE_INFINITY;
+        double[] origin = {camera.x(), camera.y(), camera.z()};
+        double[] direction = {ray.x(), ray.y(), ray.z()};
+        double[] min = {volume.blockX(), volume.blockY(), volume.blockZ()};
+        for (int axis = 0; axis < 3; axis++) {
+            if (direction[axis] == 0) {
+                if (origin[axis] <= min[axis] || origin[axis] >= min[axis] + volume.size()) return null;
+                continue;
+            }
+            double a = (min[axis] - origin[axis]) / direction[axis];
+            double b = (min[axis] + volume.size() - origin[axis]) / direction[axis];
+            near = Math.max(near, Math.min(a, b));
+            far = Math.min(far, Math.max(a, b));
+        }
+        return far > near ? new double[] {near, far} : null;
+    }
+
+    @Test
+    void painterOrderCameraKeyUsesFloorAndDoesNotChangeWithinCell() {
+        assertEquals(new AtmosphereClientCache.Cell(-1, 0, 0),
+            AtmosphereVolumeGeometry.cameraCell(new AtmosphereVolumeGeometry.Point(-0.01, 1, 2)));
+        assertEquals(AtmosphereVolumeGeometry.cameraCell(new AtmosphereVolumeGeometry.Point(0, 0, 0)),
+            AtmosphereVolumeGeometry.cameraCell(new AtmosphereVolumeGeometry.Point(3.9, 3.9, 3.9)));
+    }
+
+    @Test
     void everyLodUsesItsOwnBoundsAndDensityIntegratedOverWorldThickness() {
         for (int cellX : new int[] {1, 10, 20, 40}) {
             var tree = new AtmosphereLodHierarchy();

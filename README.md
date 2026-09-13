@@ -120,6 +120,12 @@ rebuild it. While a new view is being refined, aligned 32-block cached volumes
 provide temporary coverage; unloaded near chunks use 16-block cached fallback.
 Neither fallback overlaps its detailed descendants.
 
+In 0.9.1-alpha.1, coarse LOD volumes (including cached fallbacks) use Minecraft's
+current fog/horizon color; nearby 4-block detail stays white. Mixed colors use
+cached spatial back-to-front ordering and bounded GPU batches, not an all-white
+order-independence assumption. Rotation does not re-sort volumes. This compatible
+visual patch leaves simulation, opacity, protocol 5, and persistent data unchanged.
+
 This changes rendering only. Server simulation still uses 4x4x4-block cells and
 250-tick checks (12.5 seconds at 20 TPS), with unchanged condensation chance and
 consumption per check. Cache/render/sync intervals and persistent data are

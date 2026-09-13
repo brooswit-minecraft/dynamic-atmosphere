@@ -1,3 +1,12 @@
+# 0.9.1-alpha.1
+
+- Tint coarse LOD volumes with Minecraft's actual current fog/horizon color, including cached fallbacks. Nearby 4-block detail remains white.
+- Replace the all-white composition assumption with cached spatial back-to-front volume ordering, preserving bounded GPU batches and avoiding per-slice sorting. Near unloaded fallbacks are ordered with white detail, not blindly drawn behind it.
+- Preserve opacity, 250-tick simulation checks, condensation, protocol 5, world data, and personal visual caches. No world reset is required.
+- Add focused color and spatial composition regression tests for CI; local tests and performance measurement are intentionally skipped.
+
+Compatible visual-correction patch; actual appearance remains for user testing.
+
 # 0.9.0-alpha.1
 
 - Add distance-based client rendering LOD. With Minecraft view distance `V` expressed in blocks, render 4x4x4-block volumes below `V/2`, 8x8x8 in `[V/2, V)`, 16x16x16 in `[V, 2V)`, and 32x32x32 in `[2V, 4V]`.
