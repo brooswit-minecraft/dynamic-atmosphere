@@ -18,6 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -43,9 +45,12 @@ jobs:
           jar="forge/build/libs/dynamicatmosphere-$VERSION.jar"
           test -f "$jar"
           if gh release view "v$VERSION" >/dev/null 2>&1; then
+            git diff --exit-code "v$VERSION" HEAD -- engine forge gradle gradle.properties gradlew gradlew.bat settings.gradle version.txt
             mkdir -p "$RUNNER_TEMP/existing"
             gh release download "v$VERSION" --pattern "$(basename "$jar")" --dir "$RUNNER_TEMP/existing"
-            cmp "$jar" "$RUNNER_TEMP/existing/$(basename "$jar")"
+            # A workflow fix may retry publication after the immutable release exists.
+            # Ship the original GitHub artifact, never a later rebuild of the same version.
+            cp "$RUNNER_TEMP/existing/$(basename "$jar")" "$jar"
           else
             gh release create "v$VERSION" "$jar" --target "$GITHUB_SHA" \
               --title "Dynamic Atmosphere $VERSION" --notes-file CHANGELOG.md --prerelease
@@ -62,7 +67,6 @@ jobs:
           rinth=(bunx --bun github:brooswit-minecraft/rinth#v0.10.0)
           "${rinth[@]}" project edit "$PROJECT_ID" \
             --body-file modrinth/body.md --description "$(cat modrinth/short-description.txt)" \
-            --client-side optional --server-side required \
             --source-url "https://github.com/$GITHUB_REPOSITORY" \
             --issues-url "https://github.com/$GITHUB_REPOSITORY/issues" --license MIT
       - name: Check existing Modrinth version
