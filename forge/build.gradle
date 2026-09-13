@@ -55,6 +55,11 @@ test {
     useJUnitPlatform()
 }
 
+// NeoForge's generated Minecraft artifact belongs to main, not the default
+// Java test configurations. SavedData and payload tests need that same API.
+sourceSets.test.compileClasspath += sourceSets.main.compileClasspath
+sourceSets.test.runtimeClasspath += sourceSets.main.runtimeClasspath
+
 // Embeds :engine's compiled classes directly into this mod's jar, at the
 // jar's root (not nested), so they are on the classpath NeoForge loads the
 // mod from. This is the "include the engine subproject's output in the mod
