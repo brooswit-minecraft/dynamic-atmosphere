@@ -1,41 +1,24 @@
 # Dynamic Atmosphere
 
-Dynamic Atmosphere is a NeoForge mod for Minecraft 1.21.1. It adds a coarse,
-data driven 3D atmospheric simulation to the game: weather materials such as
-fog, smoke, and cloud that move through the world under a small set of
-generic rules, instead of scripted weather events.
+A small atmospheric **delivery spike** for Minecraft **1.21.1 / NeoForge**.
 
-**This project is early and not yet playable.** The current build is a shell
-mod. It loads, proves that its simulation code is packaged correctly inside
-the mod jar, and logs one line at startup. No weather or atmosphere
-simulation runs yet.
+This first alpha adds lightweight cloud/fog particle effects near players and
+operator commands to demonstrate that the mod is executing. It is deliberately
+small so we can test the complete build, release, modpack, and server lifecycle.
 
-## What it will do
+## Current Scope
 
-Weather materials will move through connected terrain, driven by sources,
-sinks, preferred altitudes, diffusion, and threshold events. Planned
-materials include Cloud, Fog, Smoke, Zombie Fog, Slime Fog, and Nether Gas.
-Examples of the intended behavior:
+- Server-driven visual effects using Minecraft's existing particles.
+- Bounded work near players, without forcing chunks to load.
+- `/dynamicatmosphere status` and `/dynamicatmosphere demo` for operators.
+- No world generation changes or world reset required.
 
-- Clouds forming predictably around mountains and precipitating.
-- Fog gathering over deep water, then pouring into valleys and cave
-  entrances.
-- Smoke accumulating in enclosed lava caves, and venting from factories and
-  forest fires.
-- Zombie deaths producing Zombie Fog that changes nearby zombie spawning.
-- Nether gas escaping through Nether portals into the Overworld.
+It is **not yet** the planned terrain-aware cloud and fog simulation. Gas
+transport, pollution, precipitation, and gameplay effects are future work.
+Particle visibility depends on the client's particle settings.
 
-The goal is for most new atmospheric content to be addable through data
-rather than new code, so the simulation engine stays simple while the
-possible material behaviors stay varied. Minecraft defines the environment.
-Weather materials define how they react to it.
+Install on a NeoForge 1.21.1 server, or in a NeoForge single-player instance.
+The client does not need a separate renderer or graphics dependency.
 
-## Planned first playable milestone
-
-The first playable milestone is limited to Cloud and Fog only, with
-rendering just good enough to observe and debug the simulation. No release
-date is set for this or any later milestone.
-
-## Source
-
-Source code, issue tracker, and licence are linked on this page.
+Source, issues, and primary release artifacts are hosted on
+[GitHub](https://github.com/brooswit-minecraft/dynamic-atmosphere).

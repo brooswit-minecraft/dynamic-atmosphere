@@ -1,252 +1,85 @@
-# Builds the mod jar and publishes it to Modrinth with `rinth publish`.
-# Serves SICKOS-40 (implements SICKOS-35). Read the reference this follows
-# before changing it: brooswit-minecraft/schematic's
-# .github/workflows/reusable-release.yml@v1 (the workflow sickos's own
-# release.yml actually calls — NOT sickos's local, superseded
-# reusable-release.yml, which uses Kir-Antipov/mc-publish and nothing in
-# sickos calls it; confirmed by grepping sickos's .github/ for
-# "reusable-release" and finding exactly one `uses:`, schematic's). This
-# repo is not a packwiz pack, so it inlines the same design rather than
-# calling schematic's workflow_call (which is packwiz-specific), but the
-# hard-won decisions below are carried over deliberately, not reinvented:
-#
-# 1. THE DRY RUN AND THE REAL PUBLISH ARE TWO MUTUALLY EXCLUSIVE STEPS, not
-#    one step with a computed --dry-run flag. schematic's own comment on
-#    this is worth quoting exactly: collapsing them "would make a string
-#    interpolation the only thing standing between a dispatch run and a live
-#    publish." The dry-run step below is gated `github.event_name !=
-#    'release'`; the publish step is gated `github.event_name == 'release'`.
-#    A `confirm` input would be the wrong shape here (unlike the draft-create
-#    workflow) precisely because a real event to gate on already exists.
-# 2. `--loader` is passed once, never comma-joined (a comma-joined string
-#    would register a single bogus loader literally named "fabric,forge" —
-#    moot for us with one loader, but the discipline still applies).
-# 3. rinth takes exactly one `--file` and does `existsSync` on it literally;
-#    a glob does not expand and fails as a missing file. The jar's name
-#    changes with the version being built, so it is resolved to one concrete
-#    path below and the job fails loudly if the build produced zero or more
-#    than one jar, rather than silently guessing.
-# 4. The changelog reaches rinth through `--changelog-file`, written from
-#    `env:`. The release body is controlled by anyone who can cut a release
-#    and is normally multi-line; GitHub substitutes a value into a `run:`
-#    body textually before the shell sees it, so a body containing `$(...)`
-#    or a quote must never be interpolated directly into a `run:` in a job
-#    that (on the publish path) holds a live token.
-# 5. THE CHANNEL IS DERIVED, NOT ASSUMED: `contains(version, '-') && 'beta'
-#    || 'release'`. Matters directly for SICKOS-40's own deliverable-4 proof
-#    build (test version `0.0.2-dryrun` contains a hyphen, so it is `beta`
-#    under this rule — quoted on the ticket).
-# 6. Secrets cannot be referenced directly in `if:`. They are mapped into
-#    `env:` in the "Check Modrinth configuration" step below and tested only
-#    for emptiness, never printed, then later steps key off that step's
-#    output. This is what makes the workflow degrade honestly when
-#    MODRINTH_TOKEN is absent, which for this repo is the state it starts
-#    in.
-# 7. VERSION RESOLUTION SHAPE: `RAW_VERSION: ${{ github.event_name ==
-#    'release' && github.event.release.tag_name || inputs.version }}` in
-#    `env:`, then `${RAW_VERSION#v}` to strip a leading v. The stripped
-#    version is passed to Gradle through `env:`/a quoted shell variable, not
-#    interpolated into the `run:` body, for the same untrusted-value reason
-#    as point 4 — it comes from a release tag or a dispatch input, both
-#    operator-controlled.
-#
-# THE ONE DELIBERATE EXCEPTION to "live-Modrinth workflows are
-# workflow_dispatch only": `release: types: [published]`, matching what
-# sickos's release.yml (via schematic@v1) actually does. Never add push or
-# pull_request here, not even temporarily, not even to test the dispatch
-# path — the dispatch path is exercisable on its own via workflow_dispatch,
-# once this file is on the default branch.
-
 name: Release
 
 on:
-  release:
-    types: [published]
+  push:
+    branches: [main]
+    paths: [version.txt]
   workflow_dispatch:
-    inputs:
-      version:
-        description: >-
-          Version to build for a dry run, e.g. 0.0.2-dryrun (no leading v).
-          Ignored on an actual release event — the release tag is used
-          instead. A dispatch run NEVER publishes for real, regardless of
-          this value: see the event gates above.
-        required: true
-        type: string
 
 permissions:
-  contents: read
+  contents: write
 
-env:
-  # Pinned by hand, NOT copied from rinth's README — see
-  # modrinth-draft-create.yml's header for the fuller reasoning and how it
-  # was checked (tags, compare/v0.9.1...main). Deliberately the SAME pin as
-  # that workflow: nothing here depends on a `rinth` behaviour that differs
-  # between tags, so there is no reason to run two.
-  RINTH_REF: github:brooswit-minecraft/rinth#v0.9.1
-  LOADER: neoforge
-  GAME_VERSION: "1.21.1"
+concurrency:
+  group: dynamic-atmosphere-release
+  cancel-in-progress: false
 
 jobs:
   release:
-    name: Build and publish release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Resolve version
-        id: ver
-        env:
-          RAW_VERSION: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.version }}
-        run: echo "version=${RAW_VERSION#v}" >> "$GITHUB_OUTPUT"
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v5
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: '21'
           cache: gradle
-
-      # See file header point 7: MOD_VERSION reaches Gradle through a quoted
-      # shell variable sourced from env:, never interpolated directly into
-      # this run: body.
-      - name: Build mod jar
-        env:
-          MOD_VERSION: ${{ steps.ver.outputs.version }}
-        run: ./gradlew build --no-daemon "-Pmod_version=$MOD_VERSION"
-
-      # See file header point 3.
-      - name: Resolve jar path
-        id: jar
+      - name: Resolve version
+        id: version
         run: |
-          shopt -s nullglob
-          jars=(forge/build/libs/*.jar)
-          if [ "${#jars[@]}" -eq 0 ]; then
-            echo "::error::No jar found in forge/build/libs/ (expected exactly one) — did the build step run?"
-            exit 1
-          elif [ "${#jars[@]}" -gt 1 ]; then
-            echo "::error::Multiple jars found in forge/build/libs/, expected exactly one: ${jars[*]}"
-            exit 1
-          fi
-          echo "file=${jars[0]}" >> "$GITHUB_OUTPUT"
-
-      # Reads the version back OUT OF THE BUILT JAR rather than trusting the
-      # Gradle property that was passed in — the whole point of
-      # deliverable 4 is that these must independently agree.
-      - name: Read version back out of the built jar
-        id: injar
+          version=$(cat version.txt)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$ ]]
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+      - name: Build and test
         env:
-          JAR_FILE: ${{ steps.jar.outputs.file }}
-          # A release tag is operator-controlled and shell metacharacters
-          # are legal in a git tag name (confirmed: `git check-ref-format`
-          # accepts refs/tags/v1.0.0'; id ;', `$(id)`, and `` `id` `` alike).
-          # Point 7 above requires this value reach the shell only through
-          # env:/a quoted variable, never interpolated straight into a
-          # run: body — this step was the one place that rule wasn't
-          # actually followed; fixed here rather than just noted.
-          RESOLVED_VERSION: ${{ steps.ver.outputs.version }}
+          VERSION: ${{ steps.version.outputs.value }}
         run: |
-          in_jar_version=$(unzip -p "$JAR_FILE" META-INF/neoforge.mods.toml | sed -n 's/^version="\(.*\)" .*/\1/p')
-          echo "version=$in_jar_version" >> "$GITHUB_OUTPUT"
-          {
-            echo "## Release build"
-            echo "- resolved version (from tag/input): \`$RESOLVED_VERSION\`"
-            echo "- jar file: \`$JAR_FILE\`"
-            echo "- version read back out of the jar's neoforge.mods.toml: \`$in_jar_version\`"
-          } >> "$GITHUB_STEP_SUMMARY"
-          if [ "$in_jar_version" != "$RESOLVED_VERSION" ]; then
-            echo "::error::Version mismatch: resolved '$RESOLVED_VERSION' but the built jar's neoforge.mods.toml says '$in_jar_version'."
-            exit 1
-          fi
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: dynamic-atmosphere-${{ steps.ver.outputs.version }}
-          path: forge/build/libs/*.jar
-          if-no-files-found: error
-
-      # See file header point 6.
-      - name: Check Modrinth configuration
-        id: modrinth_check
+          python3 -m unittest discover -s scripts -p 'test_*.py'
+          ./gradlew build --no-daemon "-Pmod_version=$VERSION"
+      - name: Publish immutable GitHub release
         env:
-          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
-          MODRINTH_PROJECT_ID: ${{ vars.MODRINTH_PROJECT_ID }}
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.value }}
         run: |
-          if [ -n "$MODRINTH_TOKEN" ] && [ -n "$MODRINTH_PROJECT_ID" ]; then
-            echo "has_modrinth=true" >> "$GITHUB_OUTPUT"
+          jar="forge/build/libs/dynamicatmosphere-$VERSION.jar"
+          test -f "$jar"
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            mkdir -p "$RUNNER_TEMP/existing"
+            gh release download "v$VERSION" --pattern "$(basename "$jar")" --dir "$RUNNER_TEMP/existing"
+            cmp "$jar" "$RUNNER_TEMP/existing/$(basename "$jar")"
           else
-            echo "has_modrinth=false" >> "$GITHUB_OUTPUT"
-            missing=""
-            [ -z "$MODRINTH_TOKEN" ] && missing="${missing}MODRINTH_TOKEN "
-            [ -z "$MODRINTH_PROJECT_ID" ] && missing="${missing}MODRINTH_PROJECT_ID "
-            echo "MODRINTH_TOKEN/MODRINTH_PROJECT_ID not set — skipping Modrinth publish (missing: ${missing})"
-            echo "MODRINTH_TOKEN/MODRINTH_PROJECT_ID not set: skipping Modrinth publish (missing: ${missing})" >> "$GITHUB_STEP_SUMMARY"
+            gh release create "v$VERSION" "$jar" --target "$GITHUB_SHA" \
+              --title "Dynamic Atmosphere $VERSION" --notes-file CHANGELOG.md --prerelease
           fi
-
-      # See file header point 4.
-      - name: Write Modrinth changelog to file
-        if: steps.modrinth_check.outputs.has_modrinth == 'true'
-        id: changelog
-        env:
-          RELEASE_BODY: ${{ github.event_name == 'release' && github.event.release.body || '' }}
-        run: |
-          file="$RUNNER_TEMP/modrinth-changelog.txt"
-          printf '%s' "$RELEASE_BODY" > "$file"
-          echo "file=$file" >> "$GITHUB_OUTPUT"
-
       - uses: oven-sh/setup-bun@v2
-        if: steps.modrinth_check.outputs.has_modrinth == 'true'
-
-      # --- Dry run (workflow_dispatch path) --------------------------------
-      # See file header points 1 and 5. The rinth dry-run COMMAND itself
-      # needs no MODRINTH_TOKEN (--dry-run never touches ctx.transport —
-      # verified against rinth's source at the pinned tag). This STEP is
-      # nonetheless deliberately gated on has_modrinth (matching schematic),
-      # so the dry run prints a real project id rather than a placeholder.
-      - name: Dry-run Modrinth publish
-        if: steps.modrinth_check.outputs.has_modrinth == 'true' && github.event_name != 'release'
-        shell: bash
-        env:
-          PROJECT_ID: ${{ vars.MODRINTH_PROJECT_ID }}
-          JAR_FILE: ${{ steps.jar.outputs.file }}
-          VERSION: ${{ steps.ver.outputs.version }}
-          CHANGELOG_FILE: ${{ steps.changelog.outputs.file }}
-          CHANNEL: ${{ contains(steps.ver.outputs.version, '-') && 'beta' || 'release' }}
-        run: |
-          bunx --bun "$RINTH_REF" --json publish "$PROJECT_ID" \
-            --file "$JAR_FILE" \
-            --version "$VERSION" \
-            --changelog-file "$CHANGELOG_FILE" \
-            --game-version "$GAME_VERSION" \
-            --loader "$LOADER" \
-            --channel "$CHANNEL" \
-            --dry-run | tee dry_run_publish.json
-          {
-            echo "### Dry-run Modrinth publish"
-            echo '```json'
-            cat dry_run_publish.json
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      # --- Live publish (release path only) --------------------------------
-      # See file header point 1: gated on the EVENT, never on this input's
-      # default. rinth itself refuses to publish a duplicate version_number
-      # (exit 5) before any upload, per rinth's own source (src/commands/
-      # publish.ts) and schematic's comment — a second, independent guard
-      # against re-publishing the same tag by accident.
-      - name: Publish to Modrinth
-        if: steps.modrinth_check.outputs.has_modrinth == 'true' && github.event_name == 'release'
+      - name: Sync Modrinth description
         env:
           MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
           PROJECT_ID: ${{ vars.MODRINTH_PROJECT_ID }}
-          JAR_FILE: ${{ steps.jar.outputs.file }}
-          VERSION: ${{ steps.ver.outputs.version }}
-          CHANGELOG_FILE: ${{ steps.changelog.outputs.file }}
-          CHANNEL: ${{ contains(steps.ver.outputs.version, '-') && 'beta' || 'release' }}
+          VERSION: ${{ steps.version.outputs.value }}
         run: |
-          bunx --bun "$RINTH_REF" --json publish "$PROJECT_ID" \
-            --file "$JAR_FILE" \
-            --version "$VERSION" \
-            --changelog-file "$CHANGELOG_FILE" \
-            --game-version "$GAME_VERSION" \
-            --loader "$LOADER" \
-            --channel "$CHANNEL"
+          test -n "$MODRINTH_TOKEN"
+          test -n "$PROJECT_ID"
+          rinth=(bunx --bun github:brooswit-minecraft/rinth#v0.10.0)
+          "${rinth[@]}" project edit "$PROJECT_ID" \
+            --body-file modrinth/body.md --description "$(cat modrinth/short-description.txt)" \
+            --client-side optional --server-side required \
+            --source-url "https://github.com/$GITHUB_REPOSITORY" \
+            --issues-url "https://github.com/$GITHUB_REPOSITORY/issues" --license MIT
+      - name: Check existing Modrinth version
+        id: modrinth
+        env:
+          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
+          PROJECT_ID: ${{ vars.MODRINTH_PROJECT_ID }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: python3 scripts/check-modrinth-version.py >> "$GITHUB_OUTPUT"
+      - name: Publish Modrinth version
+        if: steps.modrinth.outputs.exists != 'true'
+        env:
+          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
+          PROJECT_ID: ${{ vars.MODRINTH_PROJECT_ID }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          bunx --bun github:brooswit-minecraft/rinth#v0.10.0 publish "$PROJECT_ID" \
+            --file "forge/build/libs/dynamicatmosphere-$VERSION.jar" \
+            --version "$VERSION" --changelog-file CHANGELOG.md \
+            --game-version 1.21.1 --loader neoforge --channel alpha

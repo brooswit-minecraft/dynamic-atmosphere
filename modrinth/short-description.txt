@@ -1,1 +1,1 @@
-A NeoForge mod for Minecraft 1.21.1 that will simulate weather and atmosphere as physical materials moving through the world; it is early and not yet playable.
+An early NeoForge 1.21.1 cloud and fog visual spike, proving automated delivery and in-game execution before the full atmospheric simulation.
