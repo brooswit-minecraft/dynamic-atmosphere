@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     branches: [main]
-    paths: [version.txt]
+    paths: [version.txt, 'modrinth/**']
   workflow_dispatch:
 
 permissions:
@@ -87,3 +87,8 @@ jobs:
             --file "forge/build/libs/dynamicatmosphere-$VERSION.jar" \
             --version "$VERSION" --changelog-file CHANGELOG.md \
             --game-version 1.21.1 --loader neoforge --channel alpha
+      - name: Sync current Modrinth environment and review state
+        env:
+          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
+          PROJECT_ID: ${{ vars.MODRINTH_PROJECT_ID }}
+        run: python3 scripts/sync-modrinth-settings.py

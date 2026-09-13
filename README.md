@@ -50,14 +50,17 @@ Repository configuration:
 - Variable `MODRINTH_PROJECT_ID`: `PZV7RorC`.
 - `modrinth/body.md`: formatted listing description.
 - `modrinth/short-description.txt`: listing summary.
+- `modrinth/project.json`: current Modrinth environment and initial submission policy.
 
 Pre-release versions use the alpha channel. While this project is 0.x, use a
 minor bump for added capability or incompatible changes, a patch for compatible
 fixes, and increment the prerelease suffix for revisions to an unreleased alpha.
 Never reuse a published version. Documentation-only changes need no release.
 
-Modrinth moderation is separate from artifact publication. A new draft must be
-submitted for review before it is publicly discoverable. The existing draft-create
+Modrinth moderation is separate from artifact publication. CI submits a draft
+after publication when `submit_for_review` is enabled; moderator approval is
+still external. Changes under `modrinth/` also trigger the idempotent sync/release
+workflow without changing the artifact version. The existing draft-create
 workflow is only for initial provisioning; do not create a second project.
 
 ## Runtime Verification
