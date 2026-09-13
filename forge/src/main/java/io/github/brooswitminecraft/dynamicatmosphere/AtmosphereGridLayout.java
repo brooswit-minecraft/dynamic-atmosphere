@@ -6,7 +6,7 @@ public final class AtmosphereGridLayout {
     public static final int CELL_SIZE = 4;
     private static final int MINECRAFT_CHUNK_SIZE = 16;
     private static final int CELLS_PER_CHUNK = MINECRAFT_CHUNK_SIZE / CELL_SIZE;
-    private static final int QUARTER_BASE_TICKS = 25;
+    private static final int BASE_INTERVAL_TICKS = 250;
     private static final int CADENCE_DENOMINATOR = 16;
 
     private AtmosphereGridLayout() {
@@ -27,7 +27,7 @@ public final class AtmosphereGridLayout {
 
     public static double simulationIntervalTicks(int cellSize) {
         requirePositiveCellSize(cellSize);
-        return (double) QUARTER_BASE_TICKS * cellSize / CADENCE_DENOMINATOR;
+        return (double) BASE_INTERVAL_TICKS * cellSize / CADENCE_DENOMINATOR;
     }
 
     public static boolean isSimulationTick(long tick) {
@@ -40,7 +40,7 @@ public final class AtmosphereGridLayout {
 
     static long nextSimulationTick(long tick, int cellSize) {
         requirePositiveCellSize(cellSize);
-        long cadenceNumerator = Math.multiplyExact((long) QUARTER_BASE_TICKS, cellSize);
+        long cadenceNumerator = Math.multiplyExact((long) BASE_INTERVAL_TICKS, cellSize);
         long cycle = Math.floorDiv(tick, cadenceNumerator);
         long withinCycle = Math.floorMod(tick, cadenceNumerator);
         long event = withinCycle * CADENCE_DENOMINATOR / cadenceNumerator + 1;

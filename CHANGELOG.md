@@ -1,3 +1,13 @@
+# 0.7.1-alpha.1
+
+- Increase simulation/source check delays tenfold to reduce check frequency in response to lag: `250 * cellSize / 16` ticks. Current 4-block cells average 62.5 ticks using 62/63-tick intervals, approximately 3.125 seconds at 20 TPS (previously 6.25 ticks).
+- Size 1 averages 15.625 ticks; size 16 uses 250 ticks; size 32 uses 500 ticks. Simulation remains work-budgeted.
+- Preserve 96-block producer reach, cache/render/sync intervals, protocol 5, and persistent data formats. No data or world reset is required.
+- Keep the four-pressure-attempt limit per sampling interval and all destructive-pressure/backup warnings; the interval is now longer.
+
+Compatible cadence-tuning patch. Runtime performance remains subject to user
+verification; reduced check frequency is not a measured lag-resolution claim.
+
 # 0.7.0-alpha.1
 
 - Add a persistent client visual cache and coarse far fog extending to four times the client view distance, only in previously seen areas. Cached fog is approximate and can be stale; it is not server simulation and does not load or simulate distant chunks.

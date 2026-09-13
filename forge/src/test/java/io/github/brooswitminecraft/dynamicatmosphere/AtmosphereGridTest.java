@@ -42,8 +42,8 @@ class AtmosphereGridTest {
         AtmosphereGrid.CellKey<String> half = key(1, 0, 0);
         grid.set(full, 750, 1, 1000);
 
-        assertEquals(0, grid.spread(6, ignored -> 1000).sourcesProcessed());
-        AtmosphereGrid.SpreadResult<String> result = grid.spread(7, capacities(Map.of(full, 1000, half, 500)));
+        assertEquals(0, grid.spread(62, ignored -> 1000).sourcesProcessed());
+        AtmosphereGrid.SpreadResult<String> result = grid.spread(63, capacities(Map.of(full, 1000, half, 500)));
 
         assertEquals(250, result.moved());
         assertEquals(500, amount(grid, full));
@@ -54,11 +54,11 @@ class AtmosphereGridTest {
     @Test
     void insertionOnCadenceBoundaryWaitsForNextGlobalBoundary() {
         AtmosphereGrid<String> grid = new AtmosphereGrid<>();
-        grid.set(key(0, 0, 0), 40, 7, 1000);
+        grid.set(key(0, 0, 0), 40, 63, 1000);
 
-        assertEquals(0, grid.spread(7, ignored -> 0).sourcesProcessed());
-        assertEquals(0, grid.spread(12, ignored -> 0).sourcesProcessed());
-        assertEquals(1, grid.spread(13, ignored -> 0).sourcesProcessed());
+        assertEquals(0, grid.spread(63, ignored -> 0).sourcesProcessed());
+        assertEquals(0, grid.spread(124, ignored -> 0).sourcesProcessed());
+        assertEquals(1, grid.spread(125, ignored -> 0).sourcesProcessed());
     }
 
     @Test

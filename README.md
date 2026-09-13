@@ -24,10 +24,12 @@ boundaries and exhausted work/search budgets leave work pending, never authorize
 pressure destruction, and do not discard material.
 Excess that still cannot escape remains blocked and reported, not discarded;
 displacement is not unlimited.
-Retaining the 0.6.1 tuning, simulation/source cadence is `25 * cellSize / 16` ticks:
-the old 100-tick base is quartered, then scaled by cell size. Current 4-block
-cells average **6.25 ticks** using 6/7-tick intervals. Size 16 would use 25 ticks,
-size 1 averages 1.5625, and size 32 uses 50. Actual progress remains work-budgeted.
+In 0.7.1-alpha.1, simulation/source cadence is `250 * cellSize / 16` ticks,
+making check delays ten times longer in response to lag. Current 4-block cells
+average **62.5 ticks** using 62/63-tick intervals, approximately **3.125 seconds**
+at 20 TPS (previously 6.25 ticks). Size 1 averages 15.625 ticks, size 16 uses 250,
+and size 32 uses 500. Actual progress remains work-budgeted. Cache, render, and
+sync intervals are unchanged; no data reset is required.
 Producer offsets now reach 96 blocks instead of 12, using the same eight sampled
 positions per pass and loaded-only checks. Live cell visibility follows Minecraft's actual
 tracked chunks and the client's effective render distance, loaded chunks, and
@@ -103,7 +105,7 @@ dropping items. Once source-cell blocks are gone, relief tries neighboring cells
 and proceeds outward toward room. Each broken block adds **1 material unit**.
 Negative-hardness and intrinsically unbreakable blocks are exempt; there is no
 claim/protected-area support. Pressure is limited to four attempts per sampling
-interval, so the faster cadence also increases pressure opportunities. Work is
+interval, now ten times longer in 0.7.1-alpha.1. Work is
 bounded per pass, not an unlimited search
 or guarantee of immediate relief. Closed unbreakable surroundings leave excess
 blocked and reported rather than deleting it.
