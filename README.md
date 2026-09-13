@@ -3,20 +3,22 @@
 Minecraft 1.21.1, NeoForge 21.1.250, Java 21. Mod ID: `dynamicatmosphere`.
 MIT licensed.
 
-## Water Fog Alpha
+## Atmospheric Grid Alpha
 
-This version adds persistent, bounded fog patches over water near players.
-Deeper water produces denser fog. Patches build up and fade rather than existing
-only for a single sampling pass. The original high-terrain cloud effect remains.
-It is **not** the planned terrain-aware atmospheric simulation. No precipitation,
+The server maintains a world-aligned atmospheric grid of 16x16x16-block cells.
+Water fog and high-terrain cloud emissions add material to their cells. Material
+decays in place; it never travels between cells. Nearby clients receive a snapshot
+and batched changes, and render translucent cells with opacity based on material.
+This is **not** the full terrain-aware atmospheric simulation. No precipitation,
 pollution, gas transport, or world generation changes are included yet.
 
-Effects run on the server using vanilla particles. Install on the server or in
-a single-player NeoForge instance; multiplayer clients need no special renderer.
-Client particle settings affect visibility. No world reset is needed.
+Install this version on **both server and client**, or in a single-player NeoForge
+instance. Earlier particle-only releases did not require a client installation;
+the new grid renderer and sync protocol do. Update both sides together.
+No world reset is needed. Grid state is transient, not saved terrain.
 
 Operators can run `/dynamicatmosphere status` to inspect runtime counters and
-`/dynamicatmosphere demo` as a player to emit visible particles immediately.
+`/dynamicatmosphere demo` as a player to add material nearby for visual testing.
 
 ## Development
 
@@ -32,7 +34,7 @@ The jar is `forge/build/libs/dynamicatmosphere-<version>.jar`.
 - `engine/` is a pure Java library. Its tests and `verifyNoMinecraft` task enforce
   that Minecraft and NeoForge are absent from its classpath.
 - `forge/` contains the Minecraft adapter and packages the engine's compiled
-  classes directly into the shipped jar. The visual spike does not depend on
+  classes directly into the shipped jar. The atmospheric grid does not depend on
   the unfinished material simulation.
 
 ## Automated Releases
@@ -51,7 +53,9 @@ Repository configuration:
 - Variable `MODRINTH_PROJECT_ID`: `PZV7RorC`.
 - `modrinth/body.md`: formatted listing description.
 - `modrinth/short-description.txt`: listing summary.
-- `modrinth/project.json`: current Modrinth environment and initial submission policy.
+- `modrinth/project.json`: this release's Modrinth environment and submission policy.
+  CI applies the environment only to the version in `version.txt`, preserving
+  older releases' compatibility metadata.
 
 Pre-release versions use the alpha channel. While this project is 0.x, use a
 minor bump for added capability or incompatible changes, a patch for compatible

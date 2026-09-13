@@ -1,3 +1,14 @@
+# 0.3.0-alpha.1
+
+- World-aligned atmospheric grid with 16x16x16-block cells.
+- Existing fog/cloud sources add material; each cell decays independently.
+- Nearby-client snapshots and batched updates, including removed cells.
+- Translucent client rendering with material-dependent opacity.
+- No inter-cell flow, terrain changes, or world reset.
+
+**Compatibility change:** install this release on both server and client.
+Minor pre-1.0 bump for the new grid and network/rendering capability.
+
 # 0.2.0-alpha.1
 
 - Persistent fog patches over water, with density influenced by water depth.

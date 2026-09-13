@@ -1,1 +1,1 @@
-Water-depth-driven fog patches and lightweight cloud effects for NeoForge 1.21.1. An early, bounded visual prototype with no world reset required.
+A translucent atmospheric grid for NeoForge 1.21.1. Fog and cloud material builds up and decays in place, synchronized from server to client.
