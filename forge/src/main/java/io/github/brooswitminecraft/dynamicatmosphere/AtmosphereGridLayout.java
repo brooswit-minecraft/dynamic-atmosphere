@@ -6,7 +6,7 @@ public final class AtmosphereGridLayout {
     public static final int CELL_SIZE = 4;
     private static final int MINECRAFT_CHUNK_SIZE = 16;
     private static final int CELLS_PER_CHUNK = MINECRAFT_CHUNK_SIZE / CELL_SIZE;
-    private static final int BASE_INTERVAL_TICKS = 250;
+    private static final int BASE_INTERVAL_TICKS = 1000;
     private static final int CADENCE_DENOMINATOR = 16;
 
     private AtmosphereGridLayout() {

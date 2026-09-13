@@ -118,8 +118,9 @@ class AtmosphereGridTest {
         AtmosphereGrid.CellKey<String> half = key(1, 0, 0);
         grid.set(full, 750, 1, 1000);
 
-        assertEquals(0, grid.spread(62, ignored -> 1000).sourcesProcessed());
-        AtmosphereGrid.SpreadResult<String> result = grid.spread(63, capacities(Map.of(full, 1000, half, 500)));
+        long due = AtmosphereGridLayout.nextSimulationTick(1);
+        assertEquals(0, grid.spread(due - 1, ignored -> 1000).sourcesProcessed());
+        AtmosphereGrid.SpreadResult<String> result = grid.spread(due, capacities(Map.of(full, 1000, half, 500)));
 
         assertEquals(250, result.moved());
         assertEquals(500, amount(grid, full));
@@ -130,11 +131,13 @@ class AtmosphereGridTest {
     @Test
     void insertionOnCadenceBoundaryWaitsForNextGlobalBoundary() {
         AtmosphereGrid<String> grid = new AtmosphereGrid<>();
-        grid.set(key(0, 0, 0), 40, 63, 1000);
+        long inserted = AtmosphereGridLayout.nextSimulationTick(0);
+        long due = AtmosphereGridLayout.nextSimulationTick(inserted);
+        grid.set(key(0, 0, 0), 40, inserted, 1000);
 
-        assertEquals(0, grid.spread(63, ignored -> 0).sourcesProcessed());
-        assertEquals(0, grid.spread(124, ignored -> 0).sourcesProcessed());
-        assertEquals(1, grid.spread(125, ignored -> 0).sourcesProcessed());
+        assertEquals(0, grid.spread(inserted, ignored -> 0).sourcesProcessed());
+        assertEquals(0, grid.spread(due - 1, ignored -> 0).sourcesProcessed());
+        assertEquals(1, grid.spread(due, ignored -> 0).sourcesProcessed());
     }
 
     @Test
@@ -145,7 +148,7 @@ class AtmosphereGridTest {
         grid.set(west, 700, 1, 1000);
         grid.set(center, 1, 1, 1000);
 
-        grid.spread(101, ignored -> 1000);
+        grid.spread(AtmosphereGridLayout.nextSimulationTick(1), ignored -> 1000);
 
         assertFalse(amounts(grid).containsKey(key(2, 0, 0)));
         assertEquals(701, total(grid));
@@ -159,7 +162,7 @@ class AtmosphereGridTest {
         AtmosphereGrid.CellKey<String> west = key(-1, 0, 0);
         grid.set(source, 10, 1, 1000);
 
-        grid.spread(101, capacities(Map.of(source, 1000, east, 1000, west, 1000)));
+        grid.spread(AtmosphereGridLayout.nextSimulationTick(1), capacities(Map.of(source, 1000, east, 1000, west, 1000)));
 
         assertEquals(4, amount(grid, source));
         assertEquals(3, amount(grid, east));
@@ -174,8 +177,8 @@ class AtmosphereGridTest {
             grid.set(key(x * 3, 0, 0), 1, 1, 1000);
         }
 
-        AtmosphereGrid.SpreadResult<String> first = grid.spread(101, key -> key.x() % 3 == 0 ? 1000 : 0);
-        AtmosphereGrid.SpreadResult<String> second = grid.spread(101, key -> key.x() % 3 == 0 ? 1000 : 0);
+        AtmosphereGrid.SpreadResult<String> first = grid.spread(AtmosphereGridLayout.nextSimulationTick(1), key -> key.x() % 3 == 0 ? 1000 : 0);
+        AtmosphereGrid.SpreadResult<String> second = grid.spread(AtmosphereGridLayout.nextSimulationTick(1), key -> key.x() % 3 == 0 ? 1000 : 0);
 
         assertEquals(128, first.sourcesProcessed());
         assertTrue(first.workRemaining());
@@ -206,13 +209,13 @@ class AtmosphereGridTest {
             return key.equals(room) ? 1000 : 1;
         };
 
-        AtmosphereGrid.SpreadResult<String> first = grid.spread(101, corridor);
+        AtmosphereGrid.SpreadResult<String> first = grid.spread(AtmosphereGridLayout.nextSimulationTick(1), corridor);
         assertTrue(first.searchLimited());
         assertFalse(first.mayBreakForPressure());
 
         AtmosphereGrid.SpreadResult<String> result = first;
         for (int attempt = 0; attempt < 10 && result.blockedOverflow() > 0; attempt++) {
-            result = grid.redistributeOverflow(102 + attempt, corridor, List.of(source));
+            result = grid.redistributeOverflow(AtmosphereGridLayout.nextSimulationTick(1) + 1 + attempt, corridor, List.of(source));
             if (result.blockedOverflow() > 0) {
                 assertTrue(result.searchLimited());
                 assertFalse(result.mayBreakForPressure());
@@ -229,7 +232,7 @@ class AtmosphereGridTest {
         AtmosphereGrid.CellKey<String> source = key(0, 0, 0);
         grid.set(source, 100, 1, 1000);
 
-        AtmosphereGrid.SpreadResult<String> result = grid.spread(101, ignored -> 0);
+        AtmosphereGrid.SpreadResult<String> result = grid.spread(AtmosphereGridLayout.nextSimulationTick(1), ignored -> 0);
 
         assertEquals(100, result.blockedOverflow());
         assertEquals(List.of(new AtmosphereGrid.BlockedCell<>(source, 100, true)), result.blockedCells());
@@ -244,12 +247,12 @@ class AtmosphereGridTest {
         AtmosphereGrid.CellKey<String> east = key(1, 0, 0);
         grid.set(source, 100, 1, 1000);
 
-        AtmosphereGrid.SpreadResult<String> unknown = grid.spread(101, key -> key.equals(source) ? 0 : -1);
+        AtmosphereGrid.SpreadResult<String> unknown = grid.spread(AtmosphereGridLayout.nextSimulationTick(1), key -> key.equals(source) ? 0 : -1);
         assertTrue(unknown.searchLimited());
         assertFalse(unknown.mayBreakForPressure());
 
         AtmosphereGrid.SpreadResult<String> loaded = grid.redistributeOverflow(
-            102, capacities(Map.of(source, 0, east, 100)), List.of(source));
+            AtmosphereGridLayout.nextSimulationTick(1) + 1, capacities(Map.of(source, 0, east, 100)), List.of(source));
         assertEquals(100, loaded.overflowMoved());
         assertEquals(100, amount(grid, east));
     }
@@ -270,7 +273,7 @@ class AtmosphereGridTest {
         AtmosphereGrid.CellKey<String> source = key(0, 0, 0);
         grid.set(source, 40, 1, 1000);
 
-        grid.spread(101, capacities(Map.of(source, 1000)));
+        grid.spread(AtmosphereGridLayout.nextSimulationTick(1), capacities(Map.of(source, 1000)));
         assertEquals(40, amount(grid, source));
     }
 

@@ -28,7 +28,7 @@ class AtmosphereSourceStrengthTest {
         grid.emit(cell, AtmosphereSourceStrength.lightToEmission(0), 100, 1000);
 
         assertEquals(0, AtmosphereSourceStrength.lightToEmission(15));
-        grid.spread(200, ignored -> 0);
+        grid.spread(AtmosphereGridLayout.nextSimulationTick(100), ignored -> 0);
         assertEquals(40, grid.cells().getFirst().amount());
     }
 }

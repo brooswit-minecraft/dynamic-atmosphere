@@ -9,11 +9,11 @@ world before upgrading; restoring that backup is required to undo terrain damage
 The **atmospheric grid** divides space into 4x4x4-block cells. Water fog,
 high-terrain clouds, rain landing on exposed surfaces, and dark exposed ground add
 material. There is no natural decay: material spreads by equalizing fullness
-across six face-adjacent cells. Retaining the 0.7.1 tuning, simulation/source cadence is
-`250 * cellSize / 16` ticks: 4-block cells average 62.5 ticks using 62/63 intervals,
-approximately 3.125 seconds at 20 TPS. Check delays are ten times longer than
-the previous 6.25 ticks in response to lag. Size 1 averages 15.625 ticks,
-size 16 uses 250, and size 32 uses 500. Cache/render/sync intervals and
+across six face-adjacent cells. In 0.8.1-alpha.1, simulation/source cadence is
+`1000 * cellSize / 16` ticks: 4-block cells use 250 ticks, or 12.5 seconds at
+20 TPS. This is 40 times the original 25-base delay instead of the previous
+10 times. Size 1 averages 62.5 ticks, size 16 uses 1000, and size 32 uses 2000.
+Cache/render/sync intervals and
 96-block producer reach are unchanged; no data reset is required.
 Simulation work remains budgeted across ticks. Clients render
 translucent cells with opacity based on material amount divided by capacity.
@@ -23,7 +23,7 @@ This is an incremental alpha, not a complete weather simulation.
 
 - New in 0.8.0-alpha.1: each cell's scheduled check can condense material into one real water source. Chance is linear above 50% fullness: 0% at 50%, 5% at 75%, capped at 10% at or above 100%; at or below 50% there is no placement.
 - A successful roll targets a random air block in the same cell, never solids. Successful placement consumes 25% of the current material amount, rounded down with a minimum of 1 unit. No air or failed placement consumes nothing; ultrawarm dimensions such as the Nether skip both placement and consumption.
-- **Placed water flows normally and can wet builds. Back up worlds.** This is a world-changing feature, not a visual effect or Minecraft rain. The slower 62.5-tick average scheduled cadence remains, subject to work budgets.
+- **Placed water flows normally and can wet builds. Back up worlds.** This is a world-changing feature, not a visual effect or Minecraft rain. Checks now use 250 ticks for 4-block cells, subject to work budgets; probability and consumption per check are unchanged.
 - Server-owned material amounts, synchronized to nearby clients.
 - Bounded work near players, without forcing chunks to load.
 - Producer offsets reach 96 blocks instead of 12, with the same eight positions sampled per pass.
@@ -38,7 +38,7 @@ This is an incremental alpha, not a complete weather simulation.
 - Ordinary equalization transfers material without loss to positive-capacity face neighbors, balancing fullness rather than raw amounts. Zero-air cells block transfer; no diagonal transfer.
 - Overfull cells push excess outward toward nearby available capacity through air-capacity neighbors. Unknown unloaded boundaries or exhausted budgets leave work pending: neither authorizes pressure destruction or discards material. Unlimited displacement is not guaranteed.
 - Trapped excess triggers default-enabled pressure destruction: break the lowest-hardness eligible source-cell block with drops, then work outward once source blocks are gone. Each broken block adds 1 material unit.
-- Pressure remains limited to four attempts per sampling interval, now ten times longer in 0.7.1-alpha.1. Negative-hardness/intrinsically unbreakable blocks are exempt; closed unbreakable surroundings leave excess blocked, not deleted.
+- Pressure remains limited to four attempts per sampling interval, now 40 times the original delay in 0.8.1-alpha.1. Negative-hardness/intrinsically unbreakable blocks are exempt; closed unbreakable surroundings leave excess blocked, not deleted.
 - Rain buildup respects shelter and biome precipitation, including roof and canopy landing surfaces.
 - Low-light exposed ground builds fog; full daylight stops this source but does not clear existing material, which can continue spreading.
 - Amounts save with their owning chunks and restore on reload/restart; capacities are recomputed. Unload releases the simulation mirror, not saved material. No range-based deletion; terrain damage also persists.
@@ -56,7 +56,7 @@ not terrain-clipped volumetric fog.
 Install the same version on **both server and client**, or in a NeoForge 1.21.1
 single-player instance. No extra graphics dependency is required. This requirement
 starts with 0.3.0-alpha.1; older releases were particle-only.
-**0.8.0-alpha.1 retains protocol 5: update both sides; earlier protocols are
+**0.8.1-alpha.1 retains protocol 5: update both sides; earlier protocols are
 incompatible.** Multi-packet snapshots complete atomically, with world identity,
 snapshot scope, and chunk freshness separating live observations from cached
 visual history.

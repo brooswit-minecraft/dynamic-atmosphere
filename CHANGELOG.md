@@ -1,3 +1,13 @@
+# 0.8.1-alpha.1
+
+- Increase the cadence base from 250 to 1000: `1000 * cellSize / 16` ticks, 40 times the original 25-base delay instead of 10 times.
+- Current 4-block cells use 250 ticks (12.5 seconds at 20 TPS); size 1 averages 62.5 ticks, size 16 uses 1000, and size 32 uses 2000.
+- Preserve condensation probability/consumption per check, pressure limits, persistent data, cached/far rendering, producer reach, sync intervals, and protocol 5. Only scheduled simulation/source delays change.
+- Update cadence and due-work regression tests, including callback coverage, for CI verification.
+
+Compatible tuning patch; no world/data reset. Local Gradle and Minecraft tests
+are intentionally skipped; automated verification runs in CI.
+
 # 0.8.0-alpha.1
 
 **World-changing feature: atmospheric condensation places real water sources.

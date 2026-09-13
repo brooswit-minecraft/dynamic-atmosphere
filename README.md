@@ -24,11 +24,11 @@ boundaries and exhausted work/search budgets leave work pending, never authorize
 pressure destruction, and do not discard material.
 Excess that still cannot escape remains blocked and reported, not discarded;
 displacement is not unlimited.
-Retaining the 0.7.1 tuning, simulation/source cadence is `250 * cellSize / 16` ticks,
-making check delays ten times longer in response to lag. Current 4-block cells
-average **62.5 ticks** using 62/63-tick intervals, approximately **3.125 seconds**
-at 20 TPS (previously 6.25 ticks). Size 1 averages 15.625 ticks, size 16 uses 250,
-and size 32 uses 500. Actual progress remains work-budgeted. Cache, render, and
+In 0.8.1-alpha.1, simulation/source cadence is `1000 * cellSize / 16` ticks:
+40 times the original 25-base delay, rather than the previous 10 times. Current
+4-block cells use **250 ticks**, or **12.5 seconds** at 20 TPS (previously 62.5
+ticks). Size 1 averages 62.5 ticks, size 16 uses 1000, and size 32 uses 2000.
+Actual progress remains work-budgeted. Cache, render, and
 sync intervals are unchanged; no data reset is required.
 Producer offsets now reach 96 blocks instead of 12, using the same eight sampled
 positions per pass and loaded-only checks. Live cell visibility follows Minecraft's actual
@@ -85,8 +85,9 @@ On a successful roll, one water source is placed at a random air block in the
 same cell, without replacing solids. Only successful placement removes
 `max(1, floor(current material * 0.25))` units. No air or a failed placement
 consumes nothing. Ultrawarm dimensions, including the Nether, skip both water
-placement and consumption. The existing slower cadence remains: 4-block cells
-average 62.5 ticks (62/63), about 3.125 seconds at 20 TPS, subject to work budgets.
+placement and consumption. Checks now use the 250-tick cadence for 4-block cells,
+about 12.5 seconds at 20 TPS, subject to work budgets. Probability and consumption
+per check are unchanged.
 
 **This places real water that flows normally and can wet builds. Back up worlds
 before upgrading.** It changes the world, not just the visual cache. Existing
@@ -126,7 +127,7 @@ dropping items. Once source-cell blocks are gone, relief tries neighboring cells
 and proceeds outward toward room. Each broken block adds **1 material unit**.
 Negative-hardness and intrinsically unbreakable blocks are exempt; there is no
 claim/protected-area support. Pressure is limited to four attempts per sampling
-interval, now ten times longer in 0.7.1-alpha.1. Work is
+interval, now 40 times the original delay in 0.8.1-alpha.1. Work is
 bounded per pass, not an unlimited search
 or guarantee of immediate relief. Closed unbreakable surroundings leave excess
 blocked and reported rather than deleting it.
