@@ -8,7 +8,7 @@ import net.minecraft.resources.ResourceLocation;
 
 import java.util.List;
 
-public record AtmosphereGridPayload(ResourceLocation dimension, boolean reset, List<Cell> cells)
+public record AtmosphereGridPayload(ResourceLocation dimension, boolean reset, boolean snapshotEnd, List<Cell> cells)
     implements CustomPacketPayload {
 
     public static final int MAX_CELLS_PER_PAYLOAD = 512;
@@ -19,6 +19,8 @@ public record AtmosphereGridPayload(ResourceLocation dimension, boolean reset, L
         AtmosphereGridPayload::dimension,
         ByteBufCodecs.BOOL,
         AtmosphereGridPayload::reset,
+        ByteBufCodecs.BOOL,
+        AtmosphereGridPayload::snapshotEnd,
         Cell.STREAM_CODEC.apply(ByteBufCodecs.list(MAX_CELLS_PER_PAYLOAD)),
         AtmosphereGridPayload::cells,
         AtmosphereGridPayload::new

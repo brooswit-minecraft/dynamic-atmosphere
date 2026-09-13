@@ -24,7 +24,15 @@ boundaries and exhausted work/search budgets leave work pending, never authorize
 pressure destruction, and do not discard material.
 Excess that still cannot escape remains blocked and reported, not discarded;
 displacement is not unlimited.
-Sources are sampled every five seconds; simulation work is budgeted across ticks.
+In 0.6.1-alpha.1, simulation/source cadence is `25 * cellSize / 16` ticks:
+the old 100-tick base is quartered, then scaled by cell size. Current 4-block
+cells average **6.25 ticks** using 6/7-tick intervals. Size 16 would use 25 ticks,
+size 1 averages 1.5625, and size 32 uses 50. Actual progress remains work-budgeted.
+Producer offsets now reach 96 blocks instead of 12, using the same eight sampled
+positions per pass and loaded-only checks. Visibility follows Minecraft's actual
+tracked chunks and the client's effective render distance, loaded chunks, and
+frustum, with no fixed atmospheric radius or nearest-cell cutoff. Delta sync stays every 20 ticks, full snapshots
+every 200 ticks, and simulation processes at most 128 source cells per tick.
 Nearby clients receive a snapshot
 and batched changes, and render translucent cells with opacity based on fullness.
 This is **not** the full terrain-aware atmospheric simulation. No generated precipitation,
@@ -32,7 +40,7 @@ pollution, gas transport, or world generation changes are included yet.
 
 Rain uses Minecraft's local rain/exposure check at the topmost landing surface,
 including roofs and canopies. Each sampled rainy position contributes 40 material
-units every five seconds, independently of water/cloud sources. Dry biomes, snow,
+units per sampling pass, independently of water/cloud sources. Dry biomes, snow,
 and sheltered ground do not emit rain material.
 The mod does not create rain or change the world's weather.
 
@@ -55,7 +63,13 @@ units; capacity remains 0..1000.
 
 Install this version on **both server and client**, or in a single-player NeoForge
 instance. Earlier particle-only releases did not require a client installation;
-the new grid renderer and sync protocol do. Update both sides together.
+the new grid renderer and sync protocol do. **Protocol 4 requires updating both
+sides together; older protocol-3 clients cannot connect.** Large snapshots use
+512-cell packets and a completion marker: the client replaces the view only
+when complete, preserving retained opacity. Client memory follows the subscribed
+view plus one incoming snapshot; removals, replacement snapshots, dimension
+changes, and disconnect release old state. There is no 4,096-cell cache cap or
+512-cell draw cap. GPU batches bound buffer size without dropping distant cells.
 No world reset is needed. Both atmospheric amounts and broken terrain are saved.
 
 Operators can run `/dynamicatmosphere status` to inspect runtime counters and
@@ -68,7 +82,9 @@ excess breaks the eligible block with the lowest hardness in the source cell,
 dropping items. Once source-cell blocks are gone, relief tries neighboring cells
 and proceeds outward toward room. Each broken block adds **1 material unit**.
 Negative-hardness and intrinsically unbreakable blocks are exempt; there is no
-claim/protected-area support. Work is bounded per pass, not an unlimited search
+claim/protected-area support. Pressure is limited to four attempts per sampling
+interval, so the faster cadence also increases pressure opportunities. Work is
+bounded per pass, not an unlimited search
 or guarantee of immediate relief. Closed unbreakable surroundings leave excess
 blocked and reported rather than deleting it.
 

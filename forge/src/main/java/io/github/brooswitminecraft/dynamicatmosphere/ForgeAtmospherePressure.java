@@ -33,7 +33,7 @@ final class ForgeAtmospherePressure {
      * Attempts at most one vanilla block destruction, with drops, after a
      * bounded search. Call on the server thread only after outward overflow
      * has been attempted. The caller must cap attempts at MAX_BREAKS_PER_PASS
-     * across all pressure sources in the five-second pass, refresh capacity,
+     * across all pressure sources in the configured sampling interval, refresh capacity,
      * add the returned material unit, and retry overflow before breaking again.
      * No atmospheric state is changed here; an unsuccessful break adds nothing.
      */

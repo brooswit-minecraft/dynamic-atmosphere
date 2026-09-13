@@ -8,7 +8,6 @@ import java.util.Objects;
 
 /** Main-thread state; no Minecraft dependencies so packet/lifecycle behavior is testable. */
 public final class AtmosphereClientCache {
-    public static final int MAX_CELLS = 4096;
     private static final int TRANSITION_TICKS = 10;
 
     public record Cell(int x, int y, int z) { }
@@ -23,6 +22,7 @@ public final class AtmosphereClientCache {
     }
 
     private final Map<Cell, Amount> cells = new LinkedHashMap<>();
+    private Map<Cell, Update> snapshot;
     private String dimension;
     private boolean hasSnapshot;
     private long tick;
@@ -36,51 +36,52 @@ public final class AtmosphereClientCache {
 
     public void clear() {
         cells.clear();
+        snapshot = null;
         dimension = null;
         hasSnapshot = false;
         tick = 0;
     }
 
     public void apply(String packetDimension, boolean reset, List<Update> updates) {
-        if (dimension == null || !dimension.equals(packetDimension) || (!reset && !hasSnapshot)) {
+        apply(packetDimension, reset, reset, updates);
+    }
+
+    public void apply(String packetDimension, boolean reset, boolean snapshotEnd, List<Update> updates) {
+        if (dimension == null || !dimension.equals(packetDimension)) {
             return;
         }
-        Map<Cell, Amount> previous = reset ? new LinkedHashMap<>(cells) : cells;
         if (reset) {
-            cells.clear();
-            hasSnapshot = true;
+            snapshot = new LinkedHashMap<>();
         }
-        // Bound even an unexpectedly large decoded update list.
-        for (int i = 0; i < Math.min(updates.size(), MAX_CELLS); i++) {
-            Update update = updates.get(i);
+        if (snapshot != null) {
+            for (Update update : updates) {
+                snapshot.put(update.cell(), update);
+            }
+            if (!snapshotEnd) {
+                return;
+            }
+            Map<Cell, Amount> previous = new LinkedHashMap<>(cells);
+            cells.clear();
+            reconcile(previous, snapshot.values());
+            snapshot = null;
+            hasSnapshot = true;
+        } else if (hasSnapshot && !snapshotEnd) {
+            reconcile(cells, updates);
+        }
+    }
+
+    private void reconcile(Map<Cell, Amount> previous, Iterable<Update> updates) {
+        for (Update update : updates) {
             int material = Math.clamp(update.amount(), 0, 1_000_000);
             int capacity = Math.clamp(update.capacity(), 0, 1000);
             float target = capacity == 0 ? 0 : Math.min(1000, material * 1000.0f / capacity);
             Amount old = previous.get(update.cell());
-            if (reset && material == 0) {
-                continue;
-            }
             if (old == null && material == 0) {
                 continue;
             }
             if (old != null && old.material() == material && old.capacity() == capacity) {
-                if (reset) {
-                    cells.put(update.cell(), old);
-                }
+                cells.put(update.cell(), old);
                 continue;
-            }
-            if (old == null && cells.size() >= MAX_CELLS) {
-                // Fading removals must not displace newly subscribed authoritative cells.
-                var fading = cells.entrySet().iterator();
-                while (fading.hasNext()) {
-                    if (fading.next().getValue().material() == 0) {
-                        fading.remove();
-                        break;
-                    }
-                }
-                if (cells.size() >= MAX_CELLS) {
-                    continue;
-                }
             }
             cells.put(update.cell(), new Amount(old == null ? 0 : old.at(tick), target, tick, material, capacity));
         }
@@ -109,5 +110,9 @@ public final class AtmosphereClientCache {
     int storedAmount(Cell cell) {
         Amount amount = cells.get(cell);
         return amount == null ? 0 : amount.material();
+    }
+
+    int pendingSize() {
+        return snapshot == null ? 0 : snapshot.size();
     }
 }

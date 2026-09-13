@@ -1,3 +1,15 @@
+# 0.6.1-alpha.1
+
+- Tune simulation/source cadence to `25 * cellSize / 16` ticks: quarter the old 100-tick base, then scale by cell size. Current 4-block cells average 6.25 ticks using 6/7-tick intervals; 16-block cells would use 25 ticks, 1-block cells 1.5625, and 32-block cells 50.
+- Expand producer offsets from 12 to 96 blocks (8x), keeping the same eight sampled positions per pass and loaded-only checks.
+- Match visibility to Minecraft's tracked terrain and effective client render distance, loaded chunks, and frustum. Remove fixed atmospheric radii, nearest-cell truncation, the 4,096-cell cache cap, and the 512-cell draw cap.
+- Protocol 4 adds snapshot completion across 512-cell packets, preserving retained opacity and replacing membership only after the full view arrives. Update both client and server together; protocol-3 clients are incompatible.
+- Keep delta sync every 20 ticks, full snapshots every 200 ticks, and the 128-source-per-tick work budget.
+- Pressure remains limited to four attempts per sampling interval, so its opportunities also occur more often. Default-enabled terrain damage and backup warnings still apply.
+
+Routine compatible tuning patch; no new storage format or world reset. Runtime
+and client verification for this tuning release remain pending user testing.
+
 # 0.6.0-alpha.1
 
 **BREAKING behavior: destructive pressure is enabled by default and can damage

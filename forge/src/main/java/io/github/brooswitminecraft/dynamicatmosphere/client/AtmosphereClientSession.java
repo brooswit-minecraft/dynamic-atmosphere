@@ -3,7 +3,7 @@ package io.github.brooswitminecraft.dynamicatmosphere.client;
 import java.util.List;
 import java.util.Objects;
 
-/** Buffers one bounded snapshot and its deltas until the client world exists. */
+/** Buffers one subscribed view until the client world exists; disconnect drops all state. */
 public final class AtmosphereClientSession {
     private AtmosphereClientCache active = new AtmosphereClientCache();
     private AtmosphereClientCache pending = new AtmosphereClientCache();
@@ -29,8 +29,12 @@ public final class AtmosphereClientSession {
     }
 
     public void receive(String packetDimension, boolean reset, List<AtmosphereClientCache.Update> updates) {
+        receive(packetDimension, reset, reset, updates);
+    }
+
+    public void receive(String packetDimension, boolean reset, boolean snapshotEnd, List<AtmosphereClientCache.Update> updates) {
         if (dimension != null) {
-            active.apply(packetDimension, reset, updates);
+            active.apply(packetDimension, reset, snapshotEnd, updates);
         } else {
             if (reset) {
                 pending.clear();
@@ -38,7 +42,7 @@ public final class AtmosphereClientSession {
                 pending.changeDimension(packetDimension);
             }
             if (packetDimension.equals(pendingDimension)) {
-                pending.apply(packetDimension, reset, updates);
+                pending.apply(packetDimension, reset, snapshotEnd, updates);
             }
         }
     }

@@ -20,7 +20,6 @@ public final class AtmosphereGrid<D> {
     public static final int CELL_SIZE = AtmosphereGridLayout.CELL_SIZE;
     public static final int MAX_AMOUNT = 1_000;
     public static final int MAX_STORED_AMOUNT = 1_000_000;
-    public static final int SIMULATION_INTERVAL_TICKS = 100;
     public static final int MAX_SOURCES_PER_SPREAD = 128;
     public static final int MAX_OVERFLOW_VISITS = 512;
 
@@ -73,7 +72,7 @@ public final class AtmosphereGrid<D> {
             return false;
         }
         putCell(key, nextAmount, boundedCapacity, tick, tick);
-        scheduleIfAbsent(key, tick + SIMULATION_INTERVAL_TICKS);
+        scheduleIfAbsent(key, AtmosphereGridLayout.nextSimulationTick(tick));
         return true;
     }
 
@@ -92,7 +91,7 @@ public final class AtmosphereGrid<D> {
         }
         int boundedAmount = Math.min(amount, MAX_STORED_AMOUNT);
         putCell(key, boundedAmount, boundedCapacity, tick, tick);
-        scheduleIfAbsent(key, tick + SIMULATION_INTERVAL_TICKS);
+        scheduleIfAbsent(key, AtmosphereGridLayout.nextSimulationTick(tick));
         return true;
     }
 
@@ -112,7 +111,7 @@ public final class AtmosphereGrid<D> {
             cell.lastEmissionTick,
             cell.lastUpdateTick
         );
-        scheduleIfAbsent(cell.key, tick + SIMULATION_INTERVAL_TICKS);
+        scheduleIfAbsent(cell.key, AtmosphereGridLayout.nextSimulationTick(tick));
         return true;
     }
 
@@ -136,7 +135,7 @@ public final class AtmosphereGrid<D> {
         SpreadResult<D> overflow = redistributeOverflowInternal(tick, capacityAt, sources);
         for (CellKey<D> source : sources) {
             if (cells.containsKey(source)) {
-                scheduleIfAbsent(source, tick + SIMULATION_INTERVAL_TICKS);
+                scheduleIfAbsent(source, AtmosphereGridLayout.nextSimulationTick(tick));
             }
         }
         return new SpreadResult<>(
@@ -337,7 +336,7 @@ public final class AtmosphereGrid<D> {
                 int transfer = Math.min(remaining, Math.max(0, capacity - candidateAmount));
                 if (transfer > 0) {
                     putCell(candidate, candidateAmount + transfer, capacity, tick, tick);
-                    scheduleIfAbsent(candidate, tick + SIMULATION_INTERVAL_TICKS);
+                    scheduleIfAbsent(candidate, AtmosphereGridLayout.nextSimulationTick(tick));
                     remaining -= transfer;
                     moved += transfer;
                 }
@@ -403,7 +402,7 @@ public final class AtmosphereGrid<D> {
             long emissionTick = existing == null ? tick : existing.lastEmissionTick;
             putCell(key, next, capacity, emissionTick, tick);
             if (existing == null) {
-                scheduleIfAbsent(key, tick + SIMULATION_INTERVAL_TICKS);
+                scheduleIfAbsent(key, AtmosphereGridLayout.nextSimulationTick(tick));
             }
         }
     }

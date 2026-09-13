@@ -40,8 +40,7 @@ public final class AtmosphereClient {
             return;
         }
         syncWorld();
-        SESSION.receive(payload.dimension().toString(), payload.reset(), payload.cells().stream()
-            .limit(AtmosphereClientCache.MAX_CELLS)
+        SESSION.receive(payload.dimension().toString(), payload.reset(), payload.snapshotEnd(), payload.cells().stream()
             .map(cell -> new AtmosphereClientCache.Update(
                 new AtmosphereClientCache.Cell(cell.x(), cell.y(), cell.z()), cell.amount(), cell.capacity()))
             .toList());

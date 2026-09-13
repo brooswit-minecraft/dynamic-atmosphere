@@ -154,21 +154,55 @@ class AtmosphereClientCacheTest {
     }
 
     @Test
-    void boundsCacheAndAmountsAndMakesRoomForRemovals() {
+    void retainsEntireSubscribedViewAndReleasesRemovalsWithoutFixedCap() {
         var cache = new AtmosphereClientCache();
         cache.changeDimension("overworld");
         var updates = new ArrayList<AtmosphereClientCache.Update>();
-        for (int i = 0; i < AtmosphereClientCache.MAX_CELLS + 10; i++) {
+        for (int i = 0; i < 9000; i++) {
             updates.add(update(new AtmosphereClientCache.Cell(i, 0, 0), 9000));
         }
         cache.apply("overworld", true, updates);
         settle(cache);
-        assertEquals(AtmosphereClientCache.MAX_CELLS, cache.size());
+        assertEquals(9000, cache.size());
         assertTrue(cache.visible(0).stream().allMatch(cell -> cell.amount() == 1000));
         cache.apply("overworld", false, List.of(update(new AtmosphereClientCache.Cell(0, 0, 0), -1), update(A, 100)));
-        assertEquals(AtmosphereClientCache.MAX_CELLS, cache.size());
+        assertEquals(9001, cache.size());
         settle(cache);
+        assertEquals(9000, cache.size());
         assertTrue(cache.visible(0).stream().anyMatch(cell -> cell.cell().equals(A)));
+        cache.apply("overworld", true, List.of());
+        assertEquals(0, cache.size());
+    }
+
+    @Test
+    void multiPacketSnapshotIsAtomicAndPreservesLaterBatchOpacity() {
+        var cache = new AtmosphereClientCache();
+        cache.changeDimension("overworld");
+        cache.apply("overworld", true, List.of(update(A, 800), update(B, 500)));
+        settle(cache);
+        cache.apply("overworld", true, false, List.of(update(A, 800)));
+        cache.advance();
+        assertEquals(2, cache.size());
+        assertEquals(1, cache.pendingSize());
+        cache.apply("overworld", false, true, List.of(update(B, 500)));
+        assertEquals(0, cache.pendingSize());
+        assertEquals(List.of(new AtmosphereClientCache.VisibleCell(A, 800),
+            new AtmosphereClientCache.VisibleCell(B, 500)), cache.visible(0));
+    }
+
+    @Test
+    void incompleteSnapshotIsReplacedAndDisconnectDropsBothViews() {
+        var cache = new AtmosphereClientCache();
+        cache.changeDimension("overworld");
+        cache.apply("overworld", true, List.of(update(A, 800)));
+        cache.apply("overworld", true, false, List.of(update(B, 500)));
+        cache.apply("overworld", true, true, List.of(update(A, 800)));
+        assertEquals(1, cache.size());
+        assertEquals(0, cache.pendingSize());
+        cache.apply("overworld", true, false, List.of(update(B, 500)));
+        cache.clear();
+        assertEquals(0, cache.size());
+        assertEquals(0, cache.pendingSize());
     }
 
     @Test

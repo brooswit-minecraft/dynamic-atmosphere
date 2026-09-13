@@ -1,6 +1,7 @@
 package io.github.brooswitminecraft.dynamicatmosphere.client;
 
 import io.github.brooswitminecraft.dynamicatmosphere.AtmosphereGridLayout;
+import net.minecraft.client.Minecraft;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.ByteBufferBuilder;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
@@ -13,13 +14,10 @@ import net.minecraft.client.renderer.RenderType;
 import net.minecraft.world.phys.AABB;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 
 public final class AtmosphereVolumeRenderer extends RenderStateShard {
-    public static final int MAX_RENDER_CELLS = 512;
-    private static final int RENDER_RADIUS = 128;
+    private static final int SLICES_PER_BATCH = 4096;
     private static final RenderType VOLUME = RenderType.create(
         "dynamicatmosphere_volume", DefaultVertexFormat.POSITION_COLOR, VertexFormat.Mode.TRIANGLES,
         1024 * 1024, false, false,
@@ -43,6 +41,7 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
         var look = event.getCamera().getLookVector();
         var camera = new AtmosphereVolumeGeometry.Point(position.x, position.y, position.z);
         var forward = new AtmosphereVolumeGeometry.Point(look.x(), look.y(), look.z());
+        int viewChunks = Minecraft.getInstance().options.getEffectiveRenderDistance();
         List<AtmosphereClientCache.VisibleCell> visible = cache.visible(
             event.getPartialTick().getGameTimeDeltaPartialTick(false));
         visible.removeIf(cell -> {
@@ -50,23 +49,12 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
             return !level.getChunkSource().hasChunk(
                 AtmosphereGridLayout.chunkCoordinate(cell.cell().x()),
                 AtmosphereGridLayout.chunkCoordinate(cell.cell().z()))
-                || bounds.distanceToSqr(position) > (double) RENDER_RADIUS * RENDER_RADIUS
+                || !AtmosphereClientView.contains(cell.cell(), position.x, position.z, viewChunks)
                 || !event.getFrustum().isVisible(bounds);
         });
-        visible.sort(Comparator.comparingDouble(cell -> bounds(cell.cell()).distanceToSqr(position)));
-        List<AtmosphereVolumeGeometry.Slice> slices = new ArrayList<>();
-        for (int i = 0; i < Math.min(MAX_RENDER_CELLS, visible.size()); i++) {
-            var cell = visible.get(i);
-            var cellSlices = AtmosphereVolumeGeometry.slices(cell.cell(), cell.amount(), camera, forward);
-            if (!cellSlices.isEmpty()) {
-                renderedCellCount++;
-                slices.addAll(cellSlices);
-            }
-        }
-        if (slices.isEmpty()) {
+        if (visible.isEmpty()) {
             return;
         }
-        slices.sort(Comparator.comparingDouble(AtmosphereVolumeGeometry.Slice::depth).reversed());
         if (storage == null) {
             storage = new ByteBufferBuilder(1024 * 1024);
             buffers = MultiBufferSource.immediate(storage);
@@ -75,19 +63,39 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
         var shader = RenderSystem.getShader();
         RenderSystem.setShaderColor(1, 1, 1, 1);
         try {
-            VertexConsumer vertices = buffers.getBuffer(VOLUME);
+            VertexConsumer vertices = null;
+            int batchSlices = 0;
             // AFTER_PARTICLES already has the event model-view rotation on RenderSystem's
             // stack. These vertices are camera-relative: do not apply that matrix twice.
-            for (var slice : slices) {
-                var polygon = slice.vertices();
-                for (int i = 1; i < polygon.size() - 1; i++) {
-                    vertex(vertices, polygon.getFirst(), slice.alpha());
-                    vertex(vertices, polygon.get(i), slice.alpha());
-                    vertex(vertices, polygon.get(i + 1), slice.alpha());
+            // All slices have identical white RGB and no depth writes, so alpha
+            // composition is order-independent. Stream bounded GPU batches without
+            // a global slice list or nearest-cell cutoff. Revisit if materials gain colors.
+            for (var cell : visible) {
+                var slices = AtmosphereVolumeGeometry.slices(cell.cell(), cell.amount(), camera, forward);
+                if (!slices.isEmpty()) {
+                    renderedCellCount++;
+                }
+                for (var slice : slices) {
+                    if (vertices == null) {
+                        vertices = buffers.getBuffer(VOLUME);
+                    }
+                    var polygon = slice.vertices();
+                    for (int i = 1; i < polygon.size() - 1; i++) {
+                        vertex(vertices, polygon.getFirst(), slice.alpha());
+                        vertex(vertices, polygon.get(i), slice.alpha());
+                        vertex(vertices, polygon.get(i + 1), slice.alpha());
+                    }
+                    renderedSliceCount++;
+                    if (++batchSlices == SLICES_PER_BATCH) {
+                        buffers.endBatch(VOLUME);
+                        vertices = null;
+                        batchSlices = 0;
+                    }
                 }
             }
-            buffers.endBatch(VOLUME);
-            renderedSliceCount = slices.size();
+            if (vertices != null) {
+                buffers.endBatch(VOLUME);
+            }
         } finally {
             // RenderType.draw does not clear its state if the GPU upload throws.
             try {

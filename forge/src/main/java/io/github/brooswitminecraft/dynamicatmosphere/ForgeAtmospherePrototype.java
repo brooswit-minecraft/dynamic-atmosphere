@@ -44,21 +44,17 @@ final class ForgeAtmospherePrototype {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
-    private static final int SAMPLE_INTERVAL = 100;
     private static final int SYNC_INTERVAL = 20;
     private static final int FULL_SNAPSHOT_INTERVAL = 200;
     private static final int HIGH_TERRAIN_ABOVE_SEA = 24;
     private static final int CLOUD_PARTICLE_CAP = 16;
     private static final int DEMO_PARTICLE_CAP = 24;
     private static final int MAX_CHUNK_IMPORTS_PER_TICK = 8;
-    private static final int MAX_VISIBLE_CELLS_PER_PLAYER = 256;
-    private static final int SUBSCRIPTION_RADIUS_BLOCKS = 64;
-    private static final int GRID_RADIUS_CELLS = SUBSCRIPTION_RADIUS_BLOCKS / AtmosphereGridLayout.CELL_SIZE;
-    private static final int GRID_VERTICAL_RADIUS_CELLS = SUBSCRIPTION_RADIUS_BLOCKS / AtmosphereGridLayout.CELL_SIZE;
     private static final int WATER_EMISSION_PER_DEPTH = 20;
     private static final int HIGH_TERRAIN_EMISSION = 40;
     private static final int RAIN_EMISSION = 40;
     private static final int MAX_WATER_DEPTH = 8;
+    private static final int SOURCE_RADIUS_MULTIPLIER = 8;
     private static final int[][] SAMPLE_OFFSETS = {
         {0, 0}, {12, 0}, {-12, 0}, {0, 12}, {0, -12}, {8, 8}, {-8, -8}, {8, -8}
     };
@@ -93,7 +89,7 @@ final class ForgeAtmospherePrototype {
         serverTicks++;
         importsRemaining = MAX_CHUNK_IMPORTS_PER_TICK;
         importPendingChunks(event.getServer());
-        if (serverTicks % SAMPLE_INTERVAL == 0) {
+        if (AtmosphereGridLayout.isSimulationTick(serverTicks)) {
             pressureAttempts = 0;
             sampleSources(event.getServer());
         }
@@ -190,7 +186,8 @@ final class ForgeAtmospherePrototype {
                 + ", cells=" + grid.size()
                 + ", loadedChunks=" + chunks.size()
                 + ", pendingImports=" + pendingLoads.size()
-                + ", sampleInterval=" + SAMPLE_INTERVAL
+                + ", sampleInterval=" + AtmosphereGridLayout.simulationIntervalTicks(AtmosphereGridLayout.CELL_SIZE)
+                + ", sourceRadius=" + 12 * SOURCE_RADIUS_MULTIPLIER
                 + ", syncInterval=" + SYNC_INTERVAL
                 + ", fullSnapshotInterval=" + FULL_SNAPSHOT_INTERVAL
                 + ", passes=" + automaticPasses
@@ -318,8 +315,8 @@ final class ForgeAtmospherePrototype {
         int sent = 0;
 
         for (int[] offset : SAMPLE_OFFSETS) {
-            int x = center.getX() + offset[0];
-            int z = center.getZ() + offset[1];
+            int x = center.getX() + offset[0] * SOURCE_RADIUS_MULTIPLIER;
+            int z = center.getZ() + offset[1] * SOURCE_RADIUS_MULTIPLIER;
             BlockPos loadedProbe = new BlockPos(x, center.getY(), z);
             if (!level.hasChunkAt(loadedProbe)) {
                 continue;
@@ -433,30 +430,23 @@ final class ForgeAtmospherePrototype {
         ResourceKey<Level> dimension = player.serverLevel().dimension();
         AtmosphereGrid.CellKey<ResourceKey<Level>> playerCell = cellKey(player.serverLevel(), player.blockPosition());
         var nearby = new ArrayList<AtmosphereGrid.Cell<ResourceKey<Level>>>();
-        int minX = AtmosphereGridLayout.chunkCoordinate(playerCell.x() - GRID_RADIUS_CELLS);
-        int maxX = AtmosphereGridLayout.chunkCoordinate(playerCell.x() + GRID_RADIUS_CELLS);
-        int minZ = AtmosphereGridLayout.chunkCoordinate(playerCell.z() - GRID_RADIUS_CELLS);
-        int maxZ = AtmosphereGridLayout.chunkCoordinate(playerCell.z() + GRID_RADIUS_CELLS);
-        for (int x = minX; x <= maxX; x++) {
-            for (int z = minZ; z <= maxZ; z++) {
-                ChunkState state = ensureImported(player.serverLevel(), x, z);
-                if (state == null || !state.readable) {
-                    continue;
-                }
-                for (var key : state.cells.keySet()) {
-                    var cell = grid.get(key);
-                    if (cell != null && isNear(playerCell, key)) {
-                        nearby.add(cell);
-                    }
+        // Use Minecraft's subscription, including changes to client/server view distance.
+        // ensureImported only reads already loaded chunks and retains its per-tick budget.
+        player.getChunkTrackingView().forEach(chunk -> {
+            ChunkState state = ensureImported(player.serverLevel(), chunk.x, chunk.z);
+            if (state == null || !state.readable) {
+                return;
+            }
+            for (var key : state.cells.keySet()) {
+                var cell = grid.get(key);
+                if (cell != null) {
+                    nearby.add(cell);
                 }
             }
-        }
+        });
         nearby.sort(Comparator.comparingLong(cell -> cellDistanceSquared(playerCell, cell.key())));
         var visible = new ArrayList<AtmosphereSyncPlanner.Cell>();
         for (var cell : nearby) {
-            if (visible.size() >= MAX_VISIBLE_CELLS_PER_PLAYER) {
-                break;
-            }
             int capacity = capacities.computeIfAbsent(cell.key(), key -> capacityAt(player.serverLevel(), key));
             if (capacity >= 0) {
                 visible.add(new AtmosphereSyncPlanner.Cell(
@@ -470,7 +460,7 @@ final class ForgeAtmospherePrototype {
                 .map(cell -> new AtmosphereGridPayload.Cell(cell.x(), cell.y(), cell.z(), cell.amount(), cell.capacity()))
                 .toList();
             PacketDistributor.sendToPlayer(player, new AtmosphereGridPayload(
-                update.dimension().location(), update.reset(), cells));
+                update.dimension().location(), update.reset(), update.snapshotEnd(), cells));
             payloadsSent++;
         }
     }
@@ -609,14 +599,6 @@ final class ForgeAtmospherePrototype {
         private ChunkState(LevelChunk chunk) {
             this.chunk = chunk;
         }
-    }
-
-    private boolean isNear(
-        AtmosphereGrid.CellKey<ResourceKey<Level>> first,
-        AtmosphereGrid.CellKey<ResourceKey<Level>> second
-    ) {
-        return Math.abs((long) first.y() - second.y()) <= GRID_VERTICAL_RADIUS_CELLS
-            && horizontalCellDistanceSquared(first, second) <= (long) GRID_RADIUS_CELLS * GRID_RADIUS_CELLS;
     }
 
     private long cellDistanceSquared(

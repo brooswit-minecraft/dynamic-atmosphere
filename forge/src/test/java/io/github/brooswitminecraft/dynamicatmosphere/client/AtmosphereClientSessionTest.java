@@ -62,7 +62,7 @@ class AtmosphereClientSessionTest {
     }
 
     @Test
-    void PendingStateIsBoundedAcrossManyDeltaPackets() {
+    void pendingViewIsNotTruncatedAndIsReleasedOnDisconnect() {
         var session = new AtmosphereClientSession();
         session.receive("overworld", false, update(800));
         session.world("overworld");
@@ -76,6 +76,20 @@ class AtmosphereClientSessionTest {
                 .toList());
         }
         session.world("overworld");
-        assertEquals(AtmosphereClientCache.MAX_CELLS, session.cache().size());
+        assertEquals(9000, session.cache().size());
+        session.clear();
+        assertEquals(0, session.cache().size());
+    }
+
+    @Test
+    void snapshotCanFinishAfterWorldBecomesReady() {
+        var session = new AtmosphereClientSession();
+        session.receive("overworld", true, false, update(400));
+        session.world("overworld");
+        assertEquals(0, session.cache().size());
+        assertEquals(1, session.cache().pendingSize());
+        session.receive("overworld", false, true, update(800));
+        for (int i = 0; i < 10; i++) session.cache().advance();
+        assertEquals(800, session.cache().visible(0).getFirst().amount());
     }
 }

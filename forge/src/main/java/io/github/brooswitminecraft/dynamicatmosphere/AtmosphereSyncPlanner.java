@@ -11,7 +11,7 @@ final class AtmosphereSyncPlanner<P, D> {
     record Cell(int x, int y, int z, int amount, int capacity) {
     }
 
-    record Update<D>(D dimension, boolean reset, List<Cell> cells) {
+    record Update<D>(D dimension, boolean reset, boolean snapshotEnd, List<Cell> cells) {
         Update {
             cells = List.copyOf(cells);
         }
@@ -40,7 +40,7 @@ final class AtmosphereSyncPlanner<P, D> {
 
         if (previous == null || !previous.dimension().equals(dimension)) {
             if (previous != null) {
-                updates.add(new Update<>(previous.dimension(), true, List.of()));
+                updates.add(new Update<>(previous.dimension(), true, true, List.of()));
             }
             addBatches(updates, dimension, true, visibleCells);
             return updates;
@@ -91,13 +91,13 @@ final class AtmosphereSyncPlanner<P, D> {
     private void addBatches(List<Update<D>> updates, D dimension, boolean reset, List<Cell> cells) {
         if (cells.isEmpty()) {
             if (reset) {
-                updates.add(new Update<>(dimension, true, List.of()));
+                updates.add(new Update<>(dimension, true, true, List.of()));
             }
             return;
         }
         for (int start = 0; start < cells.size(); start += batchSize) {
             int end = Math.min(cells.size(), start + batchSize);
-            updates.add(new Update<>(dimension, reset && start == 0, cells.subList(start, end)));
+            updates.add(new Update<>(dimension, reset && start == 0, reset && end == cells.size(), cells.subList(start, end)));
         }
     }
 }

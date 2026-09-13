@@ -1,1 +1,1 @@
-A persistent 4-block fog grid for NeoForge 1.21.1 with spreading and default-enabled destructive pressure. Back up worlds: terrain can be damaged.
+A persistent fog grid for NeoForge 1.21.1 that follows Minecraft view distance, with spreading and destructive pressure. Back up worlds: terrain can be damaged.
