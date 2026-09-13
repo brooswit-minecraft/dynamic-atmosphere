@@ -13,6 +13,7 @@ import java.util.PriorityQueue;
 import java.util.Queue;
 import java.util.Set;
 import java.util.function.Predicate;
+import java.util.function.Consumer;
 import java.util.function.ToIntFunction;
 
 /** A bounded-work, server-owned atmospheric material grid. */
@@ -126,11 +127,16 @@ public final class AtmosphereGrid<D> {
     }
 
     public SpreadResult<D> spread(long tick, ToIntFunction<CellKey<D>> capacityAt) {
+        return spread(tick, capacityAt, ignored -> { });
+    }
+
+    public SpreadResult<D> spread(long tick, ToIntFunction<CellKey<D>> capacityAt, Consumer<CellKey<D>> beforeSpread) {
         List<CellKey<D>> sources = pollDueSources(tick, MAX_SOURCES_PER_SPREAD);
         if (sources.isEmpty()) {
             return SpreadResult.empty(hasDueWork(tick));
         }
 
+        for (CellKey<D> source : sources) beforeSpread.accept(source);
         int moved = spreadOneHop(tick, capacityAt, sources);
         SpreadResult<D> overflow = redistributeOverflowInternal(tick, capacityAt, sources);
         for (CellKey<D> source : sources) {

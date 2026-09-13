@@ -1,1 +1,1 @@
-Persistent atmospheric grid and client visual cache with coarse far fog in previously seen areas for NeoForge 1.21.1. Destructive pressure can damage terrain: back up worlds.
+Persistent atmosphere, cached far fog, and water condensation for NeoForge 1.21.1. Real water can wet builds; destructive pressure can damage terrain. Back up worlds.

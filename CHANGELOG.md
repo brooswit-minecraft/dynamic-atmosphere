@@ -1,3 +1,18 @@
+# 0.8.0-alpha.1
+
+**World-changing feature: atmospheric condensation places real water sources.
+Water flows normally and can wet builds. Back up worlds before upgrading;
+the existing destructive-pressure warnings also remain in effect.**
+
+- On each cell's scheduled check, fullness above 50% gives a linear water-placement chance: 0% at 50%, 5% at 75%, and 10% at or above 100%. At or below 50%, no placement occurs.
+- On a successful roll, try placing one water source at a random air block in that same cell. Never replace solids. Only successful placement consumes material: 25% of the current amount, rounded down with a minimum of 1 unit.
+- No available air or failed placement means no consumption. Ultrawarm dimensions, including the Nether, allow neither placement nor consumption.
+- Retain the slower `250 * cellSize / 16` cadence: current 4-block cells average 62.5 ticks (62/63 intervals), approximately 3.125 seconds at 20 TPS. Checks remain scheduled and work-budgeted, not guaranteed wall-clock events.
+- Preserve persistent server material, the client visual cache, coarse far fog, 96-block producer reach, and cache/render/sync intervals. No data or world reset is required.
+
+Minor pre-1.0 feature release. Gameplay and performance should be evaluated in
+the hosted world; this change does not promise a performance improvement.
+
 # 0.7.1-alpha.1
 
 - Increase simulation/source check delays tenfold to reduce check frequency in response to lag: `250 * cellSize / 16` ticks. Current 4-block cells average 62.5 ticks using 62/63-tick intervals, approximately 3.125 seconds at 20 TPS (previously 6.25 ticks).

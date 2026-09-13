@@ -24,7 +24,7 @@ boundaries and exhausted work/search budgets leave work pending, never authorize
 pressure destruction, and do not discard material.
 Excess that still cannot escape remains blocked and reported, not discarded;
 displacement is not unlimited.
-In 0.7.1-alpha.1, simulation/source cadence is `250 * cellSize / 16` ticks,
+Retaining the 0.7.1 tuning, simulation/source cadence is `250 * cellSize / 16` ticks,
 making check delays ten times longer in response to lag. Current 4-block cells
 average **62.5 ticks** using 62/63-tick intervals, approximately **3.125 seconds**
 at 20 TPS (previously 6.25 ticks). Size 1 averages 15.625 ticks, size 16 uses 250,
@@ -37,14 +37,16 @@ frustum, with no fixed atmospheric radius or nearest-cell cutoff. Delta sync sta
 every 200 ticks, and simulation processes at most 128 source cells per tick.
 Nearby clients receive a snapshot
 and batched changes, and render translucent cells with opacity based on fullness.
-This is **not** the full terrain-aware atmospheric simulation. No generated precipitation,
-pollution, gas transport, or world generation changes are included yet.
+This is **not** the full terrain-aware atmospheric simulation. Condensation can
+place real water sources (below), but does not generate Minecraft rain. Pollution,
+gas transport, and world generation changes are not included yet.
 
 Rain uses Minecraft's local rain/exposure check at the topmost landing surface,
 including roofs and canopies. Each sampled rainy position contributes 40 material
 units per sampling pass, independently of water/cloud sources. Dry biomes, snow,
 and sheltered ground do not emit rain material.
-The mod does not create rain or change the world's weather.
+The mod does not create rain or change the world's weather; condensation places
+water blocks independently of Minecraft's rain.
 
 Exposed non-fluid ground also emits according to effective light: zero at light
 15, rising to 40 units per pass at light 0. This uses the day/night-adjusted sky
@@ -71,6 +73,25 @@ sides together; earlier-protocol clients cannot connect.** Large snapshots use
 distinguish current observations from retained visual history. There is no
 512-cell draw cap; GPU batches bound buffer size.
 No world reset is needed. Both atmospheric amounts and broken terrain are saved.
+
+## Water Condensation
+
+The 0.8.0-alpha.1 feature adds a water-placement roll on each cell's scheduled
+check. With fullness `f = current material / capacity`, the probability is
+`clamp(0.2 * (f - 0.5), 0, 0.1)`: zero at or below 50% fullness, 5% at 75%,
+and capped at 10% at or above 100%. A cell with no air cannot place water.
+
+On a successful roll, one water source is placed at a random air block in the
+same cell, without replacing solids. Only successful placement removes
+`max(1, floor(current material * 0.25))` units. No air or a failed placement
+consumes nothing. Ultrawarm dimensions, including the Nether, skip both water
+placement and consumption. The existing slower cadence remains: 4-block cells
+average 62.5 ticks (62/63), about 3.125 seconds at 20 TPS, subject to work budgets.
+
+**This places real water that flows normally and can wet builds. Back up worlds
+before upgrading.** It changes the world, not just the visual cache. Existing
+destructive-pressure warnings remain unchanged, and no data or world reset is
+required.
 
 ## Persistent Visual Cache
 

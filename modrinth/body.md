@@ -9,7 +9,7 @@ world before upgrading; restoring that backup is required to undo terrain damage
 The **atmospheric grid** divides space into 4x4x4-block cells. Water fog,
 high-terrain clouds, rain landing on exposed surfaces, and dark exposed ground add
 material. There is no natural decay: material spreads by equalizing fullness
-across six face-adjacent cells. In 0.7.1-alpha.1, simulation/source cadence is
+across six face-adjacent cells. Retaining the 0.7.1 tuning, simulation/source cadence is
 `250 * cellSize / 16` ticks: 4-block cells average 62.5 ticks using 62/63 intervals,
 approximately 3.125 seconds at 20 TPS. Check delays are ten times longer than
 the previous 6.25 ticks in response to lag. Size 1 averages 15.625 ticks,
@@ -21,6 +21,9 @@ This is an incremental alpha, not a complete weather simulation.
 
 ## Current Scope
 
+- New in 0.8.0-alpha.1: each cell's scheduled check can condense material into one real water source. Chance is linear above 50% fullness: 0% at 50%, 5% at 75%, capped at 10% at or above 100%; at or below 50% there is no placement.
+- A successful roll targets a random air block in the same cell, never solids. Successful placement consumes 25% of the current material amount, rounded down with a minimum of 1 unit. No air or failed placement consumes nothing; ultrawarm dimensions such as the Nether skip both placement and consumption.
+- **Placed water flows normally and can wet builds. Back up worlds.** This is a world-changing feature, not a visual effect or Minecraft rain. The slower 62.5-tick average scheduled cadence remains, subject to work budgets.
 - Server-owned material amounts, synchronized to nearby clients.
 - Bounded work near players, without forcing chunks to load.
 - Producer offsets reach 96 blocks instead of 12, with the same eight positions sampled per pass.
@@ -44,7 +47,8 @@ This is an incremental alpha, not a complete weather simulation.
 - No world generation changes or world reset required.
 
 It is **not yet** the planned terrain-aware cloud and fog simulation. Gas
-transport, pollution, and generating precipitation are future work.
+transport, pollution, and weather-generated precipitation are future work;
+water-source condensation does not change Minecraft's weather.
 The air-count rule is coarse, not an exact airtight-wall simulation: it does
 not inspect every shared-face opening. The grid is a coarse visual representation,
 not terrain-clipped volumetric fog.
@@ -52,7 +56,7 @@ not terrain-clipped volumetric fog.
 Install the same version on **both server and client**, or in a NeoForge 1.21.1
 single-player instance. No extra graphics dependency is required. This requirement
 starts with 0.3.0-alpha.1; older releases were particle-only.
-**0.7.1-alpha.1 retains protocol 5: update both sides; earlier protocols are
+**0.8.0-alpha.1 retains protocol 5: update both sides; earlier protocols are
 incompatible.** Multi-packet snapshots complete atomically, with world identity,
 snapshot scope, and chunk freshness separating live observations from cached
 visual history.

@@ -3,6 +3,7 @@ package io.github.brooswitminecraft.dynamicatmosphere;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -15,6 +16,81 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AtmosphereGridTest {
+    @Test
+    void beforeSpreadCallbackRunsOnlyWhenSourceIsDueAndBeforeMaterialIsRead() {
+        AtmosphereGrid<String> grid = new AtmosphereGrid<>();
+        var source = key(0, 0, 0);
+        grid.set(source, 500, 1, 1000);
+        long due = AtmosphereGridLayout.nextSimulationTick(1);
+        var called = new ArrayList<AtmosphereGrid.CellKey<String>>();
+        java.util.function.Consumer<AtmosphereGrid.CellKey<String>> callback = cell -> {
+            called.add(cell);
+            grid.set(cell, grid.get(cell).amount() - 100, due, 1000);
+        };
+        var capacityAt = capacities(Map.of(source, 1000));
+
+        assertEquals(0, grid.spread(due - 1, capacityAt, callback).sourcesProcessed());
+        assertTrue(called.isEmpty());
+        assertEquals(1, grid.spread(due, capacityAt, callback).sourcesProcessed());
+        assertEquals(List.of(source), called);
+        assertEquals(400, amount(grid, source));
+        assertEquals(0, grid.spread(due, capacityAt, callback).sourcesProcessed());
+        assertEquals(List.of(source), called);
+    }
+
+    @Test
+    void beforeSpreadCallbackSharesTheOneHundredTwentyEightSourceBudget() {
+        AtmosphereGrid<String> grid = new AtmosphereGrid<>();
+        Set<AtmosphereGrid.CellKey<String>> expected = new HashSet<>();
+        for (int x = 0; x < 130; x++) {
+            var source = key(x * 3, 0, 0);
+            expected.add(source);
+            grid.set(source, 1, 1, 1000);
+        }
+        long due = AtmosphereGridLayout.nextSimulationTick(1);
+        var called = new ArrayList<AtmosphereGrid.CellKey<String>>();
+        ToIntFunction<AtmosphereGrid.CellKey<String>> capacityAt = cell -> cell.x() % 3 == 0 ? 1000 : 0;
+
+        var first = grid.spread(due, capacityAt, called::add);
+        assertEquals(128, first.sourcesProcessed());
+        assertEquals(128, called.size());
+        assertTrue(first.workRemaining());
+        var second = grid.spread(due, capacityAt, called::add);
+        assertEquals(2, second.sourcesProcessed());
+        assertEquals(130, called.size());
+        assertEquals(expected, new HashSet<>(called));
+        assertFalse(second.workRemaining());
+        grid.spread(due, capacityAt, called::add);
+        assertEquals(130, called.size());
+    }
+
+    @Test
+    void callbackCanConsumeEntireSourceWithoutResurrectionOrStaleCallback() {
+        AtmosphereGrid<String> grid = new AtmosphereGrid<>();
+        var source = key(0, 0, 0);
+        var removedBeforeDue = key(10, 0, 0);
+        grid.set(source, 1, 1, 1000);
+        grid.set(removedBeforeDue, 1, 1, 1000);
+        grid.remove(removedBeforeDue);
+        grid.drainDirtyKeys();
+        long due = AtmosphereGridLayout.nextSimulationTick(1);
+        var called = new ArrayList<AtmosphereGrid.CellKey<String>>();
+
+        var result = grid.spread(due, ignored -> 1000, cell -> {
+            called.add(cell);
+            grid.set(cell, 0, due, 1000);
+        });
+        assertEquals(List.of(source), called);
+        assertEquals(1, result.sourcesProcessed());
+        assertEquals(0, result.moved());
+        assertTrue(result.blockedCells().isEmpty());
+        assertNull(grid.get(source));
+        assertEquals(0, grid.size());
+        assertEquals(Set.of(source), grid.drainDirtyKeys());
+        assertEquals(0, grid.spread(AtmosphereGridLayout.nextSimulationTick(due), ignored -> 1000, called::add).sourcesProcessed());
+        assertEquals(List.of(source), called);
+    }
+
     @Test
     void mapsNegativeBlockCoordinatesToWorldAlignedCells() {
         assertEquals(0, AtmosphereGrid.cellCoordinate(3));

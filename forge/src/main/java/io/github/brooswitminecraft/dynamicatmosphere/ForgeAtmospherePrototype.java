@@ -14,6 +14,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
@@ -69,6 +70,9 @@ final class ForgeAtmospherePrototype {
     private long rainEmissions;
     private long darkGroundEmissions;
     private long materialMoved;
+    private long condensationChecks;
+    private long waterBlocksCreated;
+    private long materialCondensed;
     private int blockedOverflow;
     private int sourcesProcessed;
     private boolean workRemaining;
@@ -158,6 +162,9 @@ final class ForgeAtmospherePrototype {
         rainEmissions = 0;
         darkGroundEmissions = 0;
         materialMoved = 0;
+        condensationChecks = 0;
+        waterBlocksCreated = 0;
+        materialCondensed = 0;
         blockedOverflow = 0;
         sourcesProcessed = 0;
         workRemaining = false;
@@ -197,6 +204,9 @@ final class ForgeAtmospherePrototype {
                 + ", rainEmissions=" + rainEmissions
                 + ", darkGroundEmissions=" + darkGroundEmissions
                 + ", materialMoved=" + materialMoved
+                + ", condensationChecks=" + condensationChecks
+                + ", waterBlocksCreated=" + waterBlocksCreated
+                + ", materialCondensed=" + materialCondensed
                 + ", blockedOverflow=" + blockedOverflow
                 + ", sourcesProcessed=" + sourcesProcessed
                 + ", workRemaining=" + workRemaining
@@ -251,7 +261,9 @@ final class ForgeAtmospherePrototype {
         var capacities = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer>();
         ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacityAt = key ->
             capacities.computeIfAbsent(key, candidate -> capacityAt(server.getLevel(candidate.dimension()), candidate));
-        var spread = grid.spread(serverTicks, capacityAt);
+        var spread = grid.spread(serverTicks, capacityAt, key -> {
+            if (condense(server.getLevel(key.dimension()), key, capacityAt.applyAsInt(key))) capacities.clear();
+        });
         materialMoved += spread.moved();
         blockedOverflow = spread.blockedOverflow();
         sourcesProcessed = spread.sourcesProcessed();
@@ -309,6 +321,42 @@ final class ForgeAtmospherePrototype {
                 }
             }
         }
+    }
+
+    private boolean condense(ServerLevel level, AtmosphereGrid.CellKey<ResourceKey<Level>> key, int capacity) {
+        var cell = grid.get(key);
+        if (level == null || level.dimensionType().ultraWarm() || cell == null || capacity <= 0) return false;
+        condensationChecks++;
+        if (!AtmosphereCondensation.shouldCondense(cell.amount(), capacity, level.random.nextDouble())) return false;
+
+        int size = AtmosphereGridLayout.CELL_SIZE;
+        BlockPos origin = new BlockPos(key.x() * size, key.y() * size, key.z() * size);
+        if (!level.hasChunkAt(origin)) return false;
+        // Vanilla placement notifies neighboring blocks; defer at unloaded edges.
+        for (int dx = -16; dx <= 16; dx += 16) {
+            for (int dz = -16; dz <= 16; dz += 16) {
+                if (!level.hasChunkAt(origin.offset(dx, 0, dz))) return false;
+            }
+        }
+        BlockPos chosen = null;
+        int airBlocks = 0;
+        BlockPos.MutableBlockPos probe = new BlockPos.MutableBlockPos();
+        // Reservoir sampling chooses uniformly among air blocks without allocating a list.
+        for (int x = 0; x < size; x++) {
+            for (int y = 0; y < size; y++) {
+                for (int z = 0; z < size; z++) {
+                    probe.set(origin.getX() + x, origin.getY() + y, origin.getZ() + z);
+                    if (!level.isOutsideBuildHeight(probe) && level.getBlockState(probe).isAir()
+                        && level.random.nextInt(++airBlocks) == 0) chosen = probe.immutable();
+                }
+            }
+        }
+        if (chosen == null || !level.setBlockAndUpdate(chosen, Blocks.WATER.defaultBlockState())) return false;
+        int consumed = AtmosphereCondensation.consumedAmount(cell.amount());
+        grid.set(key, cell.amount() - consumed, serverTicks, capacityAt(level, key));
+        waterBlocksCreated++;
+        materialCondensed += consumed;
+        return true;
     }
 
     private void sampleAutomatic(ServerPlayer player, Set<SourceKey> emittedSources) {
