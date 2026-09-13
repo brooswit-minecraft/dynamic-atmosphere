@@ -1,15 +1,15 @@
 """Sync this release's environment without relabeling older artifacts."""
+import hashlib
 import json
 import os
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-def sync(api, project, version, settings):
-    versions = api(f"/project/{project}/version")
-    matches = [item for item in versions if item["version_number"] == version]
-    if len(matches) != 1:
-        raise ValueError("Expected exactly one published release version")
-    target = f'/version/{matches[0]["id"]}'
+def sync(api, project, version, settings, artifact_hash):
+    published = api(f"/version_file/{artifact_hash}?algorithm=sha512")
+    if published["project_id"] != project or published["version_number"] != version:
+        raise ValueError("Published artifact belongs to a different project or version")
+    target = f'/version/{published["id"]}'
     api(target, {"environment": settings["environment"]})
     if api(target).get("environment") != settings["environment"]:
         raise ValueError("Version environment read-back did not match repository settings")
@@ -41,7 +41,9 @@ def main():
 
     settings = json.loads(Path("modrinth/project.json").read_text())
     version = os.environ.get("VERSION") or Path("version.txt").read_text().strip()
-    status = sync(api, os.environ["PROJECT_ID"], version, settings)
+    artifact = Path(f"forge/build/libs/dynamicatmosphere-{version}.jar").read_bytes()
+    status = sync(api, os.environ["PROJECT_ID"], version, settings,
+                  hashlib.sha512(artifact).hexdigest())
     print("Verified release environment:", settings["environment"])
     print("Modrinth project status:", status)
 
