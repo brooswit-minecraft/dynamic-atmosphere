@@ -16,6 +16,7 @@ import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
 
 import java.lang.ref.WeakReference;
+import com.mojang.logging.LogUtils;
 
 @EventBusSubscriber(modid = DynamicAtmosphereMod.MODID, value = Dist.CLIENT)
 public final class AtmosphereClient {
@@ -23,6 +24,17 @@ public final class AtmosphereClient {
     private static ClientLevel observedLevel;
     private static ClientLevel unloadedLevel;
     private static WeakReference<Connection> disconnectedConnection = new WeakReference<>(null);
+    private static final AtmosphereDiskCache DISK = new AtmosphereDiskCache(
+        Minecraft.getInstance().gameDirectory.toPath().resolve("dynamicatmosphere-cache"));
+    private static final AtmosphereCacheWriter SAVER = new AtmosphereCacheWriter(DISK);
+    private static String cacheNamespace;
+    private static String cacheDimension;
+    private static boolean cacheDirty;
+    private static int saveTicks;
+
+    static {
+        Runtime.getRuntime().addShutdownHook(new Thread(SAVER::shutdown, "Atmosphere cache shutdown"));
+    }
 
     @EventBusSubscriber(modid = DynamicAtmosphereMod.MODID, value = Dist.CLIENT, bus = EventBusSubscriber.Bus.MOD)
     public static final class Setup {
@@ -40,10 +52,25 @@ public final class AtmosphereClient {
             return;
         }
         syncWorld();
-        SESSION.receive(payload.dimension().toString(), payload.reset(), payload.snapshotEnd(), payload.cells().stream()
+        if (observedLevel != null && !observedLevel.dimension().location().equals(payload.dimension())) return;
+        String server = Minecraft.getInstance().getCurrentServer() == null ? "local"
+            : Minecraft.getInstance().getCurrentServer().ip;
+        String namespace = DISK.namespace(server, payload.worldId(), payload.dimension().toString());
+        if (!namespace.equals(cacheNamespace)) {
+            checkpoint();
+            SESSION.clear();
+            if (observedLevel != null) SESSION.world(payload.dimension().toString());
+            cacheNamespace = namespace;
+            cacheDimension = payload.dimension().toString();
+            try { SESSION.restore(cacheDimension, SAVER.load(namespace)); }
+            catch (java.io.IOException failure) { LogUtils.getLogger().warn("Cannot load disposable atmosphere cache", failure); }
+        }
+        SESSION.receive(payload.dimension().toString(), payload.reset(), payload.snapshotEnd(), payload.authoritativeChunks().stream()
+            .map(chunk -> new AtmosphereClientCache.Chunk(chunk.x(), chunk.z())).toList(), payload.cells().stream()
             .map(cell -> new AtmosphereClientCache.Update(
                 new AtmosphereClientCache.Cell(cell.x(), cell.y(), cell.z()), cell.amount(), cell.capacity()))
             .toList());
+        cacheDirty = true;
     }
 
     @SubscribeEvent
@@ -51,6 +78,11 @@ public final class AtmosphereClient {
         syncWorld();
         if (observedLevel != null && !Minecraft.getInstance().isPaused()) {
             SESSION.cache().advance();
+            if (++saveTicks >= 200) {
+                saveTicks = 0;
+                checkpoint();
+                SAVER.retry();
+            }
         }
     }
 
@@ -88,6 +120,11 @@ public final class AtmosphereClient {
             unloadedLevel = null;
         }
         if (current != observedLevel) {
+            if (current == null || !current.dimension().location().toString().equals(cacheDimension)) {
+                checkpoint();
+                cacheNamespace = null;
+                cacheDimension = null;
+            }
             if (observedLevel != null && current != null) {
                 SESSION.clear();
             }
@@ -98,10 +135,21 @@ public final class AtmosphereClient {
     }
 
     private static void clear() {
+        checkpoint();
+        cacheNamespace = null;
+        cacheDimension = null;
         observedLevel = null;
         unloadedLevel = null;
         SESSION.clear();
         AtmosphereVolumeRenderer.close();
+    }
+
+    private static void checkpoint() {
+        if (cacheNamespace == null || !cacheDirty) return;
+        String namespace = cacheNamespace;
+        var cells = SESSION.cache().exportUpdates();
+        cacheDirty = false;
+        SAVER.submit(namespace, cells);
     }
 
     public static int cachedCellCount() {

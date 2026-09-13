@@ -18,6 +18,71 @@ class AtmosphereClientCacheTest {
     }
 
     @Test
+    void scopedSnapshotReplacesOnlyNamedChunksAndKeepsCachedOutside() {
+        var cache = new AtmosphereClientCache();
+        cache.changeDimension("overworld");
+        cache.restore(List.of(update(A, 400), update(B, 600)));
+        cache.apply("overworld", false, false, List.of(), List.of(update(A, 900)));
+        assertEquals(400, cache.storedAmount(A)); // Restore is not an authoritative snapshot.
+        cache.apply("overworld", true, false, List.of(new AtmosphereClientCache.Chunk(-1, 0)), List.of());
+        assertEquals(400, cache.storedAmount(A));
+        cache.apply("overworld", false, true, List.of(), List.of());
+        assertEquals(0, cache.storedAmount(A));
+        assertEquals(600, cache.storedAmount(B));
+        settle(cache);
+        assertEquals(List.of(update(B, 600)), cache.exportUpdates());
+        cache.apply("overworld", true, true, List.of(), List.of()); // Unsubscribe is not erasure.
+        assertEquals(600, cache.storedAmount(B));
+        cache.apply("overworld", false, false, List.of(), List.of(update(B, 0)));
+        settle(cache);
+        assertTrue(cache.exportUpdates().isEmpty());
+    }
+
+    @Test
+    void authoritativeChunkUnionAndRawExportRetainExcessAndCapacity() {
+        var cache = new AtmosphereClientCache();
+        cache.changeDimension("overworld");
+        cache.restore(List.of(new AtmosphereClientCache.Update(A, 5000, 250), update(B, 600)));
+        assertEquals(5000, cache.exportUpdates().getFirst().amount());
+        assertEquals(250, cache.exportUpdates().getFirst().capacity());
+        cache.apply("overworld", true, false, List.of(new AtmosphereClientCache.Chunk(-1, 0)), List.of(update(A, 700)));
+        cache.apply("overworld", false, true, List.of(new AtmosphereClientCache.Chunk(0, 0)), List.of(update(B, 800)));
+        assertEquals(700, cache.storedAmount(A));
+        assertEquals(800, cache.storedAmount(B));
+        cache.restore(List.of(update(A, 100))); // Late disk load cannot overwrite authority.
+        assertEquals(700, cache.storedAmount(A));
+    }
+
+    @Test
+    void memoryBudgetEvictsOutsideViewLruButNeverTruncatesDetailedView() {
+        var cache = new AtmosphereClientCache(2);
+        cache.changeDimension("overworld");
+        cache.setDetailedView(cell -> cell.x() == 0);
+        var far = new AtmosphereClientCache.Cell(100, 0, 0);
+        cache.restore(List.of(update(A, 100), update(B, 200)));
+        cache.apply("overworld", true, true, List.of(), List.of());
+        cache.apply("overworld", false, false, List.of(), List.of(update(far, 300)));
+        assertEquals(0, cache.storedAmount(A));
+        assertEquals(200, cache.storedAmount(B));
+        assertEquals(300, cache.storedAmount(far));
+        cache.setDetailedView(cell -> true);
+        cache.apply("overworld", false, false, List.of(), List.of(update(A, 100)));
+        assertEquals(3, cache.size());
+    }
+
+    @Test
+    void coarseCacheIsReusedBetweenTenTickRebuilds() {
+        var cache = new AtmosphereClientCache();
+        cache.restore(List.of(update(B, 500)));
+        var first = cache.coarseCells();
+        for (int i = 0; i < 9; i++) cache.advance();
+        assertSame(first, cache.coarseCells());
+        cache.advance();
+        assertNotSame(first, cache.coarseCells());
+        assertEquals(first, cache.coarseCells());
+    }
+
+    @Test
     void storedPressureUsesMillionUnitBoundWhileOpacityStaysNormalized() {
         var cache = new AtmosphereClientCache();
         cache.changeDimension("overworld");

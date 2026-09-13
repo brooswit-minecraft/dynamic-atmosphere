@@ -16,7 +16,7 @@ class AtmosphereClientSessionTest {
         session.receive("overworld", true, update(400));
         session.receive("overworld", false, update(800));
         session.world(null);
-        assertEquals(0, session.cache().size());
+        assertEquals(1, session.cache().size());
         session.world("overworld");
         for (int i = 0; i < 10; i++) session.cache().advance();
         assertEquals(800, session.cache().visible(0).getFirst().amount());
@@ -89,6 +89,22 @@ class AtmosphereClientSessionTest {
         assertEquals(0, session.cache().size());
         assertEquals(1, session.cache().pendingSize());
         session.receive("overworld", false, true, update(800));
+        for (int i = 0; i < 10; i++) session.cache().advance();
+        assertEquals(800, session.cache().visible(0).getFirst().amount());
+    }
+
+    @Test
+    void earlyDiskRestoreSurvivesScopedSnapshotUntilCompletionAndWorldPromotion() {
+        var session = new AtmosphereClientSession();
+        session.restore("overworld", update(400));
+        assertEquals(400, session.cache().visible(0).getFirst().amount());
+        assertEquals(update(400), session.cache().exportUpdates());
+        session.receive("overworld", true, false, List.of(new AtmosphereClientCache.Chunk(-1, 0)), List.of());
+        assertEquals(400, session.cache().visible(0).getFirst().amount());
+        session.world("overworld");
+        assertEquals(400, session.cache().visible(0).getFirst().amount());
+        session.receive("overworld", false, true, List.of(), update(800));
+        assertEquals(400, session.cache().visible(0).getFirst().amount());
         for (int i = 0; i < 10; i++) session.cache().advance();
         assertEquals(800, session.cache().visible(0).getFirst().amount());
     }

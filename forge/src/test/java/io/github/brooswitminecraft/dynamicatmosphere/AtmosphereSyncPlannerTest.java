@@ -132,7 +132,14 @@ class AtmosphereSyncPlannerTest {
         assertTrue(snapshot.stream().allMatch(update -> update.cells().size() <= 512));
         assertEquals(cells, snapshot.stream().flatMap(update -> update.cells().stream()).toList());
 
-        List<AtmosphereSyncPlanner.Update<String>> removals = planner.plan("player", "overworld", List.of());
+        List<AtmosphereSyncPlanner.Chunk> authoritativeChunks = cells.stream()
+            .map(cell -> new AtmosphereSyncPlanner.Chunk(
+                AtmosphereGridLayout.chunkCoordinate(cell.x()),
+                AtmosphereGridLayout.chunkCoordinate(cell.z())))
+            .distinct()
+            .toList();
+        List<AtmosphereSyncPlanner.Update<String>> removals =
+            planner.plan("player", "overworld", authoritativeChunks, List.of());
         assertEquals(10, removals.size());
         assertTrue(removals.stream().noneMatch(AtmosphereSyncPlanner.Update::reset));
         assertTrue(removals.stream().noneMatch(AtmosphereSyncPlanner.Update::snapshotEnd));
@@ -149,5 +156,67 @@ class AtmosphereSyncPlannerTest {
             .map(cell -> cell.x() + ":" + cell.y() + ":" + cell.z())
             .collect(Collectors.toSet());
         assertEquals(expectedCoordinates, removedCoordinates);
+    }
+
+    @Test
+    void trackedChunkMembershipChangeForcesScopedSnapshotIncludingEmptyChunks() {
+        AtmosphereSyncPlanner<String, String> planner = new AtmosphereSyncPlanner<>(512);
+        var oldChunk = new AtmosphereSyncPlanner.Chunk(0, 0);
+        var freshEmptyChunk = new AtmosphereSyncPlanner.Chunk(1, 0);
+        var oldCell = new AtmosphereSyncPlanner.Cell(0, 0, 0, 250, 1000);
+        planner.plan("player", "overworld", List.of(oldChunk), List.of(oldCell));
+
+        List<AtmosphereSyncPlanner.Update<String>> snapshot = planner.plan(
+            "player", "overworld", List.of(oldChunk, freshEmptyChunk), List.of());
+
+        assertEquals(1, snapshot.size());
+        assertTrue(snapshot.getFirst().reset());
+        assertTrue(snapshot.getFirst().snapshotEnd());
+        assertEquals(List.of(oldChunk, freshEmptyChunk), snapshot.getFirst().authoritativeChunks());
+        assertTrue(snapshot.getFirst().cells().isEmpty());
+    }
+
+    @Test
+    void leavingTrackedChunksPreservesTheirCachedCells() {
+        AtmosphereSyncPlanner<String, String> planner = new AtmosphereSyncPlanner<>(512);
+        var retainedChunk = new AtmosphereSyncPlanner.Chunk(0, 0);
+        var departedChunk = new AtmosphereSyncPlanner.Chunk(4, 0);
+        var retainedCell = new AtmosphereSyncPlanner.Cell(0, 0, 0, 250, 1000);
+        var departedCell = new AtmosphereSyncPlanner.Cell(16, 0, 0, 500, 1000);
+        planner.plan("player", "overworld", List.of(retainedChunk, departedChunk),
+            List.of(retainedCell, departedCell));
+
+        List<AtmosphereSyncPlanner.Update<String>> snapshot = planner.plan(
+            "player", "overworld", List.of(retainedChunk), List.of(retainedCell));
+
+        assertEquals(1, snapshot.size());
+        assertTrue(snapshot.getFirst().reset());
+        assertTrue(snapshot.getFirst().snapshotEnd());
+        assertEquals(List.of(retainedChunk), snapshot.getFirst().authoritativeChunks());
+        assertEquals(List.of(retainedCell), snapshot.getFirst().cells());
+        assertTrue(snapshot.stream().flatMap(update -> update.cells().stream())
+            .noneMatch(cell -> cell.x() == departedCell.x() && cell.amount() == 0));
+    }
+
+    @Test
+    void snapshotEndsOnlyAfterChunkAndCellStreamsAreBothComplete() {
+        AtmosphereSyncPlanner<String, String> planner = new AtmosphereSyncPlanner<>(512);
+        List<AtmosphereSyncPlanner.Chunk> chunks = IntStream.range(0, 1_025)
+            .mapToObj(index -> new AtmosphereSyncPlanner.Chunk(index, -index))
+            .toList();
+        var cell = new AtmosphereSyncPlanner.Cell(0, 0, 0, 100, 1000);
+
+        List<AtmosphereSyncPlanner.Update<String>> snapshot =
+            planner.plan("player", "overworld", chunks, List.of(cell));
+
+        assertEquals(3, snapshot.size());
+        assertEquals(512, snapshot.get(0).authoritativeChunks().size());
+        assertEquals(512, snapshot.get(1).authoritativeChunks().size());
+        assertEquals(1, snapshot.get(2).authoritativeChunks().size());
+        assertEquals(List.of(cell), snapshot.getFirst().cells());
+        assertTrue(snapshot.get(1).cells().isEmpty());
+        assertFalse(snapshot.getFirst().snapshotEnd());
+        assertFalse(snapshot.get(1).snapshotEnd());
+        assertTrue(snapshot.getLast().snapshotEnd());
     }
 }

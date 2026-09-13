@@ -79,6 +79,7 @@ final class ForgeAtmospherePrototype {
     private int importsRemaining = MAX_CHUNK_IMPORTS_PER_TICK;
     private long payloadsSent;
     private int playersLastPass;
+    private UUID worldId;
     private final AtmosphereGrid<ResourceKey<Level>> grid = new AtmosphereGrid<>();
     private final Map<ChunkKey, ChunkState> chunks = new HashMap<>();
     private final Map<ChunkKey, LevelChunk> pendingLoads = new LinkedHashMap<>();
@@ -166,6 +167,7 @@ final class ForgeAtmospherePrototype {
         pressureAttempts = 0;
         payloadsSent = 0;
         playersLastPass = 0;
+        worldId = null;
         grid.clear();
         grid.drainDirtyKeys();
         chunks.clear();
@@ -430,6 +432,7 @@ final class ForgeAtmospherePrototype {
         ResourceKey<Level> dimension = player.serverLevel().dimension();
         AtmosphereGrid.CellKey<ResourceKey<Level>> playerCell = cellKey(player.serverLevel(), player.blockPosition());
         var nearby = new ArrayList<AtmosphereGrid.Cell<ResourceKey<Level>>>();
+        var authoritativeChunks = new ArrayList<AtmosphereSyncPlanner.Chunk>();
         // Use Minecraft's subscription, including changes to client/server view distance.
         // ensureImported only reads already loaded chunks and retains its per-tick budget.
         player.getChunkTrackingView().forEach(chunk -> {
@@ -437,6 +440,7 @@ final class ForgeAtmospherePrototype {
             if (state == null || !state.readable) {
                 return;
             }
+            authoritativeChunks.add(new AtmosphereSyncPlanner.Chunk(chunk.x, chunk.z));
             for (var key : state.cells.keySet()) {
                 var cell = grid.get(key);
                 if (cell != null) {
@@ -455,14 +459,25 @@ final class ForgeAtmospherePrototype {
         }
 
         for (AtmosphereSyncPlanner.Update<ResourceKey<Level>> update
-            : syncPlanner.plan(player.getUUID(), dimension, visible)) {
+            : syncPlanner.plan(player.getUUID(), dimension, authoritativeChunks, visible)) {
+            List<AtmosphereGridPayload.Chunk> chunks = update.authoritativeChunks().stream()
+                .map(chunk -> new AtmosphereGridPayload.Chunk(chunk.x(), chunk.z()))
+                .toList();
             List<AtmosphereGridPayload.Cell> cells = update.cells().stream()
                 .map(cell -> new AtmosphereGridPayload.Cell(cell.x(), cell.y(), cell.z(), cell.amount(), cell.capacity()))
                 .toList();
             PacketDistributor.sendToPlayer(player, new AtmosphereGridPayload(
-                update.dimension().location(), update.reset(), update.snapshotEnd(), cells));
+                update.dimension().location(), worldId(player.serverLevel().getServer()),
+                update.reset(), update.snapshotEnd(), chunks, cells));
             payloadsSent++;
         }
+    }
+
+    private UUID worldId(MinecraftServer server) {
+        if (worldId == null) {
+            worldId = AtmosphereWorldIdentity.get(server);
+        }
+        return worldId;
     }
 
     /** Negative means unknown, including loaded chunks whose import is budget-deferred. */

@@ -5,6 +5,21 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class AtmosphereVolumeGeometryTest {
+    @Test
+    void coarseGeometryUsesSixteenBlockBoundsAndAtMostThreePlanes() {
+        var camera = new AtmosphereVolumeGeometry.Point(-24, -8, -24);
+        var slices = AtmosphereVolumeGeometry.coarseSlices(-1, -1, -1, 500, camera,
+            new AtmosphereVolumeGeometry.Point(1, 0, 1));
+        assertFalse(slices.isEmpty());
+        assertTrue(slices.size() <= 3);
+        for (var slice : slices) {
+            for (var point : slice.vertices()) {
+                assertTrue(point.x() >= 8 - 1e-6 && point.x() <= 24 + 1e-6);
+                assertTrue(point.y() >= -8 - 1e-6 && point.y() <= 8 + 1e-6);
+                assertTrue(point.z() >= 8 - 1e-6 && point.z() <= 24 + 1e-6);
+            }
+        }
+    }
     private static final AtmosphereClientCache.Cell CELL = new AtmosphereClientCache.Cell(0, 0, 0);
     private static final AtmosphereVolumeGeometry.Point FORWARD = new AtmosphereVolumeGeometry.Point(0, 0, 1);
 

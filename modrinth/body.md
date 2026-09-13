@@ -9,7 +9,7 @@ world before upgrading; restoring that backup is required to undo terrain damage
 The **atmospheric grid** divides space into 4x4x4-block cells. Water fog,
 high-terrain clouds, rain landing on exposed surfaces, and dark exposed ground add
 material. There is no natural decay: material spreads by equalizing fullness
-across six face-adjacent cells. In 0.6.1-alpha.1, simulation/source cadence is
+across six face-adjacent cells. Retaining the 0.6.1 tuning, simulation/source cadence is
 `25 * cellSize / 16` ticks: 4-block cells average 6.25 ticks using 6/7 intervals.
 Simulation work remains budgeted across ticks. Clients render
 translucent cells with opacity based on material amount divided by capacity.
@@ -20,8 +20,11 @@ This is an incremental alpha, not a complete weather simulation.
 - Server-owned material amounts, synchronized to nearby clients.
 - Bounded work near players, without forcing chunks to load.
 - Producer offsets reach 96 blocks instead of 12, with the same eight positions sampled per pass.
-- Visibility follows Minecraft's tracked chunks and the effective client render distance, loaded chunks, and frustum, without a fixed atmospheric radius or nearest-cell cutoff.
-- No 4,096-cell cache or 512-cell draw cap. Client state follows subscriptions/removals and lifecycle clearing; bounded GPU batches do not drop farther cells.
+- Live cell visibility follows Minecraft's tracked chunks and the effective client render distance, loaded chunks, and frustum, without a fixed atmospheric radius or nearest-cell cutoff.
+- Persistent client visuals add coarse far fog out to four times the client view distance, only in previously seen areas. Cached fog can be stale; it is approximate visual history, not simulation or distant chunk loading.
+- Client disk files live under `gameDirectory/dynamicatmosphere-cache`, keyed by hashed server/world/dimension/layout identity. Changed chunks are written atomically every 10 seconds and on disconnect, bounded to 64 MiB and 8,192 files; RAM restore is limited to 200,000 cells.
+- A stable world UUID in server SavedData keeps worlds separate. A newly reset world gets a fresh UUID; this update does not require a world reset. Fresh server observations supersede cached visuals for their snapshot/chunk scope and never import cached material into simulation.
+- No 512-cell draw cap; bounded GPU batches render the live view independently of the persistent visual-cache limits.
 - Delta sync remains every 20 ticks, full snapshots every 200, and work at most 128 source cells per tick.
 - Sparse per-Minecraft-chunk storage replaces the global 1,024-cell cap. Work and network updates are budgeted, not total stored cell count.
 - Capacity is proportional to vacant air blocks (0..64): fewer air blocks need less material to fill a cell.
@@ -45,9 +48,14 @@ not terrain-clipped volumetric fog.
 Install the same version on **both server and client**, or in a NeoForge 1.21.1
 single-player instance. No extra graphics dependency is required. This requirement
 starts with 0.3.0-alpha.1; older releases were particle-only.
-**This release uses protocol 4: update both sides; protocol-3 clients are
-incompatible.** Multi-packet snapshots replace the client view only on completion,
-preserving opacity for retained cells.
+**0.7.0-alpha.1 uses protocol 5: update both sides; earlier protocols are
+incompatible.** Multi-packet snapshots complete atomically, with world identity,
+snapshot scope, and chunk freshness separating live observations from cached
+visual history.
+
+Local runtime testing is intentionally skipped at the user's request. CI and
+hosted status checks do not establish visual/cache correctness; server/client
+validation remains with user testing. Destructive-pressure warnings still apply.
 
 Source, issues, and primary release artifacts are hosted on
 [GitHub](https://github.com/brooswit-minecraft/dynamic-atmosphere).

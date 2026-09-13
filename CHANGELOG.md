@@ -1,3 +1,16 @@
+# 0.7.0-alpha.1
+
+- Add a persistent client visual cache and coarse far fog extending to four times the client view distance, only in previously seen areas. Cached fog is approximate and can be stale; it is not server simulation and does not load or simulate distant chunks.
+- Protocol 5 scopes snapshots and chunk freshness to a stable world UUID stored in server SavedData. Update client and server together; earlier protocols are incompatible. Separate worlds have separate identities, and a newly reset world receives a fresh UUID.
+- Store client visuals under `gameDirectory/dynamicatmosphere-cache`, keyed by hashed server/world/dimension/layout identity. Write changed chunks atomically every 10 seconds and on disconnect.
+- Bound disk caching to 64 MiB and 8,192 files, with a 200,000-cell RAM restore limit. Fresh server snapshots supersede cached observations for their scope; cached data never restores server material.
+- Include the 0.6.1 cadence tuning: current 4-block cells average 6.25 ticks, producer offsets reach 96 blocks, and simulation work remains budgeted.
+- Retain default-enabled destructive pressure and all backup warnings below. No world reset is required.
+
+Minor pre-1.0 feature release. Implementation and release preparation are in
+progress; no local runtime testing is requested. CI verification and hosted
+status checks are separate from user-run server/client validation.
+
 # 0.6.1-alpha.1
 
 - Tune simulation/source cadence to `25 * cellSize / 16` ticks: quarter the old 100-tick base, then scale by cell size. Current 4-block cells average 6.25 ticks using 6/7-tick intervals; 16-block cells would use 25 ticks, 1-block cells 1.5625, and 32-block cells 50.

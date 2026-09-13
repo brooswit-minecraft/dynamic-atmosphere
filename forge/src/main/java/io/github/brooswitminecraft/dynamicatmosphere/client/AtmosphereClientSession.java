@@ -10,7 +10,20 @@ public final class AtmosphereClientSession {
     private String dimension;
     private String pendingDimension;
 
-    public AtmosphereClientCache cache() { return active; }
+    public AtmosphereClientCache cache() { return dimension == null ? pending : active; }
+
+    public void restore(String packetDimension, List<AtmosphereClientCache.Update> updates) {
+        if (dimension != null) {
+            if (dimension.equals(packetDimension)) active.restore(updates);
+        } else {
+            if (!packetDimension.equals(pendingDimension)) {
+                pending.clear();
+                pendingDimension = packetDimension;
+                pending.changeDimension(packetDimension);
+            }
+            pending.restore(updates);
+        }
+    }
 
     public void world(String next) {
         if (Objects.equals(dimension, next)) {
@@ -33,18 +46,29 @@ public final class AtmosphereClientSession {
     }
 
     public void receive(String packetDimension, boolean reset, boolean snapshotEnd, List<AtmosphereClientCache.Update> updates) {
+        receive(packetDimension, reset, snapshotEnd, null, updates);
+    }
+
+    public void receive(String packetDimension, boolean reset, boolean snapshotEnd,
+                        List<AtmosphereClientCache.Chunk> authoritativeChunks, List<AtmosphereClientCache.Update> updates) {
         if (dimension != null) {
-            active.apply(packetDimension, reset, snapshotEnd, updates);
+            apply(active, packetDimension, reset, snapshotEnd, authoritativeChunks, updates);
         } else {
             if (reset) {
-                pending.clear();
+                if (!packetDimension.equals(pendingDimension)) pending.clear();
                 pendingDimension = packetDimension;
                 pending.changeDimension(packetDimension);
             }
             if (packetDimension.equals(pendingDimension)) {
-                pending.apply(packetDimension, reset, snapshotEnd, updates);
+                apply(pending, packetDimension, reset, snapshotEnd, authoritativeChunks, updates);
             }
         }
+    }
+
+    private static void apply(AtmosphereClientCache cache, String dimension, boolean reset, boolean end,
+                              List<AtmosphereClientCache.Chunk> chunks, List<AtmosphereClientCache.Update> updates) {
+        if (chunks == null) cache.apply(dimension, reset, end, updates);
+        else cache.apply(dimension, reset, end, chunks, updates);
     }
 
     public void clear() {

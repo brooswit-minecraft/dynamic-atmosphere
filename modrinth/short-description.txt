@@ -1,1 +1,1 @@
-A persistent fog grid for NeoForge 1.21.1 that follows Minecraft view distance, with spreading and destructive pressure. Back up worlds: terrain can be damaged.
+Persistent atmospheric grid and client visual cache with coarse far fog in previously seen areas for NeoForge 1.21.1. Destructive pressure can damage terrain: back up worlds.

@@ -24,12 +24,12 @@ boundaries and exhausted work/search budgets leave work pending, never authorize
 pressure destruction, and do not discard material.
 Excess that still cannot escape remains blocked and reported, not discarded;
 displacement is not unlimited.
-In 0.6.1-alpha.1, simulation/source cadence is `25 * cellSize / 16` ticks:
+Retaining the 0.6.1 tuning, simulation/source cadence is `25 * cellSize / 16` ticks:
 the old 100-tick base is quartered, then scaled by cell size. Current 4-block
 cells average **6.25 ticks** using 6/7-tick intervals. Size 16 would use 25 ticks,
 size 1 averages 1.5625, and size 32 uses 50. Actual progress remains work-budgeted.
 Producer offsets now reach 96 blocks instead of 12, using the same eight sampled
-positions per pass and loaded-only checks. Visibility follows Minecraft's actual
+positions per pass and loaded-only checks. Live cell visibility follows Minecraft's actual
 tracked chunks and the client's effective render distance, loaded chunks, and
 frustum, with no fixed atmospheric radius or nearest-cell cutoff. Delta sync stays every 20 ticks, full snapshots
 every 200 ticks, and simulation processes at most 128 source cells per tick.
@@ -63,14 +63,34 @@ units; capacity remains 0..1000.
 
 Install this version on **both server and client**, or in a single-player NeoForge
 instance. Earlier particle-only releases did not require a client installation;
-the new grid renderer and sync protocol do. **Protocol 4 requires updating both
-sides together; older protocol-3 clients cannot connect.** Large snapshots use
-512-cell packets and a completion marker: the client replaces the view only
-when complete, preserving retained opacity. Client memory follows the subscribed
-view plus one incoming snapshot; removals, replacement snapshots, dimension
-changes, and disconnect release old state. There is no 4,096-cell cache cap or
-512-cell draw cap. GPU batches bound buffer size without dropping distant cells.
+the new grid renderer and sync protocol do. **Protocol 5 requires updating both
+sides together; earlier-protocol clients cannot connect.** Large snapshots use
+512-cell packets and a completion marker. Snapshot scope and chunk freshness
+distinguish current observations from retained visual history. There is no
+512-cell draw cap; GPU batches bound buffer size.
 No world reset is needed. Both atmospheric amounts and broken terrain are saved.
+
+## Persistent Visual Cache
+
+The 0.7.0-alpha.1 feature release retains previously seen atmospheric visuals
+across client sessions. Coarse far fog extends to **four times the client view
+distance**, but only in previously seen areas. It can be stale: this is an
+approximate visual cache, not simulation, current terrain knowledge, or a way to
+load distant chunks. Fresh server observations supersede cached visuals for
+their snapshot/chunk scope; cached visuals never add material to the server.
+
+A stable world UUID stored in server SavedData scopes protocol-5 snapshots and
+chunk freshness. Client files live under
+`gameDirectory/dynamicatmosphere-cache`, keyed by hashed server/world/dimension/
+layout identity. Worlds are separate; a newly reset world receives a fresh UUID
+instead of reusing the old world's visuals. This update does not require a reset.
+
+Changed chunks are written atomically every 10 seconds and on disconnect.
+The disk cache is bounded to **64 MiB and 8,192 files**, and restoring cached
+visuals into RAM is limited to **200,000 cells**. These are client visual-cache
+limits, not limits on authoritative chunk-persisted simulation. Disconnect and
+dimension changes clear live session state without discarding persisted visual
+history belonging to another scope.
 
 Operators can run `/dynamicatmosphere status` to inspect runtime counters and
 `/dynamicatmosphere demo` as a player to add material nearby for visual testing.
@@ -142,10 +162,11 @@ workflow is only for initial provisioning; do not create a second project.
 
 ## Runtime Verification
 
-Test the actual built jar in a disposable NeoForge 21.1.250 server before adding
-it to Sickos. Require a clean `Done` startup, the mod's startup log, a successful
-`dynamicatmosphere status` command, and increasing tick/pass counters. Join with
-a client and run the demo to verify rendering. A build alone is not runtime proof.
+Local server/client testing is intentionally skipped for this release at the
+user's request. CI verifies the build; hosted checks verify startup and status
+after release. User-run server/client checks cover visuals, pressure, and
+save/reload behavior. Neither a build nor a healthy server proves client visuals
+or cache correctness; those checks remain pending user verification.
 
 After adding the published Modrinth version to Sickos, use Sickos' normal version
 bump and CI release/deploy path. Verify the hosted jar hash, restarted server, and

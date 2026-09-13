@@ -31,6 +31,17 @@ public final class AtmosphereVolumeGeometry {
     }
 
     public static List<Slice> slices(AtmosphereClientCache.Cell cell, float amount, Point camera, Point look) {
+        return boxSlices((double) cell.x() * CELL_SIZE, (double) cell.y() * CELL_SIZE, (double) cell.z() * CELL_SIZE,
+            CELL_SIZE, SLICE_SPACING, amount, camera, look);
+    }
+
+    public static List<Slice> coarseSlices(int sectionX, int sectionY, int sectionZ, float amount, Point camera, Point look) {
+        return boxSlices((double) sectionX * 16, (double) sectionY * 16, (double) sectionZ * 16,
+            16, 16, amount, camera, look);
+    }
+
+    private static List<Slice> boxSlices(double x, double y, double z, int size, double spacing,
+                                         float amount, Point camera, Point look) {
         Point forward = look.normalized();
         Point right = forward.cross(Math.abs(forward.y) < 0.9 ? new Point(0, 1, 0) : new Point(1, 0, 0)).normalized();
         Point up = right.cross(forward);
@@ -40,9 +51,9 @@ public final class AtmosphereVolumeGeometry {
         for (int i = 0; i < 8; i++) {
             // Subtract in double precision before submitting floats to avoid far-world jitter.
             Point point = new Point(
-                (double) cell.x() * CELL_SIZE + ((i & 1) == 0 ? 0 : CELL_SIZE) - camera.x,
-                (double) cell.y() * CELL_SIZE + ((i & 2) == 0 ? 0 : CELL_SIZE) - camera.y,
-                (double) cell.z() * CELL_SIZE + ((i & 4) == 0 ? 0 : CELL_SIZE) - camera.z);
+                x + ((i & 1) == 0 ? 0 : size) - camera.x,
+                y + ((i & 2) == 0 ? 0 : size) - camera.y,
+                z + ((i & 4) == 0 ? 0 : size) - camera.z);
             corners[i] = point;
             near = Math.min(near, point.dot(forward));
             far = Math.max(far, point.dot(forward));
@@ -53,10 +64,10 @@ public final class AtmosphereVolumeGeometry {
         }
         // Global view-depth planes keep adjacent cells' samples aligned; partial end slabs
         // receive proportionally smaller opacity instead of adding an opaque boundary shell.
-        for (double start = Math.floor(Math.max(near, 0.05) / SLICE_SPACING) * SLICE_SPACING;
-             start < far; start += SLICE_SPACING) {
+        for (double start = Math.floor(Math.max(near, 0.05) / spacing) * spacing;
+             start < far; start += spacing) {
             double low = Math.max(Math.max(start, near), 0.05);
-            double high = Math.min(start + SLICE_SPACING, far);
+            double high = Math.min(start + spacing, far);
             if (high <= low) {
                 continue;
             }
