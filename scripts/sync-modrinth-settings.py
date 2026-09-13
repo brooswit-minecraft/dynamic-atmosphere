@@ -2,27 +2,43 @@
 import hashlib
 import json
 import os
+import time
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+def read_until(api, path, predicate=lambda value: True, wait=time.sleep):
+    # Modrinth's read replicas can briefly lag successful publication/updates.
+    for attempt in range(6):
+        try:
+            result = api(path)
+            if predicate(result):
+                return result
+        except HTTPError as error:
+            if error.code != 404 and error.code < 500:
+                raise
+            if attempt == 5:
+                raise
+        if attempt < 5:
+            wait(min(2 ** (attempt + 1), 30))
+    raise ValueError(f"Modrinth read-back did not converge: {path}")
+
+
 def sync(api, project, version, settings, artifact_hash):
-    published = api(f"/version_file/{artifact_hash}?algorithm=sha512")
+    published = read_until(api, f"/version_file/{artifact_hash}?algorithm=sha512")
     if published["project_id"] != project or published["version_number"] != version:
         raise ValueError("Published artifact belongs to a different project or version")
     target = f'/version/{published["id"]}'
     api(target, {"environment": settings["environment"]})
-    if api(target).get("environment") != settings["environment"]:
-        raise ValueError("Version environment read-back did not match repository settings")
+    read_until(api, target, lambda item: item.get("environment") == settings["environment"])
     # The project's environment list is derived from all its versions.
     api(f"/project/{project}", {"side_types_migration_review_status": "reviewed"})
-    result = api(f"/project/{project}")
-    if settings["environment"] not in result.get("environment", []):
-        raise ValueError("Project environment does not include this release")
+    result = read_until(api, f"/project/{project}",
+                        lambda item: settings["environment"] in item.get("environment", []))
     if settings.get("submit_for_review") and result["status"] in ("draft", "rejected"):
         api(f"/project/{project}", {"status": "processing"})
-        result = api(f"/project/{project}")
-        if result["status"] not in ("processing", "approved", "unlisted"):
-            raise ValueError("Project submission did not take effect")
+        result = read_until(api, f"/project/{project}",
+                            lambda item: item["status"] in ("processing", "approved", "unlisted"))
     return result["status"]
 
 
