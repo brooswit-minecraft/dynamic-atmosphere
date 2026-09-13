@@ -23,7 +23,7 @@ def api(path, patch=None):
 api("", {"environment": settings["environment"],
          "side_types_migration_review_status": "reviewed"})
 result = api("")
-if result.get("environments") != [settings["environment"]]:
+if result.get("environment") != [settings["environment"]]:
     raise SystemExit("Modrinth environment read-back did not match repository settings")
 print("Verified Modrinth environment:", settings["environment"])
 if settings.get("submit_for_review") and result["status"] in ("draft", "rejected"):
