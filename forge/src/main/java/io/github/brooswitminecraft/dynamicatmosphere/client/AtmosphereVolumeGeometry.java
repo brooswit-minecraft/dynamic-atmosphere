@@ -26,8 +26,15 @@ public final class AtmosphereVolumeGeometry {
 
     public record Slice(double depth, float alpha, List<Point> vertices) { }
 
-    static float colorChannel(int level, float fogChannel, float nearGray) {
-        return Math.clamp(level == 0 ? nearGray : fogChannel, 0, 1);
+    static float horizonBlend(double distance, double viewBlocks) {
+        double t = Math.clamp((distance - viewBlocks * 0.5) / Math.max(1, viewBlocks * 0.5), 0, 1);
+        return (float) (t * t * (3 - 2 * t));
+    }
+
+    static float colorChannel(float horizonBlend, float fogChannel, float nearGray) {
+        float blend = Math.clamp(horizonBlend, 0, 1);
+        float gray = Math.clamp(nearGray, 0, 1);
+        return gray + (Math.clamp(fogChannel, 0, 1) - gray) * blend;
     }
 
     static AtmosphereClientCache.Cell cameraCell(Point camera) {

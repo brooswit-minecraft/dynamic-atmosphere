@@ -48,23 +48,24 @@ final class ForgeAtmospherePrototype {
     private static final int SYNC_INTERVAL = 20;
     private static final int FULL_SNAPSHOT_INTERVAL = 200;
     private static final int HIGH_TERRAIN_ABOVE_SEA = 24;
-    private static final int CLOUD_PARTICLE_CAP = 16;
     private static final int DEMO_PARTICLE_CAP = 24;
     private static final int MAX_CHUNK_IMPORTS_PER_TICK = 8;
+    private static final int MAX_PRODUCER_CHUNKS_PER_TICK = 32;
+    private static final double PRODUCER_CHANCE = 0.25;
     private static final int WATER_EMISSION_PER_DEPTH = 20;
     private static final int HIGH_TERRAIN_EMISSION = 40;
-    private static final int RAIN_EMISSION = 40;
+    private static final int RAIN_CLOUD_EMISSION = 320;
+    private static final int RAIN_CLOUD_HEIGHT = 192;
     private static final int MAX_WATER_DEPTH = 8;
-    private static final int SOURCE_RADIUS_MULTIPLIER = 8;
-    private static final int[][] SAMPLE_OFFSETS = {
-        {0, 0}, {12, 0}, {-12, 0}, {0, 12}, {0, -12}, {8, 8}, {-8, -8}, {8, -8}
-    };
     private static final int[][] DEMO_CELL_OFFSETS = {
         {0, 0, 0}, {1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}
     };
 
     private long serverTicks;
-    private long automaticPasses;
+    private long producerCycles;
+    private long producerChecks;
+    private long producerSamples;
+    private int producerLastCycleChunks;
     private long particlesSent;
     private long gridEmissions;
     private long rainEmissions;
@@ -73,6 +74,7 @@ final class ForgeAtmospherePrototype {
     private long condensationChecks;
     private long waterBlocksCreated;
     private long materialCondensed;
+    private long waterRemovalEmissions;
     private int blockedOverflow;
     private int sourcesProcessed;
     private boolean workRemaining;
@@ -82,11 +84,11 @@ final class ForgeAtmospherePrototype {
     private int pressureAttempts;
     private int importsRemaining = MAX_CHUNK_IMPORTS_PER_TICK;
     private long payloadsSent;
-    private int playersLastPass;
     private UUID worldId;
     private final AtmosphereGrid<ResourceKey<Level>> grid = new AtmosphereGrid<>();
     private final Map<ChunkKey, ChunkState> chunks = new HashMap<>();
     private final Map<ChunkKey, LevelChunk> pendingLoads = new LinkedHashMap<>();
+    private final AtmosphereProducerSchedule<ChunkKey> producerSchedule = new AtmosphereProducerSchedule<>();
     private final AtmosphereSyncPlanner<UUID, ResourceKey<Level>> syncPlanner =
         new AtmosphereSyncPlanner<>(AtmosphereGridPayload.MAX_CELLS_PER_PAYLOAD);
 
@@ -94,10 +96,12 @@ final class ForgeAtmospherePrototype {
         serverTicks++;
         importsRemaining = MAX_CHUNK_IMPORTS_PER_TICK;
         importPendingChunks(event.getServer());
-        if (AtmosphereGridLayout.isSimulationTick(serverTicks)) {
-            pressureAttempts = 0;
-            sampleSources(event.getServer());
+        drainWaterTransitions(event.getServer());
+        if (serverTicks % AtmosphereGridLayout.PRODUCER_INTERVAL_TICKS == 0) {
+            beginProducerCycle();
         }
+        processProducerChunks(event.getServer());
+        pressureAttempts = 0;
         advanceSimulation(event.getServer());
         flushDirtyChunks();
         if (serverTicks % SYNC_INTERVAL == 0) {
@@ -156,7 +160,10 @@ final class ForgeAtmospherePrototype {
 
     void onServerStopped(ServerStoppedEvent event) {
         serverTicks = 0;
-        automaticPasses = 0;
+        producerCycles = 0;
+        producerChecks = 0;
+        producerSamples = 0;
+        producerLastCycleChunks = 0;
         particlesSent = 0;
         gridEmissions = 0;
         rainEmissions = 0;
@@ -165,6 +172,7 @@ final class ForgeAtmospherePrototype {
         condensationChecks = 0;
         waterBlocksCreated = 0;
         materialCondensed = 0;
+        waterRemovalEmissions = 0;
         blockedOverflow = 0;
         sourcesProcessed = 0;
         workRemaining = false;
@@ -173,12 +181,13 @@ final class ForgeAtmospherePrototype {
         pressureSearchLimits = 0;
         pressureAttempts = 0;
         payloadsSent = 0;
-        playersLastPass = 0;
         worldId = null;
         grid.clear();
         grid.drainDirtyKeys();
         chunks.clear();
         pendingLoads.clear();
+        producerSchedule.clear();
+        AtmosphereWaterTransitions.clear();
         syncPlanner.clear();
     }
 
@@ -195,11 +204,16 @@ final class ForgeAtmospherePrototype {
                 + ", cells=" + grid.size()
                 + ", loadedChunks=" + chunks.size()
                 + ", pendingImports=" + pendingLoads.size()
-                + ", sampleInterval=" + AtmosphereGridLayout.simulationIntervalTicks(AtmosphereGridLayout.CELL_SIZE)
-                + ", sourceRadius=" + 12 * SOURCE_RADIUS_MULTIPLIER
+                + ", simulationInterval=" + AtmosphereGridLayout.simulationIntervalTicks()
+                + ", producerInterval=" + AtmosphereGridLayout.PRODUCER_INTERVAL_TICKS
+                + ", producerChance=" + PRODUCER_CHANCE
+                + ", producerCycles=" + producerCycles
+                + ", producerChecks=" + producerChecks
+                + ", producerSamples=" + producerSamples
+                + ", producerBacklog=" + producerSchedule.pending()
+                + ", producerLastCycleChunks=" + producerLastCycleChunks
                 + ", syncInterval=" + SYNC_INTERVAL
                 + ", fullSnapshotInterval=" + FULL_SNAPSHOT_INTERVAL
-                + ", passes=" + automaticPasses
                 + ", emissions=" + gridEmissions
                 + ", rainEmissions=" + rainEmissions
                 + ", darkGroundEmissions=" + darkGroundEmissions
@@ -207,6 +221,7 @@ final class ForgeAtmospherePrototype {
                 + ", condensationChecks=" + condensationChecks
                 + ", waterBlocksCreated=" + waterBlocksCreated
                 + ", materialCondensed=" + materialCondensed
+                + ", waterRemovalEmissions=" + waterRemovalEmissions
                 + ", blockedOverflow=" + blockedOverflow
                 + ", sourcesProcessed=" + sourcesProcessed
                 + ", workRemaining=" + workRemaining
@@ -216,7 +231,6 @@ final class ForgeAtmospherePrototype {
                 + ", pressureSearchLimits=" + pressureSearchLimits
                 + ", payloads=" + payloadsSent
                 + ", particles=" + particlesSent
-                + ", playersLastPass=" + playersLastPass
                 + ". Server authoritative; no passive decay; six-neighbor spreading with air-space capacity."), false);
         return 1;
     }
@@ -246,15 +260,53 @@ final class ForgeAtmospherePrototype {
         return populated;
     }
 
-    private void sampleSources(MinecraftServer server) {
-        automaticPasses++;
-        playersLastPass = 0;
-        Set<SourceKey> emittedSources = new HashSet<>();
-        List<ServerPlayer> players = server.getPlayerList().getPlayers();
-        for (ServerPlayer player : players) {
-            playersLastPass++;
-            sampleAutomatic(player, emittedSources);
+    private void beginProducerCycle() {
+        List<ChunkKey> loaded = chunks.entrySet().stream()
+            .filter(entry -> entry.getValue().readable)
+            .map(Map.Entry::getKey)
+            .sorted(Comparator.comparing((ChunkKey key) -> key.dimension().location().toString())
+                .thenComparingInt(ChunkKey::x)
+                .thenComparingInt(ChunkKey::z))
+            .toList();
+        if (producerSchedule.beginCycle(loaded)) {
+            producerCycles++;
+            producerLastCycleChunks = loaded.size();
         }
+    }
+
+    private void drainWaterTransitions(MinecraftServer server) {
+        for (var entry : AtmosphereWaterTransitions.drain().entrySet()) {
+            var key = entry.getKey();
+            ServerLevel level = server.getLevel(key.dimension());
+            ChunkKey chunkKey = new ChunkKey(key.dimension(), AtmosphereGridLayout.chunkCoordinate(key.x()),
+                AtmosphereGridLayout.chunkCoordinate(key.z()));
+            ChunkState state = chunks.get(chunkKey);
+            if (level == null || state == null || !state.readable
+                || level.getChunkSource().getChunkNow(chunkKey.x(), chunkKey.z()) != state.chunk) {
+                continue;
+            }
+            int capacity = capacityAt(level, key);
+            if (capacity >= 0 && grid.emit(key, entry.getValue(), serverTicks, capacity)) {
+                waterRemovalEmissions += entry.getValue() / AtmosphereWaterTransitions.MATERIAL_PER_BLOCK;
+                gridEmissions++;
+            }
+        }
+    }
+
+    /** A cycle is never replaced while backlogged; bounded work continues on following ticks. */
+    private void processProducerChunks(MinecraftServer server) {
+        Set<SourceKey> emittedSources = new HashSet<>();
+        for (ChunkKey key : producerSchedule.poll(MAX_PRODUCER_CHUNKS_PER_TICK,
+            candidate -> isProducerChunkActive(server, candidate))) {
+            sampleAutomaticChunk(server, key, emittedSources);
+        }
+    }
+
+    private boolean isProducerChunkActive(MinecraftServer server, ChunkKey key) {
+        ServerLevel level = server.getLevel(key.dimension());
+        ChunkState state = chunks.get(key);
+        return level != null && state != null && state.readable
+            && level.getChunkSource().getChunkNow(key.x(), key.z()) == state.chunk;
     }
 
     private void advanceSimulation(MinecraftServer server) {
@@ -359,60 +411,60 @@ final class ForgeAtmospherePrototype {
         return true;
     }
 
-    private void sampleAutomatic(ServerPlayer player, Set<SourceKey> emittedSources) {
-        ServerLevel level = player.serverLevel();
-        BlockPos center = player.blockPosition();
-        int sent = 0;
+    private void sampleAutomaticChunk(MinecraftServer server, ChunkKey key, Set<SourceKey> emittedSources) {
+        ServerLevel level = server.getLevel(key.dimension());
+        ChunkState state = chunks.get(key);
+        if (level == null || state == null || !state.readable) return;
+        producerChecks++;
+        if (!AtmosphereProducerSchedule.passesChance(PRODUCER_CHANCE, level.random.nextDouble())) return;
+        producerSamples++;
 
-        for (int[] offset : SAMPLE_OFFSETS) {
-            int x = center.getX() + offset[0] * SOURCE_RADIUS_MULTIPLIER;
-            int z = center.getZ() + offset[1] * SOURCE_RADIUS_MULTIPLIER;
-            BlockPos loadedProbe = new BlockPos(x, center.getY(), z);
-            if (!level.hasChunkAt(loadedProbe)) {
-                continue;
-            }
+        int localX = level.random.nextInt(16);
+        int localZ = level.random.nextInt(16);
+        int x = state.chunk.getPos().getMinBlockX() + localX;
+        int z = state.chunk.getPos().getMinBlockZ() + localZ;
+        int surfaceY = state.chunk.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, localX, localZ) + 1;
+        BlockPos surface = new BlockPos(x, surfaceY - 1, z);
+        if (!level.isInWorldBounds(surface)) return;
 
-            int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
-            BlockPos surface = new BlockPos(x, surfaceY - 1, z);
-            if (!level.hasChunkAt(surface)) {
-                continue;
-            }
-
-            sampleLandingSources(level, loadedProbe, emittedSources);
-            if (level.getFluidState(surface).is(FluidTags.WATER)) {
-                int depth = sampleLoadedWaterDepth(level, surface);
-                AtmosphereGrid.CellKey<ResourceKey<Level>> cell =
-                    cellKey(level, new BlockPos(x, surfaceY, z));
-                SourceKey source = new SourceKey(SourceKind.WATER, level.dimension(), surface.immutable());
-                emitSource(level, emittedSources, source, cell, depth * WATER_EMISSION_PER_DEPTH);
-            } else if (surfaceY >= level.getSeaLevel() + HIGH_TERRAIN_ABOVE_SEA) {
-                AtmosphereGrid.CellKey<ResourceKey<Level>> cell =
-                    cellKey(level, new BlockPos(x, surfaceY + 5, z));
-                SourceKey source = new SourceKey(SourceKind.HIGH_TERRAIN, level.dimension(), surface.immutable());
-                emitSource(level, emittedSources, source, cell, HIGH_TERRAIN_EMISSION);
-                if (sent < CLOUD_PARTICLE_CAP) {
-                    int count = Math.min(4, CLOUD_PARTICLE_CAP - sent);
-                    sent += sendCloudParticles(
-                        player, x + 0.5, surfaceY + 5.0, z + 0.5, count, 3.0, 0.8, 3.0, 0.015);
-                }
-            }
+        sampleLandingSources(level, state.chunk, x, z, localX, localZ, emittedSources);
+        if (state.chunk.getFluidState(surface).is(FluidTags.WATER)) {
+            int depth = sampleLoadedWaterDepth(state.chunk, surface);
+            AtmosphereGrid.CellKey<ResourceKey<Level>> cell = cellKey(level, new BlockPos(x, surfaceY, z));
+            SourceKey source = new SourceKey(SourceKind.WATER, level.dimension(), surface.immutable());
+            emitSource(level, emittedSources, source, cell, depth * WATER_EMISSION_PER_DEPTH);
+        } else if (surfaceY >= level.getSeaLevel() + HIGH_TERRAIN_ABOVE_SEA) {
+            AtmosphereGrid.CellKey<ResourceKey<Level>> cell = cellKey(level, new BlockPos(x, surfaceY + 5, z));
+            SourceKey source = new SourceKey(SourceKind.HIGH_TERRAIN, level.dimension(), surface.immutable());
+            emitSource(level, emittedSources, source, cell, HIGH_TERRAIN_EMISSION);
         }
     }
 
-    private void sampleLandingSources(ServerLevel level, BlockPos loadedProbe, Set<SourceKey> emittedSources) {
-        BlockPos landing = level.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING, loadedProbe);
+    private void sampleLandingSources(
+        ServerLevel level,
+        LevelChunk chunk,
+        int x,
+        int z,
+        int localX,
+        int localZ,
+        Set<SourceKey> emittedSources
+    ) {
+        BlockPos landing = new BlockPos(x, chunk.getHeight(Heightmap.Types.MOTION_BLOCKING, localX, localZ) + 1, z);
         BlockPos surface = landing.below();
         if (!level.isInWorldBounds(landing)
             || !level.isInWorldBounds(surface)
-            || !level.hasChunkAt(landing)
-            || level.getBlockState(surface).isAir()) {
+            || chunk.getBlockState(surface).isAir()) {
             return;
         }
 
-        AtmosphereGrid.CellKey<ResourceKey<Level>> cell = cellKey(level, landing);
-        SourceKey rainSource = new SourceKey(SourceKind.RAIN, level.dimension(), landing.immutable());
-        if (level.isRainingAt(landing)
-            && emitSource(level, emittedSources, rainSource, cell, RAIN_EMISSION)) {
+        BlockPos cloud = new BlockPos(x, RAIN_CLOUD_HEIGHT, z);
+        SourceKey rainSource = new SourceKey(SourceKind.RAIN_CLOUD, level.dimension(), cloud.immutable());
+        if (!level.dimensionType().ultraWarm()
+            && !level.dimensionType().hasCeiling()
+            && level.isInWorldBounds(cloud)
+            && chunk.getBlockState(cloud).isAir()
+            && level.isRainingAt(cloud)
+            && emitSource(level, emittedSources, rainSource, cellKey(level, cloud), RAIN_CLOUD_EMISSION)) {
             rainEmissions++;
         }
 
@@ -422,8 +474,8 @@ final class ForgeAtmospherePrototype {
             SourceKind.DARK_GROUND, level.dimension(), landing.immutable());
         if (darkGroundEmission > 0
             && level.canSeeSky(landing)
-            && level.getFluidState(surface).isEmpty()
-            && emitSource(level, emittedSources, darkGroundSource, cell, darkGroundEmission)) {
+            && chunk.getFluidState(surface).isEmpty()
+            && emitSource(level, emittedSources, darkGroundSource, cellKey(level, landing), darkGroundEmission)) {
             darkGroundEmissions++;
         }
     }
@@ -447,11 +499,11 @@ final class ForgeAtmospherePrototype {
         return false;
     }
 
-    private int sampleLoadedWaterDepth(ServerLevel level, BlockPos surface) {
+    private int sampleLoadedWaterDepth(LevelChunk chunk, BlockPos surface) {
         int depth = 0;
         for (int offset = 0; offset < MAX_WATER_DEPTH; offset++) {
             BlockPos sample = surface.below(offset);
-            if (!level.hasChunkAt(sample) || !level.getFluidState(sample).is(FluidTags.WATER)) {
+            if (!chunk.getFluidState(sample).is(FluidTags.WATER)) {
                 break;
             }
             depth++;
@@ -712,7 +764,7 @@ final class ForgeAtmospherePrototype {
     private enum SourceKind {
         WATER,
         HIGH_TERRAIN,
-        RAIN,
+        RAIN_CLOUD,
         DARK_GROUND
     }
 

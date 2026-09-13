@@ -8,6 +8,50 @@ class AtmosphereLightCacheTest {
     private static AtmosphereClientCache.Cell cell(int x) { return new AtmosphereClientCache.Cell(x, 0, 0); }
 
     @Test
+    void eightBlockVolumeWeightsAllEightBaseCellsByTheirAirCounts() {
+        var cache = new AtmosphereLightCache();
+        var origin = new AtmosphereClientCache.Cell(-2, -2, -2);
+        assertEquals(0.5f, cache.value(origin, 1));
+        var visited = new java.util.HashSet<AtmosphereClientCache.Cell>();
+        cache.advanceSamples(key -> {
+            visited.add(key);
+            assertTrue(key.x() >= -2 && key.x() < 0);
+            assertTrue(key.y() >= -2 && key.y() < 0);
+            assertTrue(key.z() >= -2 && key.z() < 0);
+            return key.equals(origin) ? new AtmosphereLightCache.Sample(1, 1)
+                : new AtmosphereLightCache.Sample(0, 64);
+        });
+        assertEquals(8, visited.size());
+        assertEquals(1f / 449, cache.value(origin, 1), 1e-7);
+    }
+
+    @Test
+    void largerVolumesShareTheBaseCellBudgetAndPublishOnlyCompleteMeans() {
+        var cache = new AtmosphereLightCache();
+        cache.value(cell(0), 2);
+        var calls = new AtomicInteger();
+        cache.advanceSamples(key -> { calls.incrementAndGet(); return new AtmosphereLightCache.Sample(1, 64); });
+        assertEquals(32, calls.get());
+        assertEquals(0.5f, cache.value(cell(0), 2));
+        cache.advanceSamples(key -> { calls.incrementAndGet(); return new AtmosphereLightCache.Sample(1, 64); });
+        assertEquals(64, calls.get());
+        assertEquals(1, cache.value(cell(0), 2));
+    }
+
+    @Test
+    void missingChildDoesNotPublishPartialVolumeLightAndSolidChildrenHaveNoWeight() {
+        var cache = new AtmosphereLightCache();
+        cache.value(cell(0), 1);
+        cache.advanceSamples(key -> key.x() == 1 ? null : new AtmosphereLightCache.Sample(1, 64));
+        assertEquals(0.5f, cache.value(cell(0), 1));
+        cache.clear();
+        cache.value(cell(0), 1);
+        cache.advanceSamples(key -> key.equals(cell(0)) ? new AtmosphereLightCache.Sample(1, 2)
+            : new AtmosphereLightCache.Sample(0, 0));
+        assertEquals(1, cache.value(cell(0), 1));
+    }
+
+    @Test
     void meanIncludesDarkAirButExcludesSolidBlocks() {
         assertEquals(0.5f, AtmosphereLightCache.meanAirLight(index -> index == 0 ? 15 : index == 1 ? 0 : -1));
         assertEquals(0, AtmosphereLightCache.meanAirLight(index -> 0));

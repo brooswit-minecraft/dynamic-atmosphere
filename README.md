@@ -10,7 +10,7 @@ and can damage terrain and builds. Back up the world before upgrading. There is
 no claim/protected-area integration.**
 
 The server maintains a world-aligned atmospheric grid of 4x4x4-block cells.
-Water fog, high-terrain clouds, rain landing on exposed surfaces, and dark exposed
+Water fog, high-terrain clouds, rain-driven cloud-height emissions, and dark exposed
 ground add material to their cells. There is no natural decay: material spreads
 by equalizing fullness across the six face-adjacent cells, not diagonally.
 Capacity is proportional to the number of air blocks in each cell (0..64).
@@ -24,14 +24,15 @@ boundaries and exhausted work/search budgets leave work pending, never authorize
 pressure destruction, and do not discard material.
 Excess that still cannot escape remains blocked and reported, not discarded;
 displacement is not unlimited.
-Retaining the 0.8.1 tuning, simulation/source cadence is `1000 * cellSize / 16` ticks:
-40 times the original 25-base delay, rather than the previous 10 times. Current
-4-block cells use **250 ticks**, or **12.5 seconds** at 20 TPS (previously 62.5
-ticks). Size 1 averages 62.5 ticks, size 16 uses 1000, and size 32 uses 2000.
-Actual progress remains work-budgeted. Cache, render, and
-sync intervals are unchanged; no data reset is required.
-Producer offsets now reach 96 blocks instead of 12, using the same eight sampled
-positions per pass and loaded-only checks. Live cell visibility follows Minecraft's actual
+In 0.11.0-alpha.1, simulation uses a fixed **200-tick** interval, or **10 seconds**
+at 20 TPS, replacing the size-based 250-tick cadence. Producers are independent:
+passes are scheduled every **50 ticks** (2.5 seconds at 20 TPS) across all loaded
+chunks, not just player-offset samples. Each chunk has a random **25% default
+gate**, with one random X/Z column per pass. A bounded fair queue permits backlog,
+so scheduling is not a guarantee every chunk completes within 2.5 seconds. Checks
+never force chunks to load. Actual simulation progress remains work-budgeted.
+Cache/render/sync intervals are unchanged; no data reset is required.
+Live cell visibility follows Minecraft's actual
 tracked chunks and the client's effective render distance, loaded chunks, and
 frustum, with no fixed atmospheric radius or nearest-cell cutoff. Delta sync stays every 20 ticks, full snapshots
 every 200 ticks, and simulation processes at most 128 source cells per tick.
@@ -41,12 +42,16 @@ This is **not** the full terrain-aware atmospheric simulation. Condensation can
 place real water sources (below), but does not generate Minecraft rain. Pollution,
 gas transport, and world generation changes are not included yet.
 
-Rain uses Minecraft's local rain/exposure check at the topmost landing surface,
-including roofs and canopies. Each sampled rainy position contributes 40 material
-units per sampling pass, independently of water/cloud sources. Dry biomes, snow,
-and sheltered ground do not emit rain material.
+Rain still uses Minecraft's local rain/exposure check, but its emission is moved
+from ground level to cloud height **Y=192**. Each passed rain check adds **320 material
+units**, eight times the previous 40, instead of also adding ground-level rain
+fog. Water-depth fog, high-terrain clouds, and dark exposed-ground sources remain.
 The mod does not create rain or change the world's weather; condensation places
 water blocks independently of Minecraft's rain.
+
+A water-to-nonwater block transition emits **40 material units** at that
+position. Ordinary water-level changes do not qualify, and chunk unloads do not
+trigger this source.
 
 Exposed non-fluid ground also emits according to effective light: zero at light
 15, rising to 40 units per pass at light 0. This uses the day/night-adjusted sky
@@ -85,8 +90,8 @@ On a successful roll, one water source is placed at a random air block in the
 same cell, without replacing solids. Only successful placement removes
 `max(1, floor(current material * 0.25))` units. No air or a failed placement
 consumes nothing. Ultrawarm dimensions, including the Nether, skip both water
-placement and consumption. Checks now use the 250-tick cadence for 4-block cells,
-about 12.5 seconds at 20 TPS, subject to work budgets. Probability and consumption
+placement and consumption. Checks now use the fixed 200-tick simulation cadence,
+about 10 seconds at 20 TPS, subject to work budgets. Probability and consumption
 per check are unchanged.
 
 **This places real water that flows normally and can wet builds. Back up worlds
@@ -120,20 +125,24 @@ rebuild it. While a new view is being refined, aligned 32-block cached volumes
 provide temporary coverage; unloaded near chunks use 16-block cached fallback.
 Neither fallback overlaps its detailed descendants.
 
-In 0.10.0-alpha.1, coarse LOD volumes (including cached fallbacks) use Minecraft's
-current fog/horizon color. Nearby 4-block detail uses grayscale from the mean
+In 0.11.0-alpha.1, nearby light-based grayscale blends smoothly toward Minecraft's
+current fog/horizon color with distance, replacing the abrupt color transition.
+Color stays grayscale through `V/2` and reaches full horizon color at `V`, using
+smoothstep between them. Coarse volumes in that blend region use air-count-weighted
+base-cell light averages, not an unweighted mean of occupied cells.
+Nearby detail uses grayscale from the mean
 effective light of air blocks in that cell: light 0 is black and 15 is white.
 Non-air blocks are excluded; dark air counts. Minecraft sky darkening and block
-light are included. Sampling never loads chunks and runs for at most 32 cells
+light are included. Sampling never loads chunks and runs for at most 32 base cells
 (2,048 blocks) per client tick, not per frame. Visible cells request refresh after
 20 ticks; busy queues can delay it. Unsampled cells use neutral 50% gray. This
-disposable lighting cache holds at most 8,192 cells and clears on world changes.
+disposable lighting cache holds at most 8,192 volumes and clears on world changes.
 Mixed colors use cached spatial back-to-front ordering and bounded GPU batches;
-rotation does not re-sort volumes. Simulation, opacity, protocol 5, and persistent
-world/personal cache formats remain unchanged.
+rotation does not re-sort volumes. The blend preserves opacity, protocol 5, and
+persistent world/personal cache formats.
 
-This changes rendering only. Server simulation still uses 4x4x4-block cells and
-250-tick checks (12.5 seconds at 20 TPS), with unchanged condensation chance and
+LOD and color blending change rendering only. Server simulation uses 4x4x4-block cells and
+200-tick checks (10 seconds at 20 TPS), with unchanged condensation chance and
 consumption per check. Cache/render/sync intervals and persistent data are
 unchanged. Four-times-view cache reach remains, with distant visuals only from
 previously seen areas; LOD does not load distant chunks. No world reset is needed.
@@ -171,7 +180,7 @@ dropping items. Once source-cell blocks are gone, relief tries neighboring cells
 and proceeds outward toward room. Each broken block adds **1 material unit**.
 Negative-hardness and intrinsically unbreakable blocks are exempt; there is no
 claim/protected-area support. Pressure is limited to four attempts per sampling
-interval, now 40 times the original delay in 0.8.1-alpha.1. Work is
+interval. Work is
 bounded per pass, not an unlimited search
 or guarantee of immediate relief. Closed unbreakable surroundings leave excess
 blocked and reported rather than deleting it.

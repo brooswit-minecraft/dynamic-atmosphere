@@ -1,3 +1,16 @@
+# 0.11.0-alpha.1
+
+- Smoothstep from light-based grayscale through half the Minecraft view distance to full current fog/horizon color at the view distance. Coarse volumes in the blend region use air-count-weighted base-cell light averages, with at most 32 base cells sampled per client tick. Preserve LOD coverage and persistent visual caches.
+- Schedule producer passes over all loaded chunks every 50 ticks (2.5 seconds at 20 TPS), replacing player-offset sampling. Each chunk gets a random 25% default gate and one random X/Z column per pass. A bounded fair queue can delay checks; no chunks are force-loaded.
+- Decouple simulation from producers: use fixed 200-tick (10-second at 20 TPS) simulation checks, superseding the size-scaled 250-tick cadence. Condensation chance and consumption per due check are unchanged.
+- Replace ground-level rain emissions with 320 material units at cloud height Y=192 per passed rain check, eight times the previous 40. Preserve water-depth fog, high-terrain clouds, and dark exposed-ground sources.
+- Emit 40 material units at a block position when water transitions to nonwater. Ordinary water-level changes and chunk unloads do not trigger this source.
+- Preserve protocol 5, cache/render/sync intervals, world data, and personal visual caches. No world reset is required. Existing destructive-pressure and flowing-water warnings remain in effect.
+
+Minor feature release. Automated verification runs in CI; hosted startup checks
+the required water-transition mixin. No local tests or performance measurements
+are performed; appearance remains for user testing.
+
 # 0.10.0-alpha.1
 
 - Tint coarse LOD volumes with Minecraft's actual current fog/horizon color, including cached fallbacks.

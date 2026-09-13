@@ -4,7 +4,6 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AtmosphereGridLayoutTest {
@@ -34,48 +33,35 @@ class AtmosphereGridLayoutTest {
     }
 
     @Test
-    void simulationIntervalScalesExactlyWithCellSize() {
-        assertEquals(62.5, AtmosphereGridLayout.simulationIntervalTicks(1));
-        assertEquals(250.0, AtmosphereGridLayout.simulationIntervalTicks(4));
-        assertEquals(1000.0, AtmosphereGridLayout.simulationIntervalTicks(16));
-        assertEquals(2000.0, AtmosphereGridLayout.simulationIntervalTicks(32));
-        assertThrows(IllegalArgumentException.class, () -> AtmosphereGridLayout.simulationIntervalTicks(0));
+    void producerAndSimulationCadencesAreIndependent() {
+        assertEquals(50, AtmosphereGridLayout.PRODUCER_INTERVAL_TICKS);
+        assertEquals(200, AtmosphereGridLayout.simulationIntervalTicks());
     }
 
     @Test
-    void fractionalCadenceUsesStrictFutureGlobalBoundariesWithoutDrift() {
-        assertEquals(250, AtmosphereGridLayout.nextSimulationTick(0, 4));
-        assertEquals(500, AtmosphereGridLayout.nextSimulationTick(250, 4));
-        assertEquals(750, AtmosphereGridLayout.nextSimulationTick(500, 4));
-        assertEquals(1000, AtmosphereGridLayout.nextSimulationTick(750, 4));
-        assertEquals(1250, AtmosphereGridLayout.nextSimulationTick(1000, 4));
-
-        assertEquals(63, AtmosphereGridLayout.nextSimulationTick(0, 1));
-        assertEquals(125, AtmosphereGridLayout.nextSimulationTick(63, 1));
-        assertEquals(188, AtmosphereGridLayout.nextSimulationTick(125, 1));
-        assertEquals(250, AtmosphereGridLayout.nextSimulationTick(188, 1));
-        assertEquals(1000, AtmosphereGridLayout.nextSimulationTick(0, 16));
-        assertEquals(2000, AtmosphereGridLayout.nextSimulationTick(1000, 16));
-        assertEquals(2000, AtmosphereGridLayout.nextSimulationTick(0, 32));
-        assertEquals(4000, AtmosphereGridLayout.nextSimulationTick(2000, 32));
+    void simulationUsesStrictFutureTwoHundredTickBoundaries() {
+        assertEquals(200, AtmosphereGridLayout.nextSimulationTick(0));
+        assertEquals(200, AtmosphereGridLayout.nextSimulationTick(199));
+        assertEquals(400, AtmosphereGridLayout.nextSimulationTick(200));
+        assertEquals(600, AtmosphereGridLayout.nextSimulationTick(401));
     }
 
     @Test
-    void currentCellsRunFourChecksPerThousandTicks() {
+    void currentCellsRunFiveChecksPerThousandTicks() {
         int checks = 0;
         for (int tick = 1; tick <= 1000; tick++) {
             if (AtmosphereGridLayout.isSimulationTick(tick)) checks++;
         }
-        assertEquals(4, checks);
+        assertEquals(5, checks);
     }
 
     @Test
     void sourceTickCheckUsesTheSameCadenceAsGridScheduling() {
         assertFalse(AtmosphereGridLayout.isSimulationTick(0));
-        assertFalse(AtmosphereGridLayout.isSimulationTick(249));
-        assertTrue(AtmosphereGridLayout.isSimulationTick(250));
-        assertFalse(AtmosphereGridLayout.isSimulationTick(251));
-        assertTrue(AtmosphereGridLayout.isSimulationTick(500));
+        assertFalse(AtmosphereGridLayout.isSimulationTick(199));
+        assertTrue(AtmosphereGridLayout.isSimulationTick(200));
+        assertFalse(AtmosphereGridLayout.isSimulationTick(201));
+        assertTrue(AtmosphereGridLayout.isSimulationTick(400));
         assertTrue(AtmosphereGridLayout.isSimulationTick(1000));
     }
 }

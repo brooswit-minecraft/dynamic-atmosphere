@@ -6,15 +6,33 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class AtmosphereVolumeGeometryTest {
     @Test
-    void onlyCoarseVolumesUseCurrentFogColorIncludingUnloadedFallbacks() {
+    void distanceBlendKeepsGrayNearAndReachesHorizonAtViewDistance() {
+        assertEquals(0, AtmosphereVolumeGeometry.horizonBlend(0, 128));
+        assertEquals(0, AtmosphereVolumeGeometry.horizonBlend(64, 128));
+        assertEquals(0.5f, AtmosphereVolumeGeometry.horizonBlend(96, 128));
+        assertEquals(1, AtmosphereVolumeGeometry.horizonBlend(128, 128));
+        assertEquals(1, AtmosphereVolumeGeometry.horizonBlend(512, 128));
+        float previous = 0;
+        for (int distance = 64; distance <= 128; distance++) {
+            float blend = AtmosphereVolumeGeometry.horizonBlend(distance, 128);
+            assertTrue(blend >= previous);
+            previous = blend;
+        }
         for (float channel : new float[] {0, 0.15f, 0.7f, 1}) {
             assertEquals(0.25f, AtmosphereVolumeGeometry.colorChannel(0, channel, 0.25f));
-            for (int level = 1; level <= 3; level++) {
-                assertEquals(channel, AtmosphereVolumeGeometry.colorChannel(level, channel, 0.25f));
-            }
+            assertEquals(channel, AtmosphereVolumeGeometry.colorChannel(1, channel, 0.25f), 1e-7);
+            assertEquals((channel + 0.25f) / 2, AtmosphereVolumeGeometry.colorChannel(0.5f, channel, 0.25f), 1e-7);
         }
         assertEquals(0, AtmosphereVolumeGeometry.colorChannel(1, -1, 0.25f));
         assertEquals(1, AtmosphereVolumeGeometry.colorChannel(1, 2, 0.25f));
+    }
+
+    @Test
+    void blendIsContinuousAtBothBandEdgesAndIndependentOfLodLevel() {
+        assertEquals(0, AtmosphereVolumeGeometry.horizonBlend(64.001, 128), 1e-7);
+        assertEquals(1, AtmosphereVolumeGeometry.horizonBlend(127.999, 128), 1e-7);
+        assertEquals(AtmosphereVolumeGeometry.horizonBlend(96, 128),
+            AtmosphereVolumeGeometry.horizonBlend(192, 256));
     }
 
     @Test

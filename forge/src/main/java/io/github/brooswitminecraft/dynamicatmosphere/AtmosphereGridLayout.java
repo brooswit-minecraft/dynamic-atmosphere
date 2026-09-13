@@ -4,10 +4,10 @@ package io.github.brooswitminecraft.dynamicatmosphere;
 public final class AtmosphereGridLayout {
 
     public static final int CELL_SIZE = 4;
+    public static final int SIMULATION_INTERVAL_TICKS = 200;
+    public static final int PRODUCER_INTERVAL_TICKS = 50;
     private static final int MINECRAFT_CHUNK_SIZE = 16;
     private static final int CELLS_PER_CHUNK = MINECRAFT_CHUNK_SIZE / CELL_SIZE;
-    private static final int BASE_INTERVAL_TICKS = 1000;
-    private static final int CADENCE_DENOMINATOR = 16;
 
     private AtmosphereGridLayout() {
     }
@@ -25,36 +25,16 @@ public final class AtmosphereGridLayout {
         return Math.clamp(airBlocks, 0, volume) * 1000 / volume;
     }
 
-    public static double simulationIntervalTicks(int cellSize) {
-        requirePositiveCellSize(cellSize);
-        return (double) BASE_INTERVAL_TICKS * cellSize / CADENCE_DENOMINATOR;
+    public static int simulationIntervalTicks() {
+        return SIMULATION_INTERVAL_TICKS;
     }
 
     public static boolean isSimulationTick(long tick) {
-        return tick > 0 && nextSimulationTick(tick - 1) == tick;
+        return tick > 0 && tick % SIMULATION_INTERVAL_TICKS == 0;
     }
 
     public static long nextSimulationTick(long tick) {
-        return nextSimulationTick(tick, CELL_SIZE);
-    }
-
-    static long nextSimulationTick(long tick, int cellSize) {
-        requirePositiveCellSize(cellSize);
-        long cadenceNumerator = Math.multiplyExact((long) BASE_INTERVAL_TICKS, cellSize);
-        long cycle = Math.floorDiv(tick, cadenceNumerator);
-        long withinCycle = Math.floorMod(tick, cadenceNumerator);
-        long event = withinCycle * CADENCE_DENOMINATOR / cadenceNumerator + 1;
-        if (event > CADENCE_DENOMINATOR) {
-            cycle++;
-            event = 1;
-        }
-        long boundaryWithinCycle = Math.ceilDiv(event * cadenceNumerator, CADENCE_DENOMINATOR);
-        return Math.addExact(Math.multiplyExact(cycle, cadenceNumerator), boundaryWithinCycle);
-    }
-
-    private static void requirePositiveCellSize(int cellSize) {
-        if (cellSize <= 0) {
-            throw new IllegalArgumentException("cell size must be positive");
-        }
+        return Math.multiplyExact(Math.floorDiv(tick, SIMULATION_INTERVAL_TICKS) + 1,
+            (long) SIMULATION_INTERVAL_TICKS);
     }
 }

@@ -43,13 +43,13 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
     private static final AtmosphereLightCache LIGHT = new AtmosphereLightCache();
 
     static void tick(ClientLevel level) {
-        LIGHT.advance(cell -> {
+        LIGHT.advanceSamples(cell -> {
             var chunk = level.getChunkSource().getChunk(AtmosphereGridLayout.chunkCoordinate(cell.x()),
                 AtmosphereGridLayout.chunkCoordinate(cell.z()), ChunkStatus.FULL, false);
-            if (chunk == null) return Double.NaN;
+            if (chunk == null) return null;
             int size = AtmosphereVolumeGeometry.CELL_SIZE;
             var pos = new BlockPos.MutableBlockPos();
-            return AtmosphereLightCache.meanAirLight(index -> {
+            return AtmosphereLightCache.airLight(index -> {
                 pos.set(cell.x() * size + index % size, cell.y() * size + index / (size * size),
                     cell.z() * size + (index / size) % size);
                 return !level.isOutsideBuildHeight(pos) && chunk.getBlockState(pos).isAir()
@@ -100,13 +100,14 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
                 boolean loaded = level.getChunkSource().hasChunk(
                     AtmosphereGridLayout.chunkCoordinate(cell.x), AtmosphereGridLayout.chunkCoordinate(cell.z));
                 if (!AtmosphereLodHierarchy.visibleWhenLoaded(cell, draw.fallback(), loaded)) continue;
-                if (AtmosphereLodHierarchy.distanceSquared(cell, position.x, position.y, position.z)
-                    > farDistance * farDistance || !event.getFrustum().isVisible(bounds(cell))) continue;
+                double distanceSquared = AtmosphereLodHierarchy.distanceSquared(cell, position.x, position.y, position.z);
+                if (distanceSquared > farDistance * farDistance || !event.getFrustum().isVisible(bounds(cell))) continue;
                 var slices = AtmosphereVolumeGeometry.lodSlices(cell, cell.amount(tick), camera, forward);
-                float gray = cell.level == 0 ? LIGHT.value(new AtmosphereClientCache.Cell(cell.x, cell.y, cell.z)) : 0;
-                float red = AtmosphereVolumeGeometry.colorChannel(cell.level, fogColor[0], gray);
-                float green = AtmosphereVolumeGeometry.colorChannel(cell.level, fogColor[1], gray);
-                float blue = AtmosphereVolumeGeometry.colorChannel(cell.level, fogColor[2], gray);
+                float blend = AtmosphereVolumeGeometry.horizonBlend(Math.sqrt(distanceSquared), viewChunks * 16.0);
+                float gray = blend < 1 ? LIGHT.value(new AtmosphereClientCache.Cell(cell.x, cell.y, cell.z), cell.level) : 0;
+                float red = AtmosphereVolumeGeometry.colorChannel(blend, fogColor[0], gray);
+                float green = AtmosphereVolumeGeometry.colorChannel(blend, fogColor[1], gray);
+                float blue = AtmosphereVolumeGeometry.colorChannel(blend, fogColor[2], gray);
                 if (!slices.isEmpty()) {
                     if (cell.level > 0) renderedCoarseCount++;
                     else renderedCellCount++;
