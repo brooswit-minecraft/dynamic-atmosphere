@@ -1,3 +1,13 @@
+# 0.4.0-alpha.1
+
+- Rain adds material where it lands on exposed terrain, roofs, canopies, or water.
+- Uses Minecraft's local rain check; sheltered locations, dry biomes, and snow do not emit rain material.
+- Rain contributions stack with existing water/cloud sources, with shared-player deduplication.
+- Local decay, grid synchronization, and world data remain unchanged.
+- Runtime status reports rain emission counts.
+
+Minor pre-1.0 bump for a new atmospheric source. No world reset required.
+
 # 0.3.0-alpha.1
 
 - World-aligned atmospheric grid with 16x16x16-block cells.

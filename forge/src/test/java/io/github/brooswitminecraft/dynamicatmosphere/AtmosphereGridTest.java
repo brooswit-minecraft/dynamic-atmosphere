@@ -2,6 +2,9 @@ package io.github.brooswitminecraft.dynamicatmosphere;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.HashSet;
+import java.util.Set;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -60,5 +63,22 @@ class AtmosphereGridTest {
 
         assertTrue(grid.emit(replacement, 10, 2));
         assertEquals(replacement, grid.cells().getFirst().key());
+    }
+
+    @Test
+    void rainSourceDedupesWhileAnotherSourceAddsAndDecayStillRuns() {
+        AtmosphereGrid<String> grid = new AtmosphereGrid<>(4, 10);
+        AtmosphereGrid.CellKey<String> cell = new AtmosphereGrid.CellKey<>("overworld", 0, 4, 0);
+        Set<String> emittedSources = new HashSet<>();
+
+        assertTrue(AtmosphereGrid.emitSourceOnce(
+            emittedSources, "rain:0,64,0", grid, cell, 40, 100));
+        assertFalse(AtmosphereGrid.emitSourceOnce(
+            emittedSources, "rain:0,64,0", grid, cell, 40, 100));
+        assertTrue(AtmosphereGrid.emitSourceOnce(
+            emittedSources, "water:0,63,0", grid, cell, 20, 100));
+
+        grid.decay(100);
+        assertEquals(50, grid.cells().getFirst().amount());
     }
 }

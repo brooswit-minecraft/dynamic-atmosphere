@@ -45,6 +45,7 @@ final class ForgeAtmospherePrototype {
     private static final int GRID_DECAY_PER_PASS = 10;
     private static final int WATER_EMISSION_PER_DEPTH = 20;
     private static final int HIGH_TERRAIN_EMISSION = 40;
+    private static final int RAIN_EMISSION = 40;
     private static final int MAX_WATER_DEPTH = 8;
     private static final int[][] SAMPLE_OFFSETS = {
         {0, 0}, {12, 0}, {-12, 0}, {0, 12}, {0, -12}, {8, 8}, {-8, -8}, {8, -8}
@@ -57,6 +58,7 @@ final class ForgeAtmospherePrototype {
     private long automaticPasses;
     private long particlesSent;
     private long gridEmissions;
+    private long rainEmissions;
     private long gridCellsRemoved;
     private long payloadsSent;
     private int playersLastPass;
@@ -96,6 +98,7 @@ final class ForgeAtmospherePrototype {
         automaticPasses = 0;
         particlesSent = 0;
         gridEmissions = 0;
+        rainEmissions = 0;
         gridCellsRemoved = 0;
         payloadsSent = 0;
         playersLastPass = 0;
@@ -119,6 +122,7 @@ final class ForgeAtmospherePrototype {
                 + ", fullSnapshotInterval=" + FULL_SNAPSHOT_INTERVAL
                 + ", passes=" + automaticPasses
                 + ", emissions=" + gridEmissions
+                + ", rainEmissions=" + rainEmissions
                 + ", removed=" + gridCellsRemoved
                 + ", payloads=" + payloadsSent
                 + ", particles=" + particlesSent
@@ -181,15 +185,17 @@ final class ForgeAtmospherePrototype {
                 continue;
             }
 
-            SourceKey source = new SourceKey(level.dimension(), surface.immutable());
+            sampleRain(level, loadedProbe, emittedSources);
             if (level.getFluidState(surface).is(FluidTags.WATER)) {
                 int depth = sampleLoadedWaterDepth(level, surface);
                 AtmosphereGrid.CellKey<ResourceKey<Level>> cell =
                     cellKey(level, new BlockPos(x, surfaceY, z));
+                SourceKey source = new SourceKey(SourceKind.WATER, level.dimension(), surface.immutable());
                 emitSource(emittedSources, source, cell, depth * WATER_EMISSION_PER_DEPTH);
             } else if (surfaceY >= level.getSeaLevel() + HIGH_TERRAIN_ABOVE_SEA) {
                 AtmosphereGrid.CellKey<ResourceKey<Level>> cell =
                     cellKey(level, new BlockPos(x, surfaceY + 5, z));
+                SourceKey source = new SourceKey(SourceKind.HIGH_TERRAIN, level.dimension(), surface.immutable());
                 emitSource(emittedSources, source, cell, HIGH_TERRAIN_EMISSION);
                 if (sent < CLOUD_PARTICLE_CAP) {
                     int count = Math.min(4, CLOUD_PARTICLE_CAP - sent);
@@ -200,13 +206,32 @@ final class ForgeAtmospherePrototype {
         }
     }
 
+    private void sampleRain(ServerLevel level, BlockPos loadedProbe, Set<SourceKey> emittedSources) {
+        BlockPos landing = level.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING, loadedProbe);
+        BlockPos surface = landing.below();
+        if (!level.isInWorldBounds(landing)
+            || !level.isInWorldBounds(surface)
+            || !level.hasChunkAt(landing)
+            || level.getBlockState(surface).isAir()
+            || !level.isRainingAt(landing)) {
+            return;
+        }
+
+        SourceKey source = new SourceKey(SourceKind.RAIN, level.dimension(), landing.immutable());
+        AtmosphereGrid.CellKey<ResourceKey<Level>> cell = cellKey(level, landing);
+        if (AtmosphereGrid.emitSourceOnce(emittedSources, source, grid, cell, RAIN_EMISSION, serverTicks)) {
+            gridEmissions++;
+            rainEmissions++;
+        }
+    }
+
     private void emitSource(
         Set<SourceKey> emittedSources,
         SourceKey source,
         AtmosphereGrid.CellKey<ResourceKey<Level>> cell,
         int amount
     ) {
-        if (emittedSources.add(source) && grid.emit(cell, amount, serverTicks)) {
+        if (AtmosphereGrid.emitSourceOnce(emittedSources, source, grid, cell, amount, serverTicks)) {
             gridEmissions++;
         }
     }
@@ -338,6 +363,12 @@ final class ForgeAtmospherePrototype {
         return 0;
     }
 
-    private record SourceKey(ResourceKey<Level> dimension, BlockPos pos) {
+    private enum SourceKind {
+        WATER,
+        HIGH_TERRAIN,
+        RAIN
+    }
+
+    private record SourceKey(SourceKind kind, ResourceKey<Level> dimension, BlockPos pos) {
     }
 }

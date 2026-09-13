@@ -4,6 +4,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Predicate;
 
 final class AtmosphereGrid<D> {
@@ -31,6 +32,17 @@ final class AtmosphereGrid<D> {
 
     static int cellCoordinate(int blockCoordinate) {
         return Math.floorDiv(blockCoordinate, CELL_SIZE);
+    }
+
+    static <S, D> boolean emitSourceOnce(
+        Set<S> emittedSources,
+        S source,
+        AtmosphereGrid<D> grid,
+        CellKey<D> cell,
+        int amount,
+        long tick
+    ) {
+        return emittedSources.add(source) && grid.emit(cell, amount, tick);
     }
 
     boolean emit(CellKey<D> key, int amount, long tick) {

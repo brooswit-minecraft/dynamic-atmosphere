@@ -1,1 +1,1 @@
-A translucent atmospheric grid for NeoForge 1.21.1. Fog and cloud material builds up and decays in place, synchronized from server to client.
+A translucent atmospheric grid for NeoForge 1.21.1. Water, clouds, and rain build material that fades in place, synchronized from server to client.
