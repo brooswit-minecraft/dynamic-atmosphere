@@ -8,7 +8,7 @@ modId="dynamicatmosphere" #mandatory
 version="${mod_version}" #mandatory
 displayName="Dynamic Atmosphere" #mandatory
 authors="brooswit"
-description='''Shell mod build for the Dynamic Atmosphere / Weather System project (SICKOS). Currently ships no simulation behaviour: see the README for what this repo is for.'''
+description='''Visual delivery spike for Dynamic Atmosphere. Emits bounded vanilla cloud particles near loaded water/high terrain; this is not the planned terrain-aware material simulation.'''
 
 [[dependencies.dynamicatmosphere]]
     modId="neoforge"
@@ -20,6 +20,6 @@ description='''Shell mod build for the Dynamic Atmosphere / Weather System proje
 [[dependencies.dynamicatmosphere]]
     modId="minecraft"
     type="required"
-    versionRange="[1.21.1,1.22)"
+    versionRange="[1.21.1]"
     ordering="NONE"
     side="BOTH"

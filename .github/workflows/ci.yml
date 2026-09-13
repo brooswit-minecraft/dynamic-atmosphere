@@ -33,6 +33,9 @@ jobs:
         # :forge compiles and assembles the mod jar against real NeoForge.
         run: ./gradlew build --no-daemon
 
+      - name: Test release retry checks
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+
       - name: Upload mod jar
         uses: actions/upload-artifact@v4
         with:

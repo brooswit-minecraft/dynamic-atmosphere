@@ -17,7 +17,9 @@ group = "io.github.brooswitminecraft"
 // leading v stripped>`; every other push/PR build (including this one, and
 // ci.yml's `./gradlew build`) falls back to the literal default below, which
 // must always build cleanly on its own.
-def modVersion = (findProperty("mod_version") ?: "0.0.1") as String
+def versionFile = rootProject.file("version.txt")
+def fallbackVersion = versionFile.exists() ? versionFile.text.trim() : "0.1.0-alpha.1"
+def modVersion = (findProperty("mod_version") ?: fallbackVersion) as String
 version = modVersion
 
 base {
@@ -33,7 +35,7 @@ java {
 neoForge {
     // Matches the sickos pack's pinned NeoForge version for Minecraft
     // 1.21.1 (brooswit-minecraft/sickos pack.toml, [versions].neoforge).
-    version = "21.1.248"
+    version = "21.1.250"
 
     mods {
         dynamicatmosphere {
@@ -55,6 +57,8 @@ dependencies {
 // embedding third-party dependencies, which this isn't.
 tasks.named("jar", Jar) {
     from(project(":engine").sourceSets.main.output)
+    reproducibleFileOrder = true
+    preserveFileTimestamps = false
 }
 
 // Expands `${mod_version}` in neoforge.mods.toml's `version=` line to the
