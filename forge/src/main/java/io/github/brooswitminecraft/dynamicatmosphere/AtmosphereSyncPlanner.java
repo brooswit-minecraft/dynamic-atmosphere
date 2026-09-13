@@ -8,7 +8,7 @@ import java.util.Map;
 
 final class AtmosphereSyncPlanner<P, D> {
 
-    record Cell(int x, int y, int z, int amount) {
+    record Cell(int x, int y, int z, int amount, int capacity) {
     }
 
     record Update<D>(D dimension, boolean reset, List<Cell> cells) {
@@ -17,7 +17,7 @@ final class AtmosphereSyncPlanner<P, D> {
         }
     }
 
-    private record PlayerView<D>(D dimension, Map<CellCoordinate, Integer> cells) {
+    private record PlayerView<D>(D dimension, Map<CellCoordinate, Cell> cells) {
     }
 
     private record CellCoordinate(int x, int y, int z) {
@@ -34,7 +34,7 @@ final class AtmosphereSyncPlanner<P, D> {
     }
 
     List<Update<D>> plan(P player, D dimension, List<Cell> visibleCells) {
-        Map<CellCoordinate, Integer> current = index(visibleCells);
+        Map<CellCoordinate, Cell> current = index(visibleCells);
         PlayerView<D> previous = views.put(player, new PlayerView<>(dimension, current));
         List<Update<D>> updates = new ArrayList<>();
 
@@ -49,12 +49,12 @@ final class AtmosphereSyncPlanner<P, D> {
         List<Cell> delta = new ArrayList<>();
         for (CellCoordinate old : previous.cells().keySet()) {
             if (!current.containsKey(old)) {
-                delta.add(new Cell(old.x(), old.y(), old.z(), 0));
+                delta.add(new Cell(old.x(), old.y(), old.z(), 0, 0));
             }
         }
         for (Cell cell : visibleCells) {
-            Integer oldAmount = previous.cells().get(new CellCoordinate(cell.x(), cell.y(), cell.z()));
-            if (oldAmount == null || oldAmount != cell.amount()) {
+            Cell old = previous.cells().get(new CellCoordinate(cell.x(), cell.y(), cell.z()));
+            if (!cell.equals(old)) {
                 delta.add(cell);
             }
         }
@@ -80,10 +80,10 @@ final class AtmosphereSyncPlanner<P, D> {
         views.clear();
     }
 
-    private Map<CellCoordinate, Integer> index(List<Cell> cells) {
-        Map<CellCoordinate, Integer> indexed = new LinkedHashMap<>();
+    private Map<CellCoordinate, Cell> index(List<Cell> cells) {
+        Map<CellCoordinate, Cell> indexed = new LinkedHashMap<>();
         for (Cell cell : cells) {
-            indexed.put(new CellCoordinate(cell.x(), cell.y(), cell.z()), cell.amount());
+            indexed.put(new CellCoordinate(cell.x(), cell.y(), cell.z()), cell);
         }
         return Map.copyOf(indexed);
     }

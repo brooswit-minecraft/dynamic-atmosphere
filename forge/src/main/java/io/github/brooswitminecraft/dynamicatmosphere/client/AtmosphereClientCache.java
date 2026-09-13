@@ -12,9 +12,10 @@ public final class AtmosphereClientCache {
     private static final int TRANSITION_TICKS = 10;
 
     public record Cell(int x, int y, int z) { }
-    public record Update(Cell cell, int amount) { }
+    public record Update(Cell cell, int amount, int capacity) { }
+    /** Render amount is interpolated fullness scaled to 0..1000, not stored material. */
     public record VisibleCell(Cell cell, float amount) { }
-    private record Amount(float from, int target, long since) {
+    private record Amount(float from, float target, long since, int material, int capacity) {
         float at(double tick) {
             double progress = Math.clamp((tick - since) / TRANSITION_TICKS, 0.0, 1.0);
             return (float) (from + (target - from) * progress);
@@ -52,15 +53,17 @@ public final class AtmosphereClientCache {
         // Bound even an unexpectedly large decoded update list.
         for (int i = 0; i < Math.min(updates.size(), MAX_CELLS); i++) {
             Update update = updates.get(i);
-            int target = Math.clamp(update.amount(), 0, 1000);
+            int material = Math.clamp(update.amount(), 0, 1_000_000);
+            int capacity = Math.clamp(update.capacity(), 0, 1000);
+            float target = capacity == 0 ? 0 : Math.min(1000, material * 1000.0f / capacity);
             Amount old = previous.get(update.cell());
-            if (reset && target == 0) {
+            if (reset && material == 0) {
                 continue;
             }
-            if (old == null && target == 0) {
+            if (old == null && material == 0) {
                 continue;
             }
-            if (old != null && old.target() == target) {
+            if (old != null && old.material() == material && old.capacity() == capacity) {
                 if (reset) {
                     cells.put(update.cell(), old);
                 }
@@ -70,7 +73,7 @@ public final class AtmosphereClientCache {
                 // Fading removals must not displace newly subscribed authoritative cells.
                 var fading = cells.entrySet().iterator();
                 while (fading.hasNext()) {
-                    if (fading.next().getValue().target() == 0) {
+                    if (fading.next().getValue().material() == 0) {
                         fading.remove();
                         break;
                     }
@@ -79,13 +82,13 @@ public final class AtmosphereClientCache {
                     continue;
                 }
             }
-            cells.put(update.cell(), new Amount(old == null ? 0 : old.at(tick), target, tick));
+            cells.put(update.cell(), new Amount(old == null ? 0 : old.at(tick), target, tick, material, capacity));
         }
     }
 
     public void advance() {
         tick++;
-        cells.values().removeIf(amount -> amount.target() == 0 && tick - amount.since() >= TRANSITION_TICKS);
+        cells.values().removeIf(amount -> amount.material() == 0 && tick - amount.since() >= TRANSITION_TICKS);
     }
 
     public List<VisibleCell> visible(float partialTick) {
@@ -101,5 +104,10 @@ public final class AtmosphereClientCache {
 
     public int size() {
         return cells.size();
+    }
+
+    int storedAmount(Cell cell) {
+        Amount amount = cells.get(cell);
+        return amount == null ? 0 : amount.material();
     }
 }

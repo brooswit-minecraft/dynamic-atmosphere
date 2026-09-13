@@ -17,4 +17,9 @@ public final class AtmosphereGridLayout {
     public static int chunkCoordinate(int cellCoordinate) {
         return Math.floorDiv(cellCoordinate, CELLS_PER_CHUNK);
     }
+
+    public static int capacityForAirBlocks(int airBlocks) {
+        int volume = CELL_SIZE * CELL_SIZE * CELL_SIZE;
+        return Math.clamp(airBlocks, 0, volume) * 1000 / volume;
+    }
 }

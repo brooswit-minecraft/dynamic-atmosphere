@@ -2,6 +2,7 @@ package io.github.brooswitminecraft.dynamicatmosphere;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.mojang.logging.LogUtils;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.BlockPos;
@@ -13,24 +14,35 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.level.ChunkEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 import java.util.Comparator;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.ToIntFunction;
+import org.slf4j.Logger;
 
 /**
  * Bounded server-side atmospheric grid and delivery adapter. Cells are fixed
- * Four-block cubes; this first version has local sources and decay but no flow.
+ * Four-block cubes with local sources and conservative spreading through available air space.
  */
 final class ForgeAtmospherePrototype {
+
+    private static final Logger LOGGER = LogUtils.getLogger();
 
     private static final int SAMPLE_INTERVAL = 100;
     private static final int SYNC_INTERVAL = 20;
@@ -38,12 +50,11 @@ final class ForgeAtmospherePrototype {
     private static final int HIGH_TERRAIN_ABOVE_SEA = 24;
     private static final int CLOUD_PARTICLE_CAP = 16;
     private static final int DEMO_PARTICLE_CAP = 24;
-    private static final int MAX_GRID_CELLS = 1024;
+    private static final int MAX_CHUNK_IMPORTS_PER_TICK = 8;
     private static final int MAX_VISIBLE_CELLS_PER_PLAYER = 256;
     private static final int SUBSCRIPTION_RADIUS_BLOCKS = 64;
     private static final int GRID_RADIUS_CELLS = SUBSCRIPTION_RADIUS_BLOCKS / AtmosphereGridLayout.CELL_SIZE;
     private static final int GRID_VERTICAL_RADIUS_CELLS = SUBSCRIPTION_RADIUS_BLOCKS / AtmosphereGridLayout.CELL_SIZE;
-    private static final int GRID_DECAY_PER_PASS = 10;
     private static final int WATER_EMISSION_PER_DEPTH = 20;
     private static final int HIGH_TERRAIN_EMISSION = 40;
     private static final int RAIN_EMISSION = 40;
@@ -61,21 +72,68 @@ final class ForgeAtmospherePrototype {
     private long gridEmissions;
     private long rainEmissions;
     private long darkGroundEmissions;
-    private long gridCellsRemoved;
+    private long materialMoved;
+    private int blockedOverflow;
+    private int sourcesProcessed;
+    private boolean workRemaining;
+    private boolean searchLimited;
+    private long pressureBreaks;
+    private long pressureSearchLimits;
+    private int pressureAttempts;
+    private int importsRemaining = MAX_CHUNK_IMPORTS_PER_TICK;
     private long payloadsSent;
     private int playersLastPass;
-    private final AtmosphereGrid<ResourceKey<Level>> grid =
-        new AtmosphereGrid<>(MAX_GRID_CELLS, GRID_DECAY_PER_PASS);
+    private final AtmosphereGrid<ResourceKey<Level>> grid = new AtmosphereGrid<>();
+    private final Map<ChunkKey, ChunkState> chunks = new HashMap<>();
+    private final Map<ChunkKey, LevelChunk> pendingLoads = new LinkedHashMap<>();
     private final AtmosphereSyncPlanner<UUID, ResourceKey<Level>> syncPlanner =
         new AtmosphereSyncPlanner<>(AtmosphereGridPayload.MAX_CELLS_PER_PAYLOAD);
 
     void onServerTick(ServerTickEvent.Post event) {
         serverTicks++;
+        importsRemaining = MAX_CHUNK_IMPORTS_PER_TICK;
+        importPendingChunks(event.getServer());
         if (serverTicks % SAMPLE_INTERVAL == 0) {
-            sampleAndAdvance(event.getServer());
+            pressureAttempts = 0;
+            sampleSources(event.getServer());
         }
+        advanceSimulation(event.getServer());
+        flushDirtyChunks();
         if (serverTicks % SYNC_INTERVAL == 0) {
             syncPlayers(event.getServer(), serverTicks % FULL_SNAPSHOT_INTERVAL == 0);
+        }
+        flushDirtyChunks();
+    }
+
+    void onChunkLoad(ChunkEvent.Load event) {
+        if (event.getLevel() instanceof ServerLevel level && event.getChunk() instanceof LevelChunk chunk) {
+            // Load may precede FULL promotion; defer all world queries to the tick.
+            Runnable enqueue = () -> pendingLoads.put(chunkKey(level, chunk), chunk);
+            if (level.getServer().isSameThread()) {
+                enqueue.run();
+            } else {
+                level.getServer().execute(enqueue);
+            }
+        }
+    }
+
+    void onChunkUnload(ChunkEvent.Unload event) {
+        if (event.getLevel() instanceof ServerLevel level && event.getChunk() instanceof LevelChunk chunk) {
+            Runnable unload = () -> {
+                ChunkKey key = chunkKey(level, chunk);
+                pendingLoads.remove(key, chunk);
+                ChunkState state = chunks.get(key);
+                if (state != null && state.chunk == chunk) {
+                    flushDirtyChunks();
+                    chunks.remove(key);
+                    state.cells.keySet().forEach(grid::remove);
+                }
+            };
+            if (level.getServer().isSameThread()) {
+                unload.run();
+            } else {
+                level.getServer().execute(unload);
+            }
         }
     }
 
@@ -102,10 +160,20 @@ final class ForgeAtmospherePrototype {
         gridEmissions = 0;
         rainEmissions = 0;
         darkGroundEmissions = 0;
-        gridCellsRemoved = 0;
+        materialMoved = 0;
+        blockedOverflow = 0;
+        sourcesProcessed = 0;
+        workRemaining = false;
+        searchLimited = false;
+        pressureBreaks = 0;
+        pressureSearchLimits = 0;
+        pressureAttempts = 0;
         payloadsSent = 0;
         playersLastPass = 0;
         grid.clear();
+        grid.drainDirtyKeys();
+        chunks.clear();
+        pendingLoads.clear();
         syncPlanner.clear();
     }
 
@@ -119,7 +187,9 @@ final class ForgeAtmospherePrototype {
     private int status(CommandSourceStack source) {
         source.sendSuccess(() -> Component.literal(
             "Dynamic Atmosphere grid: active; cellSize=" + AtmosphereGrid.CELL_SIZE
-                + ", cells=" + grid.size() + "/" + MAX_GRID_CELLS
+                + ", cells=" + grid.size()
+                + ", loadedChunks=" + chunks.size()
+                + ", pendingImports=" + pendingLoads.size()
                 + ", sampleInterval=" + SAMPLE_INTERVAL
                 + ", syncInterval=" + SYNC_INTERVAL
                 + ", fullSnapshotInterval=" + FULL_SNAPSHOT_INTERVAL
@@ -127,11 +197,18 @@ final class ForgeAtmospherePrototype {
                 + ", emissions=" + gridEmissions
                 + ", rainEmissions=" + rainEmissions
                 + ", darkGroundEmissions=" + darkGroundEmissions
-                + ", removed=" + gridCellsRemoved
+                + ", materialMoved=" + materialMoved
+                + ", blockedOverflow=" + blockedOverflow
+                + ", sourcesProcessed=" + sourcesProcessed
+                + ", workRemaining=" + workRemaining
+                + ", searchLimited=" + searchLimited
+                + ", pressureBreaks=" + pressureBreaks
+                + ", pressureAttempts=" + pressureAttempts + "/" + ForgeAtmospherePressure.MAX_BREAKS_PER_PASS
+                + ", pressureSearchLimits=" + pressureSearchLimits
                 + ", payloads=" + payloadsSent
                 + ", particles=" + particlesSent
                 + ", playersLastPass=" + playersLastPass
-                + ". Server authoritative; local decay only, no intercell flow or world weather changes."), false);
+                + ". Server authoritative; no passive decay; six-neighbor spreading with air-space capacity."), false);
         return 1;
     }
 
@@ -142,14 +219,17 @@ final class ForgeAtmospherePrototype {
         for (int[] offset : DEMO_CELL_OFFSETS) {
             AtmosphereGrid.CellKey<ResourceKey<Level>> key = new AtmosphereGrid.CellKey<>(
                 center.dimension(), center.x() + offset[0], center.y() + offset[1], center.z() + offset[2]);
-            if (isCellLoaded(player.serverLevel(), key) && grid.set(key, AtmosphereGrid.MAX_AMOUNT, serverTicks)) {
+            int capacity = capacityAt(player.serverLevel(), key);
+            if (capacity > 0 && grid.set(key, AtmosphereGrid.MAX_AMOUNT, serverTicks, capacity)) {
                 populated++;
             }
         }
         sendCloudParticles(
             player, player.getX(), player.getY() + 1.2, player.getZ(), DEMO_PARTICLE_CAP, 2.5, 0.7, 2.5, 0.02);
         syncPlanner.reset(player.getUUID());
+        flushDirtyChunks();
         syncPlayer(player);
+        flushDirtyChunks();
         int populatedCells = populated;
         source.sendSuccess(() -> Component.literal(
             "Dynamic Atmosphere demo filled " + populatedCells
@@ -157,7 +237,7 @@ final class ForgeAtmospherePrototype {
         return populated;
     }
 
-    private void sampleAndAdvance(MinecraftServer server) {
+    private void sampleSources(MinecraftServer server) {
         automaticPasses++;
         playersLastPass = 0;
         Set<SourceKey> emittedSources = new HashSet<>();
@@ -166,8 +246,70 @@ final class ForgeAtmospherePrototype {
             playersLastPass++;
             sampleAutomatic(player, emittedSources);
         }
-        gridCellsRemoved += grid.decay(serverTicks);
-        gridCellsRemoved += grid.retain(key -> isActiveLoadedCell(server, players, key));
+    }
+
+    private void advanceSimulation(MinecraftServer server) {
+        var capacities = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer>();
+        ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacityAt = key ->
+            capacities.computeIfAbsent(key, candidate -> capacityAt(server.getLevel(candidate.dimension()), candidate));
+        var spread = grid.spread(serverTicks, capacityAt);
+        materialMoved += spread.moved();
+        blockedOverflow = spread.blockedOverflow();
+        sourcesProcessed = spread.sourcesProcessed();
+        workRemaining = spread.workRemaining();
+        searchLimited = spread.searchLimited();
+        if (!spread.mayBreakForPressure() || spread.searchLimited() || spread.workRemaining()) {
+            return;
+        }
+        for (var blocked : spread.blockedCells()) {
+            if (!blocked.pressureEligible()) {
+                continue;
+            }
+            var source = blocked.key();
+            ServerLevel level = server.getLevel(source.dimension());
+            while (level != null && pressureAttempts < ForgeAtmospherePressure.MAX_BREAKS_PER_PASS) {
+                // A resumed search cannot authorize destruction against changed world state.
+                pressureAttempts++;
+                capacities.clear();
+                var fresh = grid.redistributeOverflow(serverTicks, capacityAt, List.of(source));
+                materialMoved += fresh.moved();
+                blockedOverflow = fresh.blockedOverflow();
+                searchLimited |= fresh.searchLimited();
+                if (fresh.searchLimited() || fresh.workRemaining() || !fresh.blockedCells().stream()
+                    .anyMatch(cell -> cell.key().equals(source) && cell.pressureEligible())) {
+                    break;
+                }
+                var current = grid.get(source);
+                int capacity = capacityAt.applyAsInt(source);
+                if (current == null || capacity < 0 || current.amount() <= capacity) {
+                    break;
+                }
+                var pressure = ForgeAtmospherePressure.breakForPressure(level, source,
+                    key -> capacityAt.applyAsInt(key) >= 0);
+                if (pressure.searchLimited()) {
+                    pressureSearchLimits++;
+                }
+                if (pressure.broken().isEmpty()) {
+                    break;
+                }
+                var broken = pressure.broken().orElseThrow();
+                pressureBreaks++;
+                capacities.clear();
+                int newCapacity = capacityAt.applyAsInt(broken.cell());
+                grid.emit(broken.cell(), broken.addedMaterial(), serverTicks, newCapacity);
+                Set<AtmosphereGrid.CellKey<ResourceKey<Level>>> overflowSources = new LinkedHashSet<>();
+                overflowSources.add(source);
+                overflowSources.add(broken.cell());
+                var retry = grid.redistributeOverflow(serverTicks, capacityAt, overflowSources);
+                materialMoved += retry.moved();
+                blockedOverflow = retry.blockedOverflow();
+                searchLimited |= retry.searchLimited();
+                if (retry.searchLimited() || !retry.blockedCells().stream()
+                    .anyMatch(cell -> cell.key().equals(source) && cell.pressureEligible())) {
+                    break;
+                }
+            }
+        }
     }
 
     private void sampleAutomatic(ServerPlayer player, Set<SourceKey> emittedSources) {
@@ -195,12 +337,12 @@ final class ForgeAtmospherePrototype {
                 AtmosphereGrid.CellKey<ResourceKey<Level>> cell =
                     cellKey(level, new BlockPos(x, surfaceY, z));
                 SourceKey source = new SourceKey(SourceKind.WATER, level.dimension(), surface.immutable());
-                emitSource(emittedSources, source, cell, depth * WATER_EMISSION_PER_DEPTH);
+                emitSource(level, emittedSources, source, cell, depth * WATER_EMISSION_PER_DEPTH);
             } else if (surfaceY >= level.getSeaLevel() + HIGH_TERRAIN_ABOVE_SEA) {
                 AtmosphereGrid.CellKey<ResourceKey<Level>> cell =
                     cellKey(level, new BlockPos(x, surfaceY + 5, z));
                 SourceKey source = new SourceKey(SourceKind.HIGH_TERRAIN, level.dimension(), surface.immutable());
-                emitSource(emittedSources, source, cell, HIGH_TERRAIN_EMISSION);
+                emitSource(level, emittedSources, source, cell, HIGH_TERRAIN_EMISSION);
                 if (sent < CLOUD_PARTICLE_CAP) {
                     int count = Math.min(4, CLOUD_PARTICLE_CAP - sent);
                     sent += sendCloudParticles(
@@ -223,9 +365,7 @@ final class ForgeAtmospherePrototype {
         AtmosphereGrid.CellKey<ResourceKey<Level>> cell = cellKey(level, landing);
         SourceKey rainSource = new SourceKey(SourceKind.RAIN, level.dimension(), landing.immutable());
         if (level.isRainingAt(landing)
-            && AtmosphereGrid.emitSourceOnce(
-                emittedSources, rainSource, grid, cell, RAIN_EMISSION, serverTicks)) {
-            gridEmissions++;
+            && emitSource(level, emittedSources, rainSource, cell, RAIN_EMISSION)) {
             rainEmissions++;
         }
 
@@ -236,22 +376,28 @@ final class ForgeAtmospherePrototype {
         if (darkGroundEmission > 0
             && level.canSeeSky(landing)
             && level.getFluidState(surface).isEmpty()
-            && AtmosphereGrid.emitSourceOnce(
-                emittedSources, darkGroundSource, grid, cell, darkGroundEmission, serverTicks)) {
-            gridEmissions++;
+            && emitSource(level, emittedSources, darkGroundSource, cell, darkGroundEmission)) {
             darkGroundEmissions++;
         }
     }
 
-    private void emitSource(
+    private boolean emitSource(
+        ServerLevel level,
         Set<SourceKey> emittedSources,
         SourceKey source,
         AtmosphereGrid.CellKey<ResourceKey<Level>> cell,
         int amount
     ) {
-        if (AtmosphereGrid.emitSourceOnce(emittedSources, source, grid, cell, amount, serverTicks)) {
-            gridEmissions++;
+        if (emittedSources.contains(source)) {
+            return false;
         }
+        int capacity = capacityAt(level, cell);
+        if (capacity >= 0 && AtmosphereGrid.emitSourceOnce(
+            emittedSources, source, grid, cell, amount, serverTicks, capacity)) {
+            gridEmissions++;
+            return true;
+        }
+        return false;
     }
 
     private int sampleLoadedWaterDepth(ServerLevel level, BlockPos surface) {
@@ -268,32 +414,60 @@ final class ForgeAtmospherePrototype {
 
     private void syncPlayers(MinecraftServer server, boolean forceSnapshot) {
         List<ServerPlayer> players = server.getPlayerList().getPlayers();
+        var capacities = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer>();
         syncPlanner.retainPlayers(players.stream().map(ServerPlayer::getUUID).toList());
         for (ServerPlayer player : players) {
             if (forceSnapshot) {
                 syncPlanner.reset(player.getUUID());
             }
-            syncPlayer(player);
+            syncPlayer(player, capacities);
         }
     }
 
     private void syncPlayer(ServerPlayer player) {
+        syncPlayer(player, new HashMap<>());
+    }
+
+    private void syncPlayer(ServerPlayer player,
+        Map<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer> capacities) {
         ResourceKey<Level> dimension = player.serverLevel().dimension();
         AtmosphereGrid.CellKey<ResourceKey<Level>> playerCell = cellKey(player.serverLevel(), player.blockPosition());
-        List<AtmosphereSyncPlanner.Cell> visible = grid.cells().stream()
-            .filter(cell -> cell.key().dimension().equals(dimension))
-            .filter(cell -> isCellLoaded(player.serverLevel(), cell.key()))
-            .filter(cell -> isNear(playerCell, cell.key()))
-            .sorted(Comparator.comparingLong(cell -> cellDistanceSquared(playerCell, cell.key())))
-            .limit(MAX_VISIBLE_CELLS_PER_PLAYER)
-            .map(cell -> new AtmosphereSyncPlanner.Cell(
-                cell.key().x(), cell.key().y(), cell.key().z(), cell.amount()))
-            .toList();
+        var nearby = new ArrayList<AtmosphereGrid.Cell<ResourceKey<Level>>>();
+        int minX = AtmosphereGridLayout.chunkCoordinate(playerCell.x() - GRID_RADIUS_CELLS);
+        int maxX = AtmosphereGridLayout.chunkCoordinate(playerCell.x() + GRID_RADIUS_CELLS);
+        int minZ = AtmosphereGridLayout.chunkCoordinate(playerCell.z() - GRID_RADIUS_CELLS);
+        int maxZ = AtmosphereGridLayout.chunkCoordinate(playerCell.z() + GRID_RADIUS_CELLS);
+        for (int x = minX; x <= maxX; x++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                ChunkState state = ensureImported(player.serverLevel(), x, z);
+                if (state == null || !state.readable) {
+                    continue;
+                }
+                for (var key : state.cells.keySet()) {
+                    var cell = grid.get(key);
+                    if (cell != null && isNear(playerCell, key)) {
+                        nearby.add(cell);
+                    }
+                }
+            }
+        }
+        nearby.sort(Comparator.comparingLong(cell -> cellDistanceSquared(playerCell, cell.key())));
+        var visible = new ArrayList<AtmosphereSyncPlanner.Cell>();
+        for (var cell : nearby) {
+            if (visible.size() >= MAX_VISIBLE_CELLS_PER_PLAYER) {
+                break;
+            }
+            int capacity = capacities.computeIfAbsent(cell.key(), key -> capacityAt(player.serverLevel(), key));
+            if (capacity >= 0) {
+                visible.add(new AtmosphereSyncPlanner.Cell(
+                    cell.key().x(), cell.key().y(), cell.key().z(), cell.amount(), capacity));
+            }
+        }
 
         for (AtmosphereSyncPlanner.Update<ResourceKey<Level>> update
             : syncPlanner.plan(player.getUUID(), dimension, visible)) {
             List<AtmosphereGridPayload.Cell> cells = update.cells().stream()
-                .map(cell -> new AtmosphereGridPayload.Cell(cell.x(), cell.y(), cell.z(), cell.amount()))
+                .map(cell -> new AtmosphereGridPayload.Cell(cell.x(), cell.y(), cell.z(), cell.amount(), cell.capacity()))
                 .toList();
             PacketDistributor.sendToPlayer(player, new AtmosphereGridPayload(
                 update.dimension().location(), update.reset(), cells));
@@ -301,23 +475,140 @@ final class ForgeAtmospherePrototype {
         }
     }
 
-    private boolean isActiveLoadedCell(
-        MinecraftServer server,
-        List<ServerPlayer> players,
-        AtmosphereGrid.CellKey<ResourceKey<Level>> key
-    ) {
-        ServerLevel level = server.getLevel(key.dimension());
-        if (level == null || !isCellLoaded(level, key)) {
-            return false;
+    /** Negative means unknown, including loaded chunks whose import is budget-deferred. */
+    private int capacityAt(ServerLevel level, AtmosphereGrid.CellKey<ResourceKey<Level>> key) {
+        if (level == null || !level.dimension().equals(key.dimension())) {
+            return -1;
         }
-        return players.stream()
-            .filter(player -> player.serverLevel().dimension().equals(key.dimension()))
-            .map(player -> cellKey(level, player.blockPosition()))
-            .anyMatch(playerCell -> isNear(playerCell, key));
+        long originY = (long) key.y() * AtmosphereGridLayout.CELL_SIZE;
+        if (originY >= level.getMaxBuildHeight() || originY + AtmosphereGridLayout.CELL_SIZE <= level.getMinBuildHeight()) {
+            return 0;
+        }
+        ChunkState state = ensureImported(level, AtmosphereGridLayout.chunkCoordinate(key.x()),
+            AtmosphereGridLayout.chunkCoordinate(key.z()));
+        if (state == null || !state.readable) {
+            return -1;
+        }
+        int size = AtmosphereGrid.CELL_SIZE;
+        int air = 0;
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int y = 0; y < size; y++) {
+            for (int z = 0; z < size; z++) {
+                for (int x = 0; x < size; x++) {
+                    pos.set(key.x() * size + x, key.y() * size + y, key.z() * size + z);
+                    if (level.isInWorldBounds(pos) && state.chunk.getBlockState(pos).isAir()) {
+                        air++;
+                    }
+                }
+            }
+        }
+        return AtmosphereGridLayout.capacityForAirBlocks(air);
     }
 
-    private boolean isCellLoaded(ServerLevel level, AtmosphereGrid.CellKey<ResourceKey<Level>> key) {
-        return level.hasChunkAt(cellCenter(key));
+    private void importPendingChunks(MinecraftServer server) {
+        var deferred = new LinkedHashMap<ChunkKey, LevelChunk>();
+        var iterator = pendingLoads.entrySet().iterator();
+        int examined = 0;
+        while (iterator.hasNext() && examined++ < MAX_CHUNK_IMPORTS_PER_TICK && importsRemaining > 0) {
+            var entry = iterator.next();
+            ChunkKey key = entry.getKey();
+            LevelChunk expected = entry.getValue();
+            iterator.remove();
+            ServerLevel level = server.getLevel(key.dimension());
+            if (level == null) {
+                continue;
+            }
+            if (level.getChunkSource().getChunkNow(key.x(), key.z()) == null) {
+                deferred.put(key, expected);
+                continue;
+            }
+            ensureImported(level, key.x(), key.z());
+        }
+        pendingLoads.putAll(deferred);
+    }
+
+    private ChunkState ensureImported(ServerLevel level, int chunkX, int chunkZ) {
+        LevelChunk chunk = level.getChunkSource().getChunkNow(chunkX, chunkZ);
+        if (chunk == null) {
+            return null;
+        }
+        ChunkKey key = new ChunkKey(level.dimension(), chunkX, chunkZ);
+        ChunkState previous = chunks.get(key);
+        if (previous != null && previous.chunk == chunk) {
+            return previous;
+        }
+        if (importsRemaining <= 0) {
+            pendingLoads.put(key, chunk);
+            return null;
+        }
+        importsRemaining--;
+        if (previous != null) {
+            // Normal unloading already persisted it; never merge two chunk incarnations.
+            flushDirtyChunks();
+            previous.cells.keySet().forEach(grid::remove);
+        }
+        ChunkState state = new ChunkState(chunk);
+        chunks.put(key, state);
+        pendingLoads.remove(key, chunk);
+        try {
+            for (AtmosphereChunkData.Cell cell : ForgeAtmosphereStorage.read(chunk)) {
+                var cellKey = new AtmosphereGrid.CellKey<>(level.dimension(), cell.x(), cell.y(), cell.z());
+                state.cells.put(cellKey, cell);
+                grid.restore(new AtmosphereGrid.Cell<>(cellKey, cell.amount(), 0, Long.MIN_VALUE, serverTicks), serverTicks);
+            }
+        } catch (IllegalStateException exception) {
+            state.readable = false;
+            LOGGER.warn("Skipping atmospheric simulation for chunk {} in {}: {}", chunk.getPos(),
+                level.dimension().location(), exception.getMessage());
+        }
+        return state;
+    }
+
+    private void flushDirtyChunks() {
+        Set<ChunkKey> dirtyChunks = new LinkedHashSet<>();
+        for (var key : grid.drainDirtyKeys()) {
+            ChunkKey chunkKey = new ChunkKey(key.dimension(), AtmosphereGridLayout.chunkCoordinate(key.x()),
+                AtmosphereGridLayout.chunkCoordinate(key.z()));
+            ChunkState state = chunks.get(chunkKey);
+            if (state == null || !state.readable) {
+                continue;
+            }
+            var cell = grid.get(key);
+            if (cell == null) {
+                state.cells.remove(key);
+            } else {
+                state.cells.put(key, new AtmosphereChunkData.Cell(key.x(), key.y(), key.z(), cell.amount()));
+            }
+            dirtyChunks.add(chunkKey);
+        }
+        for (ChunkKey key : dirtyChunks) {
+            ChunkState state = chunks.get(key);
+            try {
+                ForgeAtmosphereStorage.write(state.chunk, List.copyOf(state.cells.values()));
+            } catch (IllegalStateException exception) {
+                state.readable = false;
+                state.cells.keySet().forEach(grid::remove);
+                LOGGER.warn("Preserving unreadable atmospheric data for chunk {} in {}: {}",
+                    state.chunk.getPos(), key.dimension().location(), exception.getMessage());
+            }
+        }
+    }
+
+    private static ChunkKey chunkKey(ServerLevel level, LevelChunk chunk) {
+        return new ChunkKey(level.dimension(), chunk.getPos().x, chunk.getPos().z);
+    }
+
+    private record ChunkKey(ResourceKey<Level> dimension, int x, int z) {
+    }
+
+    private static final class ChunkState {
+        private final LevelChunk chunk;
+        private final Map<AtmosphereGrid.CellKey<ResourceKey<Level>>, AtmosphereChunkData.Cell> cells = new LinkedHashMap<>();
+        private boolean readable = true;
+
+        private ChunkState(LevelChunk chunk) {
+            this.chunk = chunk;
+        }
     }
 
     private boolean isNear(
@@ -351,14 +642,6 @@ final class ForgeAtmospherePrototype {
             AtmosphereGrid.cellCoordinate(pos.getX()),
             AtmosphereGrid.cellCoordinate(pos.getY()),
             AtmosphereGrid.cellCoordinate(pos.getZ())
-        );
-    }
-
-    private BlockPos cellCenter(AtmosphereGrid.CellKey<ResourceKey<Level>> key) {
-        return new BlockPos(
-            key.x() * AtmosphereGrid.CELL_SIZE + AtmosphereGrid.CELL_SIZE / 2,
-            key.y() * AtmosphereGrid.CELL_SIZE + AtmosphereGrid.CELL_SIZE / 2,
-            key.z() * AtmosphereGrid.CELL_SIZE + AtmosphereGrid.CELL_SIZE / 2
         );
     }
 

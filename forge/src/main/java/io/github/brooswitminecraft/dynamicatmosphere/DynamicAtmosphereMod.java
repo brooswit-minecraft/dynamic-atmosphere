@@ -22,8 +22,11 @@ public class DynamicAtmosphereMod {
     public DynamicAtmosphereMod(IEventBus modEventBus) {
         LOGGER.info("[{}] engine module reachable: {}", MODID, EngineInfo.DESCRIPTION);
         modEventBus.addListener(AtmosphereNetwork::register);
+        ForgeAtmosphereStorage.register(modEventBus);
         ForgeAtmospherePrototype prototype = new ForgeAtmospherePrototype();
         NeoForge.EVENT_BUS.addListener(prototype::onServerTick);
+        NeoForge.EVENT_BUS.addListener(prototype::onChunkLoad);
+        NeoForge.EVENT_BUS.addListener(prototype::onChunkUnload);
         NeoForge.EVENT_BUS.addListener(prototype::onRegisterCommands);
         NeoForge.EVENT_BUS.addListener(prototype::onPlayerLoggedOut);
         NeoForge.EVENT_BUS.addListener(prototype::onPlayerRespawn);

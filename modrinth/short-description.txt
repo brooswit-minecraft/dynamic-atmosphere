@@ -1,1 +1,1 @@
-A 4-block atmospheric grid for NeoForge 1.21.1. Water, rain, clouds, and dark exposed ground build fog that fades in place, synchronized to clients.
+A persistent 4-block fog grid for NeoForge 1.21.1 with spreading and default-enabled destructive pressure. Back up worlds: terrain can be damaged.

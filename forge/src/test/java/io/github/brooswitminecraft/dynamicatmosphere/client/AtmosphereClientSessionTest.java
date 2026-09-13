@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class AtmosphereClientSessionTest {
     private static List<AtmosphereClientCache.Update> update(int amount) {
-        return List.of(new AtmosphereClientCache.Update(new AtmosphereClientCache.Cell(-1, 4, 0), amount));
+        return List.of(new AtmosphereClientCache.Update(new AtmosphereClientCache.Cell(-1, 4, 0), amount, 1000));
     }
 
     @Test
@@ -72,7 +72,7 @@ class AtmosphereClientSessionTest {
         for (int batch = 0; batch < 3; batch++) {
             final int offset = batch * 3000;
             session.receive("overworld", false, IntStream.range(offset, offset + 3000)
-                .mapToObj(x -> new AtmosphereClientCache.Update(new AtmosphereClientCache.Cell(x, 0, 0), 100))
+                .mapToObj(x -> new AtmosphereClientCache.Update(new AtmosphereClientCache.Cell(x, 0, 0), 100, 1000))
                 .toList());
         }
         session.world("overworld");

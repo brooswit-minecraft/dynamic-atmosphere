@@ -8,7 +8,7 @@ modId="dynamicatmosphere" #mandatory
 version="${mod_version}" #mandatory
 displayName="Dynamic Atmosphere" #mandatory
 authors="brooswit"
-description='''An atmospheric grid with server-owned material buildup and decay, synchronized to nearby clients and rendered as translucent cells. No inter-cell flow or terrain modification.'''
+description='''A persistent, chunk-owned 4-block fog grid with fullness-based spreading and no natural decay or global cell-count cap. Unknown unloaded boundaries and exhausted budgets defer work, never authorize pressure destruction. Default-enabled destructive pressure breaks eligible blocks with drops and adds 1 material per block. Intrinsically unbreakable blocks are exempt; no claim protection support. Back up worlds: atmospheric amounts and terrain damage persist.'''
 
 [[dependencies.dynamicatmosphere]]
     modId="neoforge"

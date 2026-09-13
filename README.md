@@ -5,31 +5,76 @@ MIT licensed.
 
 ## Atmospheric Grid Alpha
 
+**BREAKING behavior in 0.6.0-alpha.1: pressure destruction is enabled by default
+and can damage terrain and builds. Back up the world before upgrading. There is
+no claim/protected-area integration.**
+
 The server maintains a world-aligned atmospheric grid of 4x4x4-block cells.
-Water fog, high-terrain clouds, rain landing on exposed surfaces, and dark exposed ground add material to their cells. Material
-decays in place; it never travels between cells. Nearby clients receive a snapshot
-and batched changes, and render translucent cells with opacity based on material.
+Water fog, high-terrain clouds, rain landing on exposed surfaces, and dark exposed
+ground add material to their cells. There is no natural decay: material spreads
+by equalizing fullness across the six face-adjacent cells, not diagonally.
+Capacity is proportional to the number of air blocks in each cell (0..64).
+Fullness is material amount divided by capacity: fewer vacant blocks need less
+material to fill. Transfer uses positive-capacity neighbors; zero-air cells block it.
+If terrain reduces capacity below the stored amount, excess is pushed farther
+outward toward the nearest available capacity through neighboring air-capacity
+cells. This search is bounded to the loaded active region. Confirmed blockage
+can trigger bounded destructive pressure relief (below). Unknown unloaded
+boundaries and exhausted work/search budgets leave work pending, never authorize
+pressure destruction, and do not discard material.
+Excess that still cannot escape remains blocked and reported, not discarded;
+displacement is not unlimited.
+Sources are sampled every five seconds; simulation work is budgeted across ticks.
+Nearby clients receive a snapshot
+and batched changes, and render translucent cells with opacity based on fullness.
 This is **not** the full terrain-aware atmospheric simulation. No generated precipitation,
 pollution, gas transport, or world generation changes are included yet.
 
 Rain uses Minecraft's local rain/exposure check at the topmost landing surface,
 including roofs and canopies. Each sampled rainy position contributes 40 material
-units every five seconds, independently of water/cloud sources; each cell loses
-10 units per pass. Dry biomes, snow, and sheltered ground do not emit rain material.
+units every five seconds, independently of water/cloud sources. Dry biomes, snow,
+and sheltered ground do not emit rain material.
 The mod does not create rain or change the world's weather.
 
 Exposed non-fluid ground also emits according to effective light: zero at light
 15, rising to 40 units per pass at light 0. This uses the day/night-adjusted sky
-light combined with local block lighting. Daylight stops this source, allowing
-normal decay to clear overnight fog. Water/rain/cloud sources remain independent.
+light combined with local block lighting. Full daylight stops this source, but
+does not clear existing fog: material continues to spread without natural decay.
+Water/rain/cloud sources remain independent.
+
+The air-count rule is coarse, not an exact airtight-wall simulation. It does
+not inspect every shared-face opening, and rendered cells are not clipped to
+individual terrain blocks. Ordinary equalization conserves transferred material.
+Sparse atmospheric amounts are saved with each Minecraft chunk, without a
+global 1,024-cell cap or range-based deletion. Changes mark their owning chunks
+dirty for saving; unloading releases the in-memory simulation mirror, and loading
+restores amounts with capacity recomputed from terrain. Amounts survive normal
+save/unload/reload and server restarts. Work and network budgets limit processing,
+not the total number of stored cells. Each cell stores at most 1,000,000 material
+units; capacity remains 0..1000.
 
 Install this version on **both server and client**, or in a single-player NeoForge
 instance. Earlier particle-only releases did not require a client installation;
 the new grid renderer and sync protocol do. Update both sides together.
-No world reset is needed. Grid state is transient, not saved terrain.
+No world reset is needed. Both atmospheric amounts and broken terrain are saved.
 
 Operators can run `/dynamicatmosphere status` to inspect runtime counters and
 `/dynamicatmosphere demo` as a player to add material nearby for visual testing.
+
+## Destructive Pressure
+
+Pressure relief is included in 0.6.0-alpha.1 and enabled by default. Trapped
+excess breaks the eligible block with the lowest hardness in the source cell,
+dropping items. Once source-cell blocks are gone, relief tries neighboring cells
+and proceeds outward toward room. Each broken block adds **1 material unit**.
+Negative-hardness and intrinsically unbreakable blocks are exempt; there is no
+claim/protected-area support. Work is bounded per pass, not an unlimited search
+or guarantee of immediate relief. Closed unbreakable surroundings leave excess
+blocked and reported rather than deleting it.
+
+Back up existing worlds before upgrading. Downgrading the mod does not restore
+broken blocks; restore the backup to roll back terrain damage. This alpha's
+pressure implementation still requires build and server/client verification.
 
 ## Development
 

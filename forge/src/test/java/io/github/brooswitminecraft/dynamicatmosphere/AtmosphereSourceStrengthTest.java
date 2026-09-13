@@ -22,15 +22,13 @@ class AtmosphereSourceStrengthTest {
     }
 
     @Test
-    void materialDecaysWhenDarkGroundSourceTurnsOff() {
-        AtmosphereGrid<String> grid = new AtmosphereGrid<>(4, 10);
+    void materialDoesNotPassivelyDecayWhenDarkGroundSourceTurnsOff() {
+        AtmosphereGrid<String> grid = new AtmosphereGrid<>();
         AtmosphereGrid.CellKey<String> cell = new AtmosphereGrid.CellKey<>("overworld", 0, 16, 0);
-        grid.emit(cell, AtmosphereSourceStrength.lightToEmission(0), 100);
+        grid.emit(cell, AtmosphereSourceStrength.lightToEmission(0), 100, 1000);
 
-        grid.decay(100);
-        assertEquals(30, grid.cells().getFirst().amount());
         assertEquals(0, AtmosphereSourceStrength.lightToEmission(15));
-        grid.decay(200);
-        assertEquals(20, grid.cells().getFirst().amount());
+        grid.spread(200, ignored -> 0);
+        assertEquals(40, grid.cells().getFirst().amount());
     }
 }

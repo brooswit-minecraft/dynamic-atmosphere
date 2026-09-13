@@ -10,11 +10,63 @@ class AtmosphereClientCacheTest {
     private static final AtmosphereClientCache.Cell B = new AtmosphereClientCache.Cell(0, 4, 0);
 
     private static AtmosphereClientCache.Update update(AtmosphereClientCache.Cell cell, int amount) {
-        return new AtmosphereClientCache.Update(cell, amount);
+        return new AtmosphereClientCache.Update(cell, amount, 1000);
     }
 
     private static void settle(AtmosphereClientCache cache) {
         for (int i = 0; i < 10; i++) cache.advance();
+    }
+
+    @Test
+    void storedPressureUsesMillionUnitBoundWhileOpacityStaysNormalized() {
+        var cache = new AtmosphereClientCache();
+        cache.changeDimension("overworld");
+        cache.apply("overworld", true, List.of(new AtmosphereClientCache.Update(A, 1_000_000, 500)));
+        settle(cache);
+        assertEquals(1_000_000, cache.storedAmount(A));
+        assertEquals(1000, cache.visible(0).getFirst().amount());
+        cache.apply("overworld", false, List.of(new AtmosphereClientCache.Update(A, Integer.MAX_VALUE, 500)));
+        assertEquals(1_000_000, cache.storedAmount(A));
+        cache.apply("overworld", false, List.of(new AtmosphereClientCache.Update(A, 5000, 0)));
+        settle(cache);
+        assertEquals(5000, cache.storedAmount(A));
+        assertTrue(cache.visible(0).isEmpty());
+        cache.apply("overworld", false, List.of(new AtmosphereClientCache.Update(A, -1, 500)));
+        settle(cache);
+        assertEquals(0, cache.storedAmount(A));
+        assertEquals(0, cache.size());
+    }
+
+    @Test
+    void capacityOnlyChangesInterpolateFullnessAndSnapshotsPreserveIt() {
+        var cache = new AtmosphereClientCache();
+        cache.changeDimension("overworld");
+        cache.apply("overworld", true, List.of(new AtmosphereClientCache.Update(A, 250, 1000)));
+        settle(cache);
+        cache.apply("overworld", false, List.of(new AtmosphereClientCache.Update(A, 250, 500)));
+        assertEquals(250, cache.visible(0).getFirst().amount());
+        settle(cache);
+        assertEquals(500, cache.visible(0).getFirst().amount());
+        cache.apply("overworld", true, List.of(new AtmosphereClientCache.Update(A, 250, 500)));
+        assertEquals(500, cache.visible(0).getFirst().amount());
+    }
+
+    @Test
+    void zeroCapacityIsInvisibleAndOverfullOpacityIsClamped() {
+        var cache = new AtmosphereClientCache();
+        cache.changeDimension("overworld");
+        cache.apply("overworld", true, List.of(new AtmosphereClientCache.Update(A, 500, 100)));
+        settle(cache);
+        assertEquals(1000, cache.visible(0).getFirst().amount());
+        cache.apply("overworld", false, List.of(new AtmosphereClientCache.Update(A, 500, 0)));
+        settle(cache);
+        assertTrue(cache.visible(0).isEmpty());
+        cache.apply("overworld", false, List.of(new AtmosphereClientCache.Update(A, 500, 1000)));
+        settle(cache);
+        assertEquals(500, cache.visible(0).getFirst().amount());
+        cache.apply("overworld", false, List.of(new AtmosphereClientCache.Update(A, 0, 0)));
+        settle(cache);
+        assertEquals(0, cache.size());
     }
 
     @Test

@@ -36,7 +36,7 @@ public record AtmosphereGridPayload(ResourceLocation dimension, boolean reset, L
         return TYPE;
     }
 
-    public record Cell(int x, int y, int z, int amount) {
+    public record Cell(int x, int y, int z, int amount, int capacity) {
         static final StreamCodec<RegistryFriendlyByteBuf, Cell> STREAM_CODEC = StreamCodec.composite(
             ByteBufCodecs.VAR_INT,
             Cell::x,
@@ -46,12 +46,17 @@ public record AtmosphereGridPayload(ResourceLocation dimension, boolean reset, L
             Cell::z,
             ByteBufCodecs.VAR_INT,
             Cell::amount,
+            ByteBufCodecs.VAR_INT,
+            Cell::capacity,
             Cell::new
         );
 
         public Cell {
-            if (amount < 0 || amount > AtmosphereGrid.MAX_AMOUNT) {
-                throw new IllegalArgumentException("atmosphere amount must be between 0 and 1000");
+            if (capacity < 0 || capacity > AtmosphereGrid.MAX_AMOUNT) {
+                throw new IllegalArgumentException("atmosphere capacity must be between 0 and 1000");
+            }
+            if (amount < 0 || amount > AtmosphereGrid.MAX_STORED_AMOUNT) {
+                throw new IllegalArgumentException("atmosphere amount must be between 0 and " + AtmosphereGrid.MAX_STORED_AMOUNT);
             }
         }
     }

@@ -7,6 +7,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class AtmosphereGridLayoutTest {
 
     @Test
+    void capacityScalesWithVacantBlockCount() {
+        assertEquals(0, AtmosphereGridLayout.capacityForAirBlocks(0));
+        assertEquals(250, AtmosphereGridLayout.capacityForAirBlocks(16));
+        assertEquals(500, AtmosphereGridLayout.capacityForAirBlocks(32));
+        assertEquals(1000, AtmosphereGridLayout.capacityForAirBlocks(64));
+        assertEquals(0, AtmosphereGridLayout.capacityForAirBlocks(-1));
+        assertEquals(1000, AtmosphereGridLayout.capacityForAirBlocks(65));
+    }
+
+    @Test
     void mapsCellCoordinatesToContainingMinecraftChunk() {
         assertEquals(0, AtmosphereGridLayout.chunkCoordinate(0));
         assertEquals(0, AtmosphereGridLayout.chunkCoordinate(1));

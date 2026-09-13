@@ -43,7 +43,7 @@ public final class AtmosphereClient {
         SESSION.receive(payload.dimension().toString(), payload.reset(), payload.cells().stream()
             .limit(AtmosphereClientCache.MAX_CELLS)
             .map(cell -> new AtmosphereClientCache.Update(
-                new AtmosphereClientCache.Cell(cell.x(), cell.y(), cell.z()), cell.amount()))
+                new AtmosphereClientCache.Cell(cell.x(), cell.y(), cell.z()), cell.amount(), cell.capacity()))
             .toList());
     }
 
