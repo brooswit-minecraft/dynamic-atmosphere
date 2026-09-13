@@ -26,8 +26,8 @@ public final class AtmosphereVolumeGeometry {
 
     public record Slice(double depth, float alpha, List<Point> vertices) { }
 
-    static float colorChannel(int level, float fogChannel) {
-        return level == 0 ? 1.0f : Math.clamp(fogChannel, 0, 1);
+    static float colorChannel(int level, float fogChannel, float nearGray) {
+        return Math.clamp(level == 0 ? nearGray : fogChannel, 0, 1);
     }
 
     static AtmosphereClientCache.Cell cameraCell(Point camera) {

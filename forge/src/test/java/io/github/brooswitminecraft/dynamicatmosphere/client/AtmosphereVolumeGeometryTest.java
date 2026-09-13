@@ -8,24 +8,24 @@ class AtmosphereVolumeGeometryTest {
     @Test
     void onlyCoarseVolumesUseCurrentFogColorIncludingUnloadedFallbacks() {
         for (float channel : new float[] {0, 0.15f, 0.7f, 1}) {
-            assertEquals(1, AtmosphereVolumeGeometry.colorChannel(0, channel));
+            assertEquals(0.25f, AtmosphereVolumeGeometry.colorChannel(0, channel, 0.25f));
             for (int level = 1; level <= 3; level++) {
-                assertEquals(channel, AtmosphereVolumeGeometry.colorChannel(level, channel));
+                assertEquals(channel, AtmosphereVolumeGeometry.colorChannel(level, channel, 0.25f));
             }
         }
-        assertEquals(0, AtmosphereVolumeGeometry.colorChannel(1, -1));
-        assertEquals(1, AtmosphereVolumeGeometry.colorChannel(1, 2));
+        assertEquals(0, AtmosphereVolumeGeometry.colorChannel(1, -1, 0.25f));
+        assertEquals(1, AtmosphereVolumeGeometry.colorChannel(1, 2, 0.25f));
     }
 
     @Test
-    void nearColoredFallbackIsDrawnAfterWhiteDetailBehindIt() {
+    void nearColoredFallbackIsDrawnAfterGrayDetailBehindIt() {
         var tree = new AtmosphereLodHierarchy();
-        tree.put(new AtmosphereClientCache.Cell(1, 0, 0), 500, 500, 0, 0);
+        tree.put(new AtmosphereClientCache.Cell(3, 0, 0), 500, 500, 0, 0);
         tree.put(new AtmosphereClientCache.Cell(6, 0, 0), 500, 500, 0, 0);
         var selected = tree.select(40, 2, 2, 4, 0);
-        var white = selected.volumes().stream().filter(v -> v.x == 1).findFirst().orElseThrow();
+        var gray = selected.volumes().stream().filter(v -> v.x == 3).findFirst().orElseThrow();
         var fallback = selected.unloadedFallbacks().stream().filter(v -> v.x == 4).findFirst().orElseThrow();
-        assertTrue(AtmosphereVolumeGeometry.backToFront(white, fallback,
+        assertTrue(AtmosphereVolumeGeometry.backToFront(gray, fallback,
             AtmosphereVolumeGeometry.cameraCell(new AtmosphereVolumeGeometry.Point(40, 2, 2))) < 0);
     }
 

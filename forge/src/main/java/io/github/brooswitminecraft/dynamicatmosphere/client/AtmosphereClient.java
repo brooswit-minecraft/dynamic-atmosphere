@@ -59,6 +59,7 @@ public final class AtmosphereClient {
         if (!namespace.equals(cacheNamespace)) {
             checkpoint();
             SESSION.clear();
+            AtmosphereVolumeRenderer.close();
             if (observedLevel != null) SESSION.world(payload.dimension().toString());
             cacheNamespace = namespace;
             cacheDimension = payload.dimension().toString();
@@ -78,6 +79,7 @@ public final class AtmosphereClient {
         syncWorld();
         if (observedLevel != null && !Minecraft.getInstance().isPaused()) {
             SESSION.cache().advance();
+            AtmosphereVolumeRenderer.tick(observedLevel);
             if (++saveTicks >= 200) {
                 saveTicks = 0;
                 checkpoint();

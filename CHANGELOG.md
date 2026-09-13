@@ -1,11 +1,13 @@
-# 0.9.1-alpha.1
+# 0.10.0-alpha.1
 
-- Tint coarse LOD volumes with Minecraft's actual current fog/horizon color, including cached fallbacks. Nearby 4-block detail remains white.
-- Replace the all-white composition assumption with cached spatial back-to-front volume ordering, preserving bounded GPU batches and avoiding per-slice sorting. Near unloaded fallbacks are ordered with white detail, not blindly drawn behind it.
+- Tint coarse LOD volumes with Minecraft's actual current fog/horizon color, including cached fallbacks.
+- Shade nearby 4-block detail by mean effective light of air blocks, normalized from black at 0 to white at 15. Include sky darkening and block light; exclude non-air blocks. Sample only loaded terrain, at most 32 cells per client tick, with 20-tick refresh requests and neutral gray before sampling. Bound the disposable lighting cache to 8,192 cells.
+- Replace the uniform-color composition assumption with cached spatial back-to-front volume ordering, preserving bounded GPU batches and avoiding per-slice sorting. Near unloaded fallbacks are ordered with gray detail, not blindly drawn behind it.
 - Preserve opacity, 250-tick simulation checks, condensation, protocol 5, world data, and personal visual caches. No world reset is required.
 - Add focused color and spatial composition regression tests for CI; local tests and performance measurement are intentionally skipped.
 
-Compatible visual-correction patch; actual appearance remains for user testing.
+Minor client-lighting feature release, superseding the unpublished 0.9.1 attempt;
+actual appearance remains for user testing.
 
 # 0.9.0-alpha.1
 

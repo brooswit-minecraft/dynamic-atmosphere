@@ -8,6 +8,8 @@ import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderStateShard;
 import net.minecraft.client.renderer.RenderType;
@@ -38,6 +40,23 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
     private static AtmosphereLodHierarchy.Selection orderedSelection;
     private static AtmosphereClientCache.Cell orderCamera;
     private static List<DrawVolume> orderedVolumes = List.of();
+    private static final AtmosphereLightCache LIGHT = new AtmosphereLightCache();
+
+    static void tick(ClientLevel level) {
+        LIGHT.advance(cell -> {
+            var chunk = level.getChunkSource().getChunk(AtmosphereGridLayout.chunkCoordinate(cell.x()),
+                AtmosphereGridLayout.chunkCoordinate(cell.z()), ChunkStatus.FULL, false);
+            if (chunk == null) return Double.NaN;
+            int size = AtmosphereVolumeGeometry.CELL_SIZE;
+            var pos = new BlockPos.MutableBlockPos();
+            return AtmosphereLightCache.meanAirLight(index -> {
+                pos.set(cell.x() * size + index % size, cell.y() * size + index / (size * size),
+                    cell.z() * size + (index / size) % size);
+                return !level.isOutsideBuildHeight(pos) && chunk.getBlockState(pos).isAir()
+                    ? level.getMaxLocalRawBrightness(pos) : -1;
+            });
+        });
+    }
 
     static void render(RenderLevelStageEvent event, ClientLevel level, AtmosphereClientCache cache) {
         renderedCellCount = 0;
@@ -72,7 +91,7 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
             int batchSlices = 0;
             // AFTER_PARTICLES already has the event model-view rotation on RenderSystem's
             // stack. These vertices are camera-relative: do not apply that matrix twice.
-            // Mixed fog/white RGB requires painter order, including near unloaded fallbacks.
+            // Mixed horizon/gray RGB requires painter order, including near unloaded fallbacks.
             // Cache BSP order of selected volumes; rotation never sorts a global slice list.
             // Each volume has uniform RGB, so its internal slices still commute.
             for (var draw : ordered(selection, camera)) {
@@ -84,9 +103,10 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
                 if (AtmosphereLodHierarchy.distanceSquared(cell, position.x, position.y, position.z)
                     > farDistance * farDistance || !event.getFrustum().isVisible(bounds(cell))) continue;
                 var slices = AtmosphereVolumeGeometry.lodSlices(cell, cell.amount(tick), camera, forward);
-                float red = AtmosphereVolumeGeometry.colorChannel(cell.level, fogColor[0]);
-                float green = AtmosphereVolumeGeometry.colorChannel(cell.level, fogColor[1]);
-                float blue = AtmosphereVolumeGeometry.colorChannel(cell.level, fogColor[2]);
+                float gray = cell.level == 0 ? LIGHT.value(new AtmosphereClientCache.Cell(cell.x, cell.y, cell.z)) : 0;
+                float red = AtmosphereVolumeGeometry.colorChannel(cell.level, fogColor[0], gray);
+                float green = AtmosphereVolumeGeometry.colorChannel(cell.level, fogColor[1], gray);
+                float blue = AtmosphereVolumeGeometry.colorChannel(cell.level, fogColor[2], gray);
                 if (!slices.isEmpty()) {
                     if (cell.level > 0) renderedCoarseCount++;
                     else renderedCellCount++;
@@ -148,6 +168,7 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
     }
 
     static void close() {
+        LIGHT.clear();
         if (storage != null) {
             storage.close();
             storage = null;
