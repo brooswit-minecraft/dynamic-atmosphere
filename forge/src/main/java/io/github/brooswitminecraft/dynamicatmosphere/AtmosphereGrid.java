@@ -9,7 +9,7 @@ import java.util.function.Predicate;
 
 final class AtmosphereGrid<D> {
 
-    static final int CELL_SIZE = 16;
+    static final int CELL_SIZE = AtmosphereGridLayout.CELL_SIZE;
     static final int MAX_AMOUNT = 1000;
 
     record CellKey<D>(D dimension, int x, int y, int z) {
@@ -31,7 +31,7 @@ final class AtmosphereGrid<D> {
     }
 
     static int cellCoordinate(int blockCoordinate) {
-        return Math.floorDiv(blockCoordinate, CELL_SIZE);
+        return AtmosphereGridLayout.cellCoordinate(blockCoordinate);
     }
 
     static <S, D> boolean emitSourceOnce(

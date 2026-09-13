@@ -1,3 +1,15 @@
+# 0.5.0-alpha.1
+
+- Reduce atmospheric cells to 4x4x4 blocks with shared server/client grid coordinates.
+- Preserve the 64-block subscription radius and existing cell/network limits.
+- Correct render bounds and chunk visibility checks for sub-chunk cells, including negative coordinates.
+- Keep proportional translucent volume sampling for the smaller cells.
+- Exposed dry ground produces more material at lower effective light levels, creating nighttime fog that decays after daylight returns.
+- Effective light includes sky darkening and local block light; this source does not emit on water/lava or sheltered ground.
+
+Minor pre-1.0 compatibility bump: update both sides together. The new protocol
+rejects older 16-block-grid clients. Grid state is transient; no world reset.
+
 # 0.4.0-alpha.1
 
 - Rain adds material where it lands on exposed terrain, roofs, canopies, or water.

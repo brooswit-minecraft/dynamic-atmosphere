@@ -5,8 +5,8 @@ MIT licensed.
 
 ## Atmospheric Grid Alpha
 
-The server maintains a world-aligned atmospheric grid of 16x16x16-block cells.
-Water fog, high-terrain clouds, and rain landing on exposed surfaces add material to their cells. Material
+The server maintains a world-aligned atmospheric grid of 4x4x4-block cells.
+Water fog, high-terrain clouds, rain landing on exposed surfaces, and dark exposed ground add material to their cells. Material
 decays in place; it never travels between cells. Nearby clients receive a snapshot
 and batched changes, and render translucent cells with opacity based on material.
 This is **not** the full terrain-aware atmospheric simulation. No generated precipitation,
@@ -17,6 +17,11 @@ including roofs and canopies. Each sampled rainy position contributes 40 materia
 units every five seconds, independently of water/cloud sources; each cell loses
 10 units per pass. Dry biomes, snow, and sheltered ground do not emit rain material.
 The mod does not create rain or change the world's weather.
+
+Exposed non-fluid ground also emits according to effective light: zero at light
+15, rising to 40 units per pass at light 0. This uses the day/night-adjusted sky
+light combined with local block lighting. Daylight stops this source, allowing
+normal decay to clear overnight fog. Water/rain/cloud sources remain independent.
 
 Install this version on **both server and client**, or in a single-player NeoForge
 instance. Earlier particle-only releases did not require a client installation;

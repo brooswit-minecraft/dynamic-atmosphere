@@ -28,7 +28,7 @@ import java.util.UUID;
 
 /**
  * Bounded server-side atmospheric grid and delivery adapter. Cells are fixed
- * 16-block cubes; this first version has local sources and decay but no flow.
+ * Four-block cubes; this first version has local sources and decay but no flow.
  */
 final class ForgeAtmospherePrototype {
 
@@ -40,8 +40,9 @@ final class ForgeAtmospherePrototype {
     private static final int DEMO_PARTICLE_CAP = 24;
     private static final int MAX_GRID_CELLS = 1024;
     private static final int MAX_VISIBLE_CELLS_PER_PLAYER = 256;
-    private static final int GRID_RADIUS_CELLS = 4;
-    private static final int GRID_VERTICAL_RADIUS_CELLS = 4;
+    private static final int SUBSCRIPTION_RADIUS_BLOCKS = 64;
+    private static final int GRID_RADIUS_CELLS = SUBSCRIPTION_RADIUS_BLOCKS / AtmosphereGridLayout.CELL_SIZE;
+    private static final int GRID_VERTICAL_RADIUS_CELLS = SUBSCRIPTION_RADIUS_BLOCKS / AtmosphereGridLayout.CELL_SIZE;
     private static final int GRID_DECAY_PER_PASS = 10;
     private static final int WATER_EMISSION_PER_DEPTH = 20;
     private static final int HIGH_TERRAIN_EMISSION = 40;
@@ -59,6 +60,7 @@ final class ForgeAtmospherePrototype {
     private long particlesSent;
     private long gridEmissions;
     private long rainEmissions;
+    private long darkGroundEmissions;
     private long gridCellsRemoved;
     private long payloadsSent;
     private int playersLastPass;
@@ -99,6 +101,7 @@ final class ForgeAtmospherePrototype {
         particlesSent = 0;
         gridEmissions = 0;
         rainEmissions = 0;
+        darkGroundEmissions = 0;
         gridCellsRemoved = 0;
         payloadsSent = 0;
         playersLastPass = 0;
@@ -123,6 +126,7 @@ final class ForgeAtmospherePrototype {
                 + ", passes=" + automaticPasses
                 + ", emissions=" + gridEmissions
                 + ", rainEmissions=" + rainEmissions
+                + ", darkGroundEmissions=" + darkGroundEmissions
                 + ", removed=" + gridCellsRemoved
                 + ", payloads=" + payloadsSent
                 + ", particles=" + particlesSent
@@ -185,7 +189,7 @@ final class ForgeAtmospherePrototype {
                 continue;
             }
 
-            sampleRain(level, loadedProbe, emittedSources);
+            sampleLandingSources(level, loadedProbe, emittedSources);
             if (level.getFluidState(surface).is(FluidTags.WATER)) {
                 int depth = sampleLoadedWaterDepth(level, surface);
                 AtmosphereGrid.CellKey<ResourceKey<Level>> cell =
@@ -206,22 +210,36 @@ final class ForgeAtmospherePrototype {
         }
     }
 
-    private void sampleRain(ServerLevel level, BlockPos loadedProbe, Set<SourceKey> emittedSources) {
+    private void sampleLandingSources(ServerLevel level, BlockPos loadedProbe, Set<SourceKey> emittedSources) {
         BlockPos landing = level.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING, loadedProbe);
         BlockPos surface = landing.below();
         if (!level.isInWorldBounds(landing)
             || !level.isInWorldBounds(surface)
             || !level.hasChunkAt(landing)
-            || level.getBlockState(surface).isAir()
-            || !level.isRainingAt(landing)) {
+            || level.getBlockState(surface).isAir()) {
             return;
         }
 
-        SourceKey source = new SourceKey(SourceKind.RAIN, level.dimension(), landing.immutable());
         AtmosphereGrid.CellKey<ResourceKey<Level>> cell = cellKey(level, landing);
-        if (AtmosphereGrid.emitSourceOnce(emittedSources, source, grid, cell, RAIN_EMISSION, serverTicks)) {
+        SourceKey rainSource = new SourceKey(SourceKind.RAIN, level.dimension(), landing.immutable());
+        if (level.isRainingAt(landing)
+            && AtmosphereGrid.emitSourceOnce(
+                emittedSources, rainSource, grid, cell, RAIN_EMISSION, serverTicks)) {
             gridEmissions++;
             rainEmissions++;
+        }
+
+        int darkGroundEmission = AtmosphereSourceStrength.lightToEmission(
+            level.getMaxLocalRawBrightness(landing));
+        SourceKey darkGroundSource = new SourceKey(
+            SourceKind.DARK_GROUND, level.dimension(), landing.immutable());
+        if (darkGroundEmission > 0
+            && level.canSeeSky(landing)
+            && level.getFluidState(surface).isEmpty()
+            && AtmosphereGrid.emitSourceOnce(
+                emittedSources, darkGroundSource, grid, cell, darkGroundEmission, serverTicks)) {
+            gridEmissions++;
+            darkGroundEmissions++;
         }
     }
 
@@ -366,7 +384,8 @@ final class ForgeAtmospherePrototype {
     private enum SourceKind {
         WATER,
         HIGH_TERRAIN,
-        RAIN
+        RAIN,
+        DARK_GROUND
     }
 
     private record SourceKey(SourceKind kind, ResourceKey<Level> dimension, BlockPos pos) {

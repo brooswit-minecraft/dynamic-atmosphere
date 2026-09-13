@@ -13,9 +13,12 @@ class AtmosphereGridTest {
 
     @Test
     void mapsNegativeBlockCoordinatesToWorldAlignedCells() {
-        assertEquals(0, AtmosphereGrid.cellCoordinate(15));
+        assertEquals(0, AtmosphereGrid.cellCoordinate(3));
+        assertEquals(1, AtmosphereGrid.cellCoordinate(4));
+        assertEquals(3, AtmosphereGrid.cellCoordinate(15));
         assertEquals(-1, AtmosphereGrid.cellCoordinate(-1));
-        assertEquals(-2, AtmosphereGrid.cellCoordinate(-17));
+        assertEquals(-1, AtmosphereGrid.cellCoordinate(-4));
+        assertEquals(-2, AtmosphereGrid.cellCoordinate(-5));
     }
 
     @Test

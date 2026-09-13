@@ -1,5 +1,6 @@
 package io.github.brooswitminecraft.dynamicatmosphere.client;
 
+import io.github.brooswitminecraft.dynamicatmosphere.AtmosphereGridLayout;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.ByteBufferBuilder;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
@@ -46,7 +47,9 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
             event.getPartialTick().getGameTimeDeltaPartialTick(false));
         visible.removeIf(cell -> {
             AABB bounds = bounds(cell.cell());
-            return !level.getChunkSource().hasChunk(cell.cell().x(), cell.cell().z())
+            return !level.getChunkSource().hasChunk(
+                AtmosphereGridLayout.chunkCoordinate(cell.cell().x()),
+                AtmosphereGridLayout.chunkCoordinate(cell.cell().z()))
                 || bounds.distanceToSqr(position) > (double) RENDER_RADIUS * RENDER_RADIUS
                 || !event.getFrustum().isVisible(bounds);
         });
@@ -100,7 +103,8 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
         double x = (double) cell.x() * AtmosphereVolumeGeometry.CELL_SIZE;
         double y = (double) cell.y() * AtmosphereVolumeGeometry.CELL_SIZE;
         double z = (double) cell.z() * AtmosphereVolumeGeometry.CELL_SIZE;
-        return new AABB(x, y, z, x + 16, y + 16, z + 16);
+        return new AABB(x, y, z, x + AtmosphereGridLayout.CELL_SIZE,
+            y + AtmosphereGridLayout.CELL_SIZE, z + AtmosphereGridLayout.CELL_SIZE);
     }
 
     private static void vertex(VertexConsumer vertices, AtmosphereVolumeGeometry.Point point, float alpha) {

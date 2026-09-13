@@ -2,8 +2,8 @@
 
 A small atmospheric mod in alpha for Minecraft **1.21.1 / NeoForge**.
 
-The **atmospheric grid** divides space into 16x16x16-block cells. Water fog,
-high-terrain clouds, and rain landing on exposed surfaces add material; it gradually decays in
+The **atmospheric grid** divides space into 4x4x4-block cells. Water fog,
+high-terrain clouds, rain landing on exposed surfaces, and dark exposed ground add material; it gradually decays in
 place. Clients render translucent cells with opacity based on their material.
 This is an incremental visual prototype, not a complete weather simulation.
 
@@ -13,6 +13,7 @@ This is an incremental visual prototype, not a complete weather simulation.
 - Bounded work near players, without forcing chunks to load.
 - Bounded cell state and network updates; no movement between cells.
 - Rain buildup respects shelter and biome precipitation, including roof and canopy landing surfaces.
+- Low-light exposed ground builds overnight fog; daylight and nearby lighting reduce this source, and material decays locally.
 - `/dynamicatmosphere status` and `/dynamicatmosphere demo` for operators.
 - No world generation changes or world reset required.
 

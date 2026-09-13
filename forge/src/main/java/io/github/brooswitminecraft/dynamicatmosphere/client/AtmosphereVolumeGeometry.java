@@ -1,13 +1,15 @@
 package io.github.brooswitminecraft.dynamicatmosphere.client;
 
+import io.github.brooswitminecraft.dynamicatmosphere.AtmosphereGridLayout;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
 /** Camera-facing slices clipped to fixed world cells, including when the camera is inside. */
 public final class AtmosphereVolumeGeometry {
-    public static final int CELL_SIZE = 16;
-    public static final double SLICE_SPACING = 2;
+    public static final int CELL_SIZE = AtmosphereGridLayout.CELL_SIZE;
+    public static final double SLICE_SPACING = CELL_SIZE / 8.0;
     private static final int[][] EDGES = {
         {0, 1}, {2, 3}, {4, 5}, {6, 7}, {0, 2}, {1, 3},
         {4, 6}, {5, 7}, {0, 4}, {1, 5}, {2, 6}, {3, 7}

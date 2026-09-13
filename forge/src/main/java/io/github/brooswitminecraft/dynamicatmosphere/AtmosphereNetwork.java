@@ -15,7 +15,7 @@ public final class AtmosphereNetwork {
     }
 
     static void register(RegisterPayloadHandlersEvent event) {
-        event.registrar("1").playToClient(
+        event.registrar("2").playToClient(
             AtmosphereGridPayload.TYPE,
             AtmosphereGridPayload.STREAM_CODEC,
             (payload, context) -> clientReceiver.accept(payload, context.connection())

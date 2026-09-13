@@ -11,11 +11,17 @@ class AtmosphereVolumeGeometryTest {
     @Test
     void outsideViewHasInteriorSlicesRatherThanCubeShell() {
         var slices = AtmosphereVolumeGeometry.slices(CELL, 1000,
-            new AtmosphereVolumeGeometry.Point(8, 8, -8), FORWARD);
+            new AtmosphereVolumeGeometry.Point(2, 2, -2), FORWARD);
+        assertEquals(4, AtmosphereVolumeGeometry.CELL_SIZE);
+        assertEquals(0.5, AtmosphereVolumeGeometry.SLICE_SPACING);
         assertEquals(8, slices.size());
         for (var slice : slices) {
             assertEquals(4, slice.vertices().size());
-            assertTrue(slice.depth() > 8 && slice.depth() < 24);
+            assertTrue(slice.depth() > 2 && slice.depth() < 6);
+            for (var point : slice.vertices()) {
+                assertTrue(Math.abs(point.x()) <= 2 && Math.abs(point.y()) <= 2);
+                assertTrue(point.z() > 2 && point.z() < 6);
+            }
             assertTrue(slice.alpha() > 0 && slice.alpha() < 0.1);
         }
         double transmission = 1;
@@ -26,30 +32,30 @@ class AtmosphereVolumeGeometryTest {
     @Test
     void insideViewKeepsSlicesAheadAndOmitsEverythingBehind() {
         var slices = AtmosphereVolumeGeometry.slices(CELL, 1000,
-            new AtmosphereVolumeGeometry.Point(8, 8, 8), FORWARD);
+            new AtmosphereVolumeGeometry.Point(2, 2, 2), FORWARD);
         assertFalse(slices.isEmpty());
-        assertTrue(slices.stream().allMatch(slice -> slice.depth() > 0 && slice.depth() < 8));
+        assertTrue(slices.stream().allMatch(slice -> slice.depth() > 0 && slice.depth() < 2));
         assertTrue(AtmosphereVolumeGeometry.slices(CELL, 1000,
-            new AtmosphereVolumeGeometry.Point(8, 8, 24), FORWARD).isEmpty());
+            new AtmosphereVolumeGeometry.Point(2, 2, 6), FORWARD).isEmpty());
         assertTrue(AtmosphereVolumeGeometry.slices(CELL, 0,
-            new AtmosphereVolumeGeometry.Point(8, 8, -8), FORWARD).isEmpty());
+            new AtmosphereVolumeGeometry.Point(2, 2, -2), FORWARD).isEmpty());
     }
 
     @Test
     void negativeAndFarCoordinatesKeepIdenticalCameraRelativeGeometry() {
         var expected = AtmosphereVolumeGeometry.slices(CELL, 500,
-            new AtmosphereVolumeGeometry.Point(8, 8, -8), FORWARD);
+            new AtmosphereVolumeGeometry.Point(2, 2, -2), FORWARD);
         var negative = AtmosphereVolumeGeometry.slices(new AtmosphereClientCache.Cell(-1, -2, -3), 500,
-            new AtmosphereVolumeGeometry.Point(-8, -24, -56), FORWARD);
-        var far = AtmosphereVolumeGeometry.slices(new AtmosphereClientCache.Cell(1800000, 0, 1800000), 500,
-            new AtmosphereVolumeGeometry.Point(28800008, 8, 28799992), FORWARD);
+            new AtmosphereVolumeGeometry.Point(-2, -6, -14), FORWARD);
+        var far = AtmosphereVolumeGeometry.slices(new AtmosphereClientCache.Cell(7200000, 0, 7200000), 500,
+            new AtmosphereVolumeGeometry.Point(28800002, 2, 28799998), FORWARD);
         assertEquals(expected, negative);
         assertEquals(expected, far);
     }
 
     @Test
     void obliqueAndVerticalSlicesStayInsideCellAndHaveBoundedPolygonCounts() {
-        var camera = new AtmosphereVolumeGeometry.Point(8, 8, 8);
+        var camera = new AtmosphereVolumeGeometry.Point(2, 2, 2);
         for (var look : List.of(new AtmosphereVolumeGeometry.Point(1, 1, 1),
             new AtmosphereVolumeGeometry.Point(0, 1, 0), new AtmosphereVolumeGeometry.Point(0, -1, 0))) {
             var slices = AtmosphereVolumeGeometry.slices(CELL, 1000, camera, look);
@@ -58,7 +64,7 @@ class AtmosphereVolumeGeometryTest {
             for (var slice : slices) {
                 assertTrue(slice.vertices().size() >= 3 && slice.vertices().size() <= 6);
                 for (var p : slice.vertices()) {
-                    assertTrue(Math.abs(p.x()) <= 8.000001 && Math.abs(p.y()) <= 8.000001 && Math.abs(p.z()) <= 8.000001);
+                    assertTrue(Math.abs(p.x()) <= 2.000001 && Math.abs(p.y()) <= 2.000001 && Math.abs(p.z()) <= 2.000001);
                     assertEquals(slice.depth(), p.dot(look.normalized()), 1.0e-6);
                 }
             }
@@ -67,8 +73,10 @@ class AtmosphereVolumeGeometryTest {
 
     @Test
     void opacityIsMonotonicAndClamped() {
-        assertEquals(0, AtmosphereVolumeGeometry.sliceAlpha(-1, 2));
-        assertTrue(AtmosphereVolumeGeometry.sliceAlpha(100, 2) < AtmosphereVolumeGeometry.sliceAlpha(500, 2));
-        assertEquals(AtmosphereVolumeGeometry.sliceAlpha(1000, 2), AtmosphereVolumeGeometry.sliceAlpha(9000, 2));
+        assertEquals(0, AtmosphereVolumeGeometry.sliceAlpha(-1, 0.5));
+        assertTrue(AtmosphereVolumeGeometry.sliceAlpha(100, 0.5) < AtmosphereVolumeGeometry.sliceAlpha(500, 0.5));
+        assertEquals(AtmosphereVolumeGeometry.sliceAlpha(1000, 0.5), AtmosphereVolumeGeometry.sliceAlpha(9000, 0.5));
+        assertEquals(-Math.expm1(-0.6 / 8), AtmosphereVolumeGeometry.sliceAlpha(1000, 0.5), 1.0e-7);
+        assertEquals(-Math.expm1(-0.6), AtmosphereVolumeGeometry.sliceAlpha(1000, 4), 1.0e-7);
     }
 }
