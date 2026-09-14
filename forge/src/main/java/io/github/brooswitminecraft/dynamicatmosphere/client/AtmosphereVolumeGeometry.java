@@ -9,7 +9,7 @@ import java.util.List;
 /** Camera-facing slices clipped to fixed world cells, including when the camera is inside. */
 public final class AtmosphereVolumeGeometry {
     public static final int CELL_SIZE = AtmosphereGridLayout.CELL_SIZE;
-    public static final double SLICE_SPACING = CELL_SIZE / 8.0;
+    public static final double SLICE_SPACING = CELL_SIZE / 4.0;
     private static final int[][] EDGES = {
         {0, 1}, {2, 3}, {4, 5}, {6, 7}, {0, 2}, {1, 3},
         {4, 6}, {5, 7}, {0, 4}, {1, 5}, {2, 6}, {3, 7}
@@ -48,6 +48,7 @@ public final class AtmosphereVolumeGeometry {
 
     private static List<Slice> boxSlices(double x, double y, double z, int size, double spacing,
                                          float amount, Point camera, Point look) {
+        if (amount <= 0) return List.of();
         Point forward = look.normalized();
         Point right = forward.cross(Math.abs(forward.y) < 0.9 ? new Point(0, 1, 0) : new Point(1, 0, 0)).normalized();
         Point up = right.cross(forward);
@@ -65,7 +66,7 @@ public final class AtmosphereVolumeGeometry {
             far = Math.max(far, point.dot(forward));
         }
         List<Slice> result = new ArrayList<>(16);
-        if (far <= 0.05 || amount <= 0) {
+        if (far <= 0.05) {
             return result;
         }
         // Global view-depth planes keep adjacent cells' samples aligned; partial end slabs

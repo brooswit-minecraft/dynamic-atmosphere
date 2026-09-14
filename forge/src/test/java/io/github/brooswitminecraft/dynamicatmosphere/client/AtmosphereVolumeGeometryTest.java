@@ -73,8 +73,8 @@ class AtmosphereVolumeGeometryTest {
         var slices = AtmosphereVolumeGeometry.slices(CELL, 1000,
             new AtmosphereVolumeGeometry.Point(2, 2, -2), FORWARD);
         assertEquals(4, AtmosphereVolumeGeometry.CELL_SIZE);
-        assertEquals(0.5, AtmosphereVolumeGeometry.SLICE_SPACING);
-        assertEquals(8, slices.size());
+        assertEquals(1.0, AtmosphereVolumeGeometry.SLICE_SPACING);
+        assertEquals(4, slices.size());
         for (var slice : slices) {
             assertEquals(4, slice.vertices().size());
             assertTrue(slice.depth() > 2 && slice.depth() < 6);
@@ -82,7 +82,7 @@ class AtmosphereVolumeGeometryTest {
                 assertTrue(Math.abs(point.x()) <= 2 && Math.abs(point.y()) <= 2);
                 assertTrue(point.z() > 2 && point.z() < 6);
             }
-            assertTrue(slice.alpha() > 0 && slice.alpha() < 0.1);
+            assertTrue(slice.alpha() > 0 && slice.alpha() < 0.2);
         }
         double transmission = 1;
         for (var slice : slices) transmission *= 1 - slice.alpha();

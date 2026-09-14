@@ -165,6 +165,13 @@ Constant RGB with no depth writes makes atmospheric alpha order-independent;
 rendering uses bounded GPU batches without sorting volumes. Opacity, protocol 5,
 and persistent world/personal cache formats are unchanged.
 
+In 0.13.1-alpha.1, detailed 4-block volumes use four 1-block camera-facing
+slices instead of eight 0.5-block slices. Alpha remains integrated over each
+slice's thickness, preserving total optical density while reducing translucent
+geometry and blend layers. Zero-density volumes exit before geometry allocation.
+Fog color, LOD distance bands, coarse geometry, cache behavior, protocol 5, and
+server simulation are unchanged. Actual FPS improvement remains for user testing.
+
 LOD and color tuning change rendering only. Server simulation uses 4x4x4-block cells and
 200-tick checks (10 seconds at 20 TPS), with unchanged condensation chance and
 consumption per check. Cache/render/sync intervals and persistent data are

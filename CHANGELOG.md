@@ -1,3 +1,9 @@
+# 0.13.1-alpha.1
+
+- Reduce each detailed 4-block atmospheric volume from eight 0.5-block translucent slices to four 1-block slices. Opacity remains integrated over slice thickness, preserving the same total optical density while halving detailed slice submissions and blend layers.
+- Skip zero-density volumes before allocating camera-facing geometry. Preserve Minecraft fog RGB, LOD distance bands, cache and protocol behavior, coarse geometry, and server simulation.
+- This is a client rendering performance patch. No measured FPS improvement is claimed; automated CI verifies geometry and the production artifact before publication.
+
 # 0.13.0-alpha.1
 
 - Cache cell air capacity per loaded chunk, invalidating on air-occupancy changes including fluid transport. Drop caches on unload; no world data is removed. Avoid redundant unchanged-amount persistence writes and an unnecessary full-view distance sort during synchronization.
