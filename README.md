@@ -39,7 +39,7 @@ chunks, not just player-offset samples. Each chunk has a random **10% default
 gate**, with one random X/Z column per pass. A bounded fair queue permits backlog,
 so scheduling is not a guarantee every chunk completes within 15 seconds. Checks
 never force chunks to load. Actual simulation progress remains work-budgeted.
-Each due cell has a **50% skip chance**. Skipped cells are rescheduled at the
+Each due cell has a **75% skip chance**. Skipped cells are rescheduled at the
 normal 200-tick interval rather than retried next tick. They can still receive
 incoming material from neighbors: skipping does not freeze a cell or establish
 a fixed 400-tick schedule. Condensation rules are unchanged on processed checks.
@@ -168,8 +168,8 @@ not a claim of balance or measured performance.
 | Slime | 16 blocks | 200 ticks | Green | 4x |
 
 Intervals are scheduled game ticks, subject to bounded work queues, not guaranteed
-wall-clock completion. Scheduled producer passes share a 300-tick cadence. Vapor
-retains its 50% due-check skip and condensation.
+wall-clock completion. Scheduled producer passes share a 300-tick cadence. All
+materials have a configurable 75% due-check skip; Vapor retains condensation.
 Material amounts do not combine across identities. Only Vapor uses the persistent
 client visual disk cache; the other six keep independent session-only visual caches.
 Legacy 8-block Smoke cells are split into aligned 4-block children on load. Integer

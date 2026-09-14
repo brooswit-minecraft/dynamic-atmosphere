@@ -28,7 +28,7 @@ not a claim of balance or measured performance.
 All materials share the 200-tick simulation cadence and scheduled producer passes
 share a 300-tick cadence. These are scheduled game ticks subject to bounded work
 queues, not guaranteed wall-clock completion. Event sources remain event-driven.
-Vapor retains its 50% due-check skip and condensation.
+All materials have a configurable 75% due-check skip; Vapor retains condensation.
 Material amounts do not combine across identities. Only Vapor uses the persistent
 client visual disk cache; the other six keep independent session-only visual caches.
 Legacy 8-block Smoke cells migrate into aligned 4-block children while preserving
@@ -91,7 +91,7 @@ worlds. Updating does not clear existing material or undo previous world changes
 ## Vapor and World Behavior
 
 Vapor retains 4-block cells and scheduled 200-tick simulation checks (10 seconds
-at 20 TPS). Each due Vapor cell has a 50% skip chance and is rescheduled normally;
+at 20 TPS). Each due cell has a 75% skip chance and is rescheduled normally;
 it can still receive incoming material. Producer passes run every 300 ticks
 (15 seconds at 20 TPS), with a 10% loaded-chunk gate and a sampled X/Z column.
 Bounded fair queues permit backlog and never force chunks to load.
