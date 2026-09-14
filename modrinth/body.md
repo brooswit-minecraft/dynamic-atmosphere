@@ -9,7 +9,7 @@ world before upgrading; restoring that backup is required to undo terrain damage
 The **atmospheric grid** divides space into 4x4x4-block cells. Water fog,
 high-terrain clouds, rain-driven cloud-height emissions, and dark exposed ground add
 material. There is no natural decay: material spreads by equalizing fullness
-across six face-adjacent cells. In 0.13.0-alpha.1, simulation checks retain a fixed
+across six face-adjacent cells. In 0.14.0-alpha.1, Vapor simulation checks retain a fixed
 200 ticks (10 seconds at 20 TPS), independent of producer passes scheduled every
 300 ticks (15 seconds). Producers cover all loaded chunks with a random 10%
 default gate and one random X/Z column per chunk per pass. A bounded fair queue
@@ -20,25 +20,25 @@ Simulation work remains budgeted across ticks. Clients render
 translucent cells with opacity based on material amount divided by capacity.
 This is an incremental alpha, not a complete weather simulation.
 
-**Upcoming, unreleased:** Rain will split a total of 320 units per passed check
-between ground (a random integer from 0 through 320) and Y=192 (the remainder),
-using the existing rain gate. Evaporation will trace contiguous water to its bottom;
+**0.14.0 behavior:** Rain splits a total of 320 units per passed check
+between ground (a random integer from 0 through 320) and an airborne position
+(the remainder), randomly chosen between ground and Y=192, or ground itself
+when already above Y=192, using the existing rain gate. Evaporation traces contiguous water to its bottom;
 bottom water directly above magma bypasses the temperature roll and also targets
 the original surface, once when both coincide. The outer 300-tick/10% chunk gate
 remains, waterlogged hosts are preserved, and only successful mutations emit through
-the humidity-scaled removal hook. These gameplay changes await verification for a
-fresh minor release, not 0.13.2-alpha.1. Existing atmosphere and worlds are retained.
+the humidity-scaled removal hook. Existing atmosphere and worlds are retained.
 
 ## Current Scope
 
 - New snow/ice surface vapor: a WORLD_SURFACE lookup selects ICE-tagged blocks, SNOW, SNOW_BLOCK, or POWDER_SNOW to emit 40 units without consuming the block. Reuse the existing 15-second / 10% loaded-chunk gate; no additional column scan or forced chunk load. A capacity scan may still occur.
 - Each due simulation cell has a 50% skip chance. A skipped cell is rescheduled at the normal 200-tick interval, not retried next tick; neighboring cells can still send it material. This is not a fixed 400-tick schedule. Condensation rules remain unchanged on processed checks.
-- In 0.13.0-alpha.1, all near, far, and fallback volumes use Minecraft's current fog/horizon color from one snapshot per frame. Local light-based grayscale, distance color blending, and client terrain-light sampling are removed.
-- Constant RGB and no depth writes make atmospheric alpha order-independent. Rendering keeps bounded GPU batches without volume sorting; opacity, protocol, and persistent data are unchanged.
-- In 0.13.1-alpha.1, detailed 4-block volumes use four 1-block camera-facing slices instead of eight 0.5-block slices. Thickness-integrated alpha preserves total optical density while reducing translucent geometry and blend layers; zero-density volumes skip geometry allocation. Fog RGB, LOD distances, coarse rendering, caches, protocol 5, and server simulation are unchanged. Actual FPS improvement remains for user testing.
-- New in 0.9.0-alpha.1: distance-based rendering LOD. With Minecraft client view distance `V` in blocks, use 4x4x4-block volumes below `V/2`, 8x8x8 in `[V/2, V)`, 16x16x16 in `[V, 2V)`, and 32x32x32 in `[2V, 4V]`.
+- Fire produces black Smoke in independent, chunk-persisted 8x8x8 cells, synchronized separately from Vapor. Smoke does not use Vapor condensation. Client Smoke state is session-only and never writes into the Vapor visual disk cache.
+- Vapor near/far/fallback volumes use Minecraft's current fog/horizon color; Smoke uses black RGB. Vapor-only rendering remains unsorted, but visible Smoke requires shared back-to-front slice ordering across both materials. Mixed colors are not order-independent; bounded GPU batches preserve that order.
+- Detailed Vapor uses 1-block slice spacing; Smoke reuses the geometry helper with its eight-block base size. Thickness-integrated opacity is retained, and zero-density volumes skip geometry allocation. No measured FPS improvement is claimed.
+- With Minecraft client view distance `V` in blocks, both materials use base cells through `V/2`, 2x cells through `V`, and 4x cells through `2V`, with nothing beyond. Vapor sizes are 4/8/16 blocks; Smoke sizes are 8/16/32 blocks. The legacy Vapor 32-block band beyond 2V is removed.
 - Coarser volumes recursively average eight children, including empty volumes. Coverage is non-overlapping: coarse parents are not rendered over their finer children. Fewer volumes and slices are rendered at distance; actual performance needs user verification, with no measured FPS or runtime-verification claim.
-- Boundary-crossing parents can remain finer. Selection is cached in 16-block camera regions, spatially queried and budgeted; rotation does not rebuild it. New views temporarily use aligned 32-block cached coverage while refining, and unloaded near chunks retain a 16-block fallback, never overlaid with detail.
+- Boundary-crossing parents can remain finer. Selection is cached in 16-block camera regions, spatially queried and budgeted; rotation does not rebuild it. Refining views use 16-block Vapor or 32-block Smoke coverage; unloaded near chunks use 16-block fallbacks without overlapping detail. All fallback geometry is clipped at 2V; cache data is retained.
 - LOD is client rendering only: retain 4-block simulation cells, now with fixed 200-tick checks (10 seconds at 20 TPS), unchanged condensation probability/consumption per check, cache/render/sync intervals, and persistent data. No world reset is required.
 - New in 0.8.0-alpha.1: each cell's scheduled check can condense material into one real water source. Chance is linear above 50% fullness: 0% at 50%, 5% at 75%, capped at 10% at or above 100%; at or below 50% there is no placement.
 - A successful roll targets a random air block in the same cell, never solids. Successful placement consumes 25% of the current material amount, rounded down with a minimum of 1 unit. No air or failed placement consumes nothing; ultrawarm dimensions such as the Nether skip both placement and consumption.
@@ -46,7 +46,7 @@ fresh minor release, not 0.13.2-alpha.1. Existing atmosphere and worlds are reta
 - Server-owned material amounts, synchronized to nearby clients.
 - Bounded fair producer work across all loaded chunks, without forcing chunks to load; backlogs can delay scheduled checks.
 - Live cell visibility follows Minecraft's tracked chunks and the effective client render distance, loaded chunks, and frustum, without a fixed atmospheric radius or nearest-cell cutoff.
-- Persistent client visuals add coarse far fog out to four times the client view distance, only in previously seen areas. Cached fog can be stale; it is approximate visual history, not simulation or distant chunk loading.
+- Persistent Vapor visuals render to twice view distance, only in previously seen areas. Older farther-away data stays cached but is not drawn past 2V. Cached fog can be stale; it is approximate visual history, not simulation or distant chunk loading.
 - Client disk files live under `gameDirectory/dynamicatmosphere-cache`, keyed by hashed server/world/dimension/layout identity. Changed chunks are written atomically every 10 seconds and on disconnect, bounded to 64 MiB and 8,192 files; RAM restore is limited to 200,000 cells.
 - A stable world UUID in server SavedData keeps worlds separate. A newly reset world gets a fresh UUID; this update does not require a world reset. Fresh server observations supersede cached visuals for their snapshot/chunk scope and never import cached material into simulation.
 - No 512-cell draw cap; bounded GPU batches render the live view independently of the persistent visual-cache limits.
@@ -57,7 +57,7 @@ fresh minor release, not 0.13.2-alpha.1. Existing atmosphere and worlds are reta
 - Overfull cells push excess outward toward nearby available capacity through air-capacity neighbors. Unknown unloaded boundaries or exhausted budgets leave work pending: neither authorizes pressure destruction or discards material. Unlimited displacement is not guaranteed.
 - Trapped excess triggers default-enabled pressure destruction: break the lowest-hardness eligible source-cell block with drops, then work outward once source blocks are gone. Each broken block adds 1 material unit.
 - Pressure remains limited to four attempts per sampling interval. Negative-hardness/intrinsically unbreakable blocks are exempt; closed unbreakable surroundings leave excess blocked, not deleted.
-- Rain checks emit 320 units at the previous cloud altitude Y=192 per passed check, replacing ground-level rain fog. High-terrain clouds and dark exposed-ground sources remain.
+- Rain checks split a total of 320 units between ground and the random airborne position described above. High-terrain clouds and dark exposed-ground sources remain.
 - Sampled surface water evaporates: plain water fluid blocks become air; waterlogged hosts retain their block with WATERLOGGED cleared. Non-water solids and unsupported hosts are preserved. This removes real water, including condensed water; natural fluid updates may refill it. No reset or migration is required.
 - After the outer 10% chunk gate, evaporation chance is `clamp(biome temperature / 2, 0, 1)`: temperature 0.8 gives 40%, 2 gives 100%, and 0 or below gives 0%. This roll applies only to the scheduled water producer.
 - Every successful non-transport water-to-nonwater mutation, including manual removal, emits `round(10 + 70 * clamp(biome downfall, 0, 1))` units: 10 dry to 80 wet. Downfall is a biome humidity proxy, not current weather. Loaded-chunk biome humidity is captured at removal; the deferred hook alone emits, with no depth-based/direct duplicate. Water-level changes, failed mutations, and unloads emit nothing.
@@ -70,8 +70,11 @@ fresh minor release, not 0.13.2-alpha.1. Existing atmosphere and worlds are reta
 - No world generation changes or world reset required.
 
 It is **not yet** the planned terrain-aware cloud and fog simulation. Gas
-transport, pollution, and weather-generated precipitation are future work;
+transport beyond the implemented Vapor/Smoke rules, pollution, and weather-generated precipitation are future work;
 water-source condensation does not change Minecraft's weather.
+Only fire produces Smoke in this release: lava, explosions, furnaces, torches,
+campfires and other planned Smoke sources are not enabled. Dust, Hostility,
+Exhaust, Slime and Ender Gas remain future runtime systems.
 The air-count rule is coarse, not an exact airtight-wall simulation: it does
 not inspect every shared-face opening. The grid is a coarse visual representation,
 not terrain-clipped volumetric fog.
@@ -79,7 +82,7 @@ not terrain-clipped volumetric fog.
 Install the same version on **both server and client**, or in a NeoForge 1.21.1
 single-player instance. No extra graphics dependency is required. This requirement
 starts with 0.3.0-alpha.1; older releases were particle-only.
-**0.13.0-alpha.1 retains protocol 5: update both sides; earlier protocols are
+**0.14.0-alpha.1 uses protocol 6: update both sides; earlier protocols are
 incompatible.** Multi-packet snapshots complete atomically, with world identity,
 snapshot scope, and chunk freshness separating live observations from cached
 visual history.
