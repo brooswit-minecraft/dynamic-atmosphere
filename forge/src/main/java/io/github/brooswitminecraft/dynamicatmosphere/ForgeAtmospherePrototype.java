@@ -74,6 +74,7 @@ final class ForgeAtmospherePrototype {
     private long rainEmissions;
     private long darkGroundEmissions;
     private long materialMoved;
+    private long fanCellsChecked, fanRequests, fanBlocked, fanTransfers, fanMaterialMoved;
     private long condensationChecks;
     private long waterBlocksCreated;
     private long materialCondensed;
@@ -287,6 +288,7 @@ final class ForgeAtmospherePrototype {
         rainEmissions = 0;
         darkGroundEmissions = 0;
         materialMoved = 0;
+        fanCellsChecked = fanRequests = fanBlocked = fanTransfers = fanMaterialMoved = 0;
         condensationChecks = 0;
         waterBlocksCreated = 0;
         materialCondensed = 0;
@@ -356,6 +358,9 @@ final class ForgeAtmospherePrototype {
                 + ", rainEmissions=" + rainEmissions
                 + ", darkGroundEmissions=" + darkGroundEmissions
                 + ", materialMoved=" + materialMoved
+                + ", fanCellsChecked=" + fanCellsChecked + ", fanRequests=" + fanRequests
+                + ", fanBlocked=" + fanBlocked + ", fanTransfers=" + fanTransfers
+                + ", fanMaterialMoved=" + fanMaterialMoved
                 + ", condensationChecks=" + condensationChecks
                 + ", waterBlocksCreated=" + waterBlocksCreated
                 + ", materialCondensed=" + materialCondensed
@@ -596,8 +601,9 @@ final class ForgeAtmospherePrototype {
             growPlants(server.getLevel(key.dimension()), grid, key, AtmosphereGrid.CELL_SIZE, capacityAt);
             capacities.clear();
             if (condense(server.getLevel(key.dimension()), key, capacityAt.applyAsInt(key))) capacities.clear();
-        }, key -> shouldSimulate(server, key), canTransfer, key -> applyFans(server.getLevel(key.dimension()), grid, key,
-            AtmosphereGrid.CELL_SIZE, capacityAt, canTransfer));
+            applyFans(server.getLevel(key.dimension()), grid, key,
+                AtmosphereGrid.CELL_SIZE, capacityAt, canTransfer);
+        }, key -> shouldSimulate(server, key), canTransfer);
         materialMoved += spread.moved();
         blockedOverflow += spread.blockedOverflow();
         sourcesProcessed += spread.sourcesProcessed();
@@ -688,8 +694,8 @@ final class ForgeAtmospherePrototype {
             var current = smokeGrid.get(key);
             if (used > 0 && current != null) smokeGrid.set(key,
                 Math.max(0, current.amount() - used), serverTicks, capacityAt.applyAsInt(key));
-        }, key -> shouldSimulate(server, key), canTransfer, key -> applyFans(server.getLevel(key.dimension()), smokeGrid, key,
-            SmokeGridLayout.CELL_SIZE, capacityAt, canTransfer));
+            applyFans(level, smokeGrid, key, SmokeGridLayout.CELL_SIZE, capacityAt, canTransfer);
+        }, key -> shouldSimulate(server, key), canTransfer);
         materialMoved += spread.moved();
         blockedOverflow += spread.blockedOverflow();
         sourcesProcessed += spread.sourcesProcessed();
@@ -731,8 +737,8 @@ final class ForgeAtmospherePrototype {
                     }
                     dissipateDust(level, materialGrid, key, capacityAt);
                 }
-            }, key -> shouldSimulate(server, key), canTransfer, key -> applyFans(server.getLevel(key.dimension()), materialGrid, key,
-                material.cellSize(), capacityAt, canTransfer));
+                applyFans(cellLevel, materialGrid, key, material.cellSize(), capacityAt, canTransfer);
+            }, key -> shouldSimulate(server, key), canTransfer);
             materialMoved += spread.moved();
             blockedOverflow += spread.blockedOverflow();
             sourcesProcessed += spread.sourcesProcessed();
@@ -772,24 +778,29 @@ final class ForgeAtmospherePrototype {
         AtmosphereGrid.CellKey<ResourceKey<Level>> source, int size,
         ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacity,
         BiPredicate<AtmosphereGrid.CellKey<ResourceKey<Level>>, AtmosphereGrid.CellKey<ResourceKey<Level>>> canTransfer) {
+        fanCellsChecked++;
         if (level == null || target.get(source) == null) return;
         BlockPos origin = new BlockPos(source.x() * size, source.y() * size, source.z() * size);
         for (var request : ForgeFanTransport.collect(level, origin, size,
             tuning().integrations().createFanTransportPerRpm())) {
+            fanRequests++;
             var current = target.get(source);
             if (current == null) break;
             var direction = request.direction();
             var destination = new AtmosphereGrid.CellKey<>(source.dimension(), source.x() + direction.getStepX(),
                 source.y() + direction.getStepY(), source.z() + direction.getStepZ());
             int spareCapacity = capacity.applyAsInt(destination);
-            if (spareCapacity <= 0 || !canTransfer.test(source, destination)) continue;
+            boolean allowed = canTransfer.test(source, destination);
             var existing = target.get(destination);
             int existingAmount = existing == null ? 0 : existing.amount();
-            int moved = Math.min(request.amount(), Math.min(current.amount(), spareCapacity - existingAmount));
-            if (moved <= 0) continue;
+            int moved = AtmosphereFanTransport.movableAmount(request.amount(), current.amount(), existingAmount,
+                spareCapacity, allowed);
+            if (moved <= 0) { fanBlocked++; continue; }
             if (target.set(destination, existingAmount + moved, serverTicks, spareCapacity)) {
                 target.set(source, current.amount() - moved, serverTicks, capacity.applyAsInt(source));
                 materialMoved += moved;
+                fanMaterialMoved += moved;
+                fanTransfers++;
             }
         }
     }

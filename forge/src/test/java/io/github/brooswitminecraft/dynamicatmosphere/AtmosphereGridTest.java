@@ -144,6 +144,52 @@ class AtmosphereGridTest {
     }
 
     @Test
+    void fanHookSharesTheOrdinarySimulationSkipDecision() {
+        var grid = new AtmosphereGrid<String>();
+        var source = key(0, 0, 0);
+        var east = key(1, 0, 0);
+        grid.set(source, 600, 1, 1000);
+        var cap = capacities(Map.of(source, 1000, east, 1000));
+        var calls = new ArrayList<Long>();
+        for (long tick : new long[] {200, 200, 399, 400}) {
+            grid.spread(tick, cap, cell -> {
+                    if (!cell.equals(source)) return;
+                    calls.add(tick);
+                    int moved = AtmosphereFanTransport.movableAmount(128, amount(grid, source),
+                        amount(grid, east), 1000, true);
+                    grid.set(east, amount(grid, east) + moved, tick, 1000);
+                    grid.set(source, amount(grid, source) - moved, tick, 1000);
+                }, cell -> false, (from, to) -> true);
+        }
+        assertTrue(calls.isEmpty());
+        assertEquals(0, amount(grid, east));
+        assertEquals(600, amount(grid, source));
+        assertEquals(600, total(grid));
+    }
+
+    @Test
+    void selectedFanTransferOccursBeforeNormalDistribution() {
+        var grid = new AtmosphereGrid<String>();
+        var source = key(0, 0, 0);
+        var east = key(1, 0, 0);
+        grid.set(source, 600, 1, 1000);
+        var calls = new ArrayList<AtmosphereGrid.CellKey<String>>();
+        grid.spread(200, capacities(Map.of(source, 1000, east, 1000)), cell -> {
+            calls.add(cell);
+            int moved = AtmosphereFanTransport.movableAmount(128, amount(grid, source),
+                amount(grid, east), 1000, true);
+            assertEquals(128, moved);
+            grid.set(source, amount(grid, source) - moved, 200, 1000);
+            grid.set(east, amount(grid, east) + moved, 200, 1000);
+            assertEquals(128, amount(grid, east));
+        }, cell -> true, (from, to) -> true);
+        assertEquals(List.of(source), calls);
+        assertEquals(300, amount(grid, source));
+        assertEquals(300, amount(grid, east));
+        assertEquals(600, total(grid));
+    }
+
+    @Test
     void skippedSourceWaitsForNextNormalTurnWithoutDoingSimulationWork() {
         AtmosphereGrid<String> grid = new AtmosphereGrid<>();
         var source = key(0, 0, 0);

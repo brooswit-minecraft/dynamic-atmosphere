@@ -5,6 +5,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class AtmosphereFanTransportTest {
     @Test
+    void transferRespectsSourceSpareCapacityAndBarriers() {
+        assertEquals(128, AtmosphereFanTransport.movableAmount(128, 600, 200, 1000, true));
+        assertEquals(50, AtmosphereFanTransport.movableAmount(128, 600, 950, 1000, true));
+        assertEquals(20, AtmosphereFanTransport.movableAmount(128, 20, 0, 1000, true));
+        assertEquals(0, AtmosphereFanTransport.movableAmount(128, 600, 1000, 1000, true));
+        assertEquals(0, AtmosphereFanTransport.movableAmount(128, 600, 0, -1, true));
+        assertEquals(0, AtmosphereFanTransport.movableAmount(128, 600, 0, 1000, false));
+    }
+
+    @Test
     void scalesAbsoluteRpmAndDiscardsFractionalUnits() {
         assertEquals(0, amount(0, 0.10));
         assertEquals(0, amount(8, 0.10));

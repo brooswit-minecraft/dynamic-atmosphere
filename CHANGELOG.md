@@ -1,3 +1,8 @@
+# 0.17.1-alpha.1
+
+- Apply Create fan transfers before normal distribution for every selected cell. Preserve the shared simulation step and 75% skip decision; no separate timer or skip bypass.
+- Add fan-specific detection, blocked-transfer, successful-transfer, and moved-material counters to `/dynamicatmosphere status`.
+
 # 0.17.0-alpha.1
 
 - Increase Ender Gas cells from 1x1x1 to 2x2x2 on the server and client. No other material used one-block cells.
