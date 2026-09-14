@@ -70,6 +70,11 @@ Remove Peaceful Nights from the pack only alongside the working replacement.
   not yet specified. Do not silently overwrite waterlogged host blocks.
 - Smoke: lava, fire, explosions and blocks destroyed by explosions; furnaces,
   torches, and campfires.
+  Next-version request: emit Smoke when fire or lava is added or removed,
+  in addition to ongoing production. Do not include this in the currently
+  deploying fire-only release. Transition quantities and whether fluid-level
+  changes or transport count remain to be specified; avoid repeating the
+  water-transport emission amplification bug.
   Explosions explicitly create a Smoke burst at the blast location, even when
   no blocks are destroyed. Emit once per explosion, separately from the
   per-destroyed-block source; burst amount remains to be specified.
