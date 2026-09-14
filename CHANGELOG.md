@@ -1,3 +1,12 @@
+# 0.13.0-alpha.1
+
+- Cache cell air capacity per loaded chunk, invalidating on air-occupancy changes including fluid transport. Drop caches on unload; no world data is removed. Avoid redundant unchanged-amount persistence writes and an unnecessary full-view distance sort during synchronization.
+
+- Add a snow/ice surface vapor producer: a WORLD_SURFACE lookup selects ICE-tagged blocks, SNOW, SNOW_BLOCK, or POWDER_SNOW to emit 40 material units without consuming the block. Reuse the existing 300-tick (15-second at 20 TPS), 10% loaded-chunk gate; no additional column scan or forced chunk loading. A capacity scan may still occur.
+- Move rain emissions from Y=192 to the fixed altitude Y=300, retaining 320 units per passed rain check.
+- Give each due simulation cell a 50% skip chance. A skipped cell is rescheduled at the normal 200-tick interval, not retried next tick; it can still receive incoming material from neighboring cells. This is not a fixed doubling of the interval or a freeze of skipped cells.
+- Preserve world and cache data, protocol 5, condensation rules on processed checks, and existing water-flow/destructive-pressure warnings. No world reset or backlog cleanup.
+
 # 0.12.2-alpha.1
 
 - Fix phantom atmospheric emissions from moving water: wrap the vanilla fluid tick, including Flowing Fluids 1.0.6's injected transport, in an exception-safe nested scope. No stack inspection or per-mutation allocation. No Flowing Fluids dependency is required.

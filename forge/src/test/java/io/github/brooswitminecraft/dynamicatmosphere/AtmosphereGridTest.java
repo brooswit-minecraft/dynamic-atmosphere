@@ -17,6 +17,26 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AtmosphereGridTest {
     @Test
+    void skippedSourceWaitsForNextNormalTurnWithoutDoingSimulationWork() {
+        AtmosphereGrid<String> grid = new AtmosphereGrid<>();
+        var source = key(0, 0, 0);
+        grid.set(source, 500, 1, 1000);
+        long due = AtmosphereGridLayout.nextSimulationTick(1);
+        var called = new ArrayList<AtmosphereGrid.CellKey<String>>();
+        var result = grid.spread(due, cell -> {
+            throw new AssertionError("Skipped source must not query capacity");
+        }, called::add, cell -> false);
+        assertEquals(0, result.sourcesProcessed());
+        assertEquals(500, amount(grid, source));
+        assertTrue(called.isEmpty());
+        assertFalse(result.workRemaining());
+        assertEquals(0, grid.spread(due, capacities(Map.of(source, 1000)), called::add).sourcesProcessed());
+        assertEquals(1, grid.spread(AtmosphereGridLayout.nextSimulationTick(due),
+            capacities(Map.of(source, 1000)), called::add).sourcesProcessed());
+        assertEquals(List.of(source), called);
+    }
+
+    @Test
     void beforeSpreadCallbackRunsOnlyWhenSourceIsDueAndBeforeMaterialIsRead() {
         AtmosphereGrid<String> grid = new AtmosphereGrid<>();
         var source = key(0, 0, 0);

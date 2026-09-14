@@ -135,16 +135,25 @@ public final class AtmosphereGrid<D> {
     }
 
     public SpreadResult<D> spread(long tick, ToIntFunction<CellKey<D>> capacityAt, Consumer<CellKey<D>> beforeSpread) {
-        List<CellKey<D>> sources = pollDueSources(tick, MAX_SOURCES_PER_SPREAD);
-        if (sources.isEmpty()) {
+        return spread(tick, capacityAt, beforeSpread, key -> true);
+    }
+
+    public SpreadResult<D> spread(long tick, ToIntFunction<CellKey<D>> capacityAt,
+        Consumer<CellKey<D>> beforeSpread, Predicate<CellKey<D>> shouldSimulate) {
+        List<CellKey<D>> dueSources = pollDueSources(tick, MAX_SOURCES_PER_SPREAD);
+        if (dueSources.isEmpty()) {
             return SpreadResult.empty(hasDueWork(tick));
+        }
+        List<CellKey<D>> sources = new ArrayList<>();
+        for (CellKey<D> source : dueSources) {
+            if (shouldSimulate.test(source)) sources.add(source);
         }
 
         for (CellKey<D> source : sources) beforeSpread.accept(source);
         int moved = spreadOneHop(tick, capacityAt, sources);
         SpreadResult<D> overflow = redistributeOverflowInternal(tick, capacityAt, sources);
         int consolidated = consolidateTinySources(tick, capacityAt, sources);
-        for (CellKey<D> source : sources) {
+        for (CellKey<D> source : dueSources) {
             if (cells.containsKey(source)) {
                 scheduleIfAbsent(source, AtmosphereGridLayout.nextSimulationTick(tick));
             }

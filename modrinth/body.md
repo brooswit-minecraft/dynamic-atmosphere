@@ -9,7 +9,7 @@ world before upgrading; restoring that backup is required to undo terrain damage
 The **atmospheric grid** divides space into 4x4x4-block cells. Water fog,
 high-terrain clouds, rain-driven cloud-height emissions, and dark exposed ground add
 material. There is no natural decay: material spreads by equalizing fullness
-across six face-adjacent cells. In 0.12.2-alpha.1, simulation checks retain a fixed
+across six face-adjacent cells. In 0.13.0-alpha.1, simulation checks retain a fixed
 200 ticks (10 seconds at 20 TPS), independent of producer passes scheduled every
 300 ticks (15 seconds). Producers cover all loaded chunks with a random 10%
 default gate and one random X/Z column per chunk per pass. A bounded fair queue
@@ -22,7 +22,9 @@ This is an incremental alpha, not a complete weather simulation.
 
 ## Current Scope
 
-- In 0.12.2-alpha.1, all near, far, and fallback volumes use Minecraft's current fog/horizon color from one snapshot per frame. Local light-based grayscale, distance color blending, and client terrain-light sampling are removed.
+- New snow/ice surface vapor: a WORLD_SURFACE lookup selects ICE-tagged blocks, SNOW, SNOW_BLOCK, or POWDER_SNOW to emit 40 units without consuming the block. Reuse the existing 15-second / 10% loaded-chunk gate; no additional column scan or forced chunk load. A capacity scan may still occur.
+- Each due simulation cell has a 50% skip chance. A skipped cell is rescheduled at the normal 200-tick interval, not retried next tick; neighboring cells can still send it material. This is not a fixed 400-tick schedule. Condensation rules remain unchanged on processed checks.
+- In 0.13.0-alpha.1, all near, far, and fallback volumes use Minecraft's current fog/horizon color from one snapshot per frame. Local light-based grayscale, distance color blending, and client terrain-light sampling are removed.
 - Constant RGB and no depth writes make atmospheric alpha order-independent. Rendering keeps bounded GPU batches without volume sorting; opacity, protocol, and persistent data are unchanged.
 - New in 0.9.0-alpha.1: distance-based rendering LOD. With Minecraft client view distance `V` in blocks, use 4x4x4-block volumes below `V/2`, 8x8x8 in `[V/2, V)`, 16x16x16 in `[V, 2V)`, and 32x32x32 in `[2V, 4V]`.
 - Coarser volumes recursively average eight children, including empty volumes. Coverage is non-overlapping: coarse parents are not rendered over their finer children. Fewer volumes and slices are rendered at distance; actual performance needs user verification, with no measured FPS or runtime-verification claim.
@@ -45,7 +47,7 @@ This is an incremental alpha, not a complete weather simulation.
 - Overfull cells push excess outward toward nearby available capacity through air-capacity neighbors. Unknown unloaded boundaries or exhausted budgets leave work pending: neither authorizes pressure destruction or discards material. Unlimited displacement is not guaranteed.
 - Trapped excess triggers default-enabled pressure destruction: break the lowest-hardness eligible source-cell block with drops, then work outward once source blocks are gone. Each broken block adds 1 material unit.
 - Pressure remains limited to four attempts per sampling interval. Negative-hardness/intrinsically unbreakable blocks are exempt; closed unbreakable surroundings leave excess blocked, not deleted.
-- Rain checks emit 320 units at cloud height Y=192 per passed check, replacing ground-level rain fog. High-terrain clouds and dark exposed-ground sources remain.
+- Rain checks emit 320 units at the fixed altitude Y=300 per passed check, replacing ground-level rain fog. High-terrain clouds and dark exposed-ground sources remain.
 - Sampled surface water evaporates: plain water fluid blocks become air; waterlogged hosts retain their block with WATERLOGGED cleared. Non-water solids and unsupported hosts are preserved. This removes real water, including condensed water; natural fluid updates may refill it. No reset or migration is required.
 - After the outer 10% chunk gate, evaporation chance is `clamp(biome temperature / 2, 0, 1)`: temperature 0.8 gives 40%, 2 gives 100%, and 0 or below gives 0%. This roll applies only to the scheduled water producer.
 - Every successful non-transport water-to-nonwater mutation, including manual removal, emits `round(10 + 70 * clamp(biome downfall, 0, 1))` units: 10 dry to 80 wet. Downfall is a biome humidity proxy, not current weather. Loaded-chunk biome humidity is captured at removal; the deferred hook alone emits, with no depth-based/direct duplicate. Water-level changes, failed mutations, and unloads emit nothing.
@@ -67,7 +69,7 @@ not terrain-clipped volumetric fog.
 Install the same version on **both server and client**, or in a NeoForge 1.21.1
 single-player instance. No extra graphics dependency is required. This requirement
 starts with 0.3.0-alpha.1; older releases were particle-only.
-**0.12.2-alpha.1 retains protocol 5: update both sides; earlier protocols are
+**0.13.0-alpha.1 retains protocol 5: update both sides; earlier protocols are
 incompatible.** Multi-packet snapshots complete atomically, with world identity,
 snapshot scope, and chunk freshness separating live observations from cached
 visual history.

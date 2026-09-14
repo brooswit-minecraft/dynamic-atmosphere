@@ -24,13 +24,17 @@ boundaries and exhausted work/search budgets leave work pending, never authorize
 pressure destruction, and do not discard material.
 Excess that still cannot escape remains blocked and reported, not discarded;
 displacement is not unlimited.
-In 0.12.2-alpha.1, simulation retains a fixed **200-tick** interval, or **10 seconds**
+In 0.13.0-alpha.1, simulation retains a fixed **200-tick** interval, or **10 seconds**
 at 20 TPS, replacing the size-based 250-tick cadence. Producers are independent:
 passes are scheduled every **300 ticks** (15 seconds at 20 TPS) across all loaded
 chunks, not just player-offset samples. Each chunk has a random **10% default
 gate**, with one random X/Z column per pass. A bounded fair queue permits backlog,
 so scheduling is not a guarantee every chunk completes within 15 seconds. Checks
 never force chunks to load. Actual simulation progress remains work-budgeted.
+Each due cell has a **50% skip chance**. Skipped cells are rescheduled at the
+normal 200-tick interval rather than retried next tick. They can still receive
+incoming material from neighbors: skipping does not freeze a cell or establish
+a fixed 400-tick schedule. Condensation rules are unchanged on processed checks.
 Cache/render/sync intervals are unchanged; no data reset is required.
 Live cell visibility follows Minecraft's actual
 tracked chunks and the client's effective render distance, loaded chunks, and
@@ -43,7 +47,7 @@ place real water sources (below), but does not generate Minecraft rain. Pollutio
 gas transport, and world generation changes are not included yet.
 
 Rain still uses Minecraft's local rain/exposure check, but its emission is moved
-from ground level to cloud height **Y=192**. Each passed rain check adds **320 material
+from ground level to the fixed altitude **Y=300**. Each passed rain check adds **320 material
 units**, eight times the previous 40, instead of also adding ground-level rain
 fog. High-terrain clouds and dark exposed-ground sources remain.
 Sampled surface water now evaporates: plain water fluid blocks become air, while
@@ -103,6 +107,11 @@ Prefer the largest eligible destination with deterministic ties; no new cell,
 chunk load, or pressure overflow is created. The empty source is removed and both
 changes are persisted and synchronized. Solitary or blocked cells retain material.
 
+Sampled snow/ice surfaces also emit **40 vapor units without consuming the
+block**. ICE-tagged blocks, SNOW, SNOW_BLOCK, and POWDER_SNOW qualify. This uses
+a `WORLD_SURFACE` lookup and the existing 15-second / 10% loaded-chunk gate,
+with no additional column scan or forced chunk load. A capacity scan may still occur.
+
 ## Water Condensation
 
 The 0.8.0-alpha.1 feature adds a water-placement roll on each cell's scheduled
@@ -149,7 +158,7 @@ rebuild it. While a new view is being refined, aligned 32-block cached volumes
 provide temporary coverage; unloaded near chunks use 16-block cached fallback.
 Neither fallback overlaps its detailed descendants.
 
-In 0.12.2-alpha.1, every near, far, and fallback volume uses Minecraft's current
+In 0.13.0-alpha.1, every near, far, and fallback volume uses Minecraft's current
 fog/horizon color, sampled once per render frame. There is no local light-based
 grayscale, distance color blend, or client terrain-light sampling cache.
 Constant RGB with no depth writes makes atmospheric alpha order-independent;

@@ -13,6 +13,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.FluidTags;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LiquidBlock;
@@ -56,7 +57,8 @@ final class ForgeAtmospherePrototype {
     private static final double PRODUCER_CHANCE = 0.10;
     private static final int HIGH_TERRAIN_EMISSION = 40;
     private static final int RAIN_CLOUD_EMISSION = 320;
-    private static final int RAIN_CLOUD_HEIGHT = 192;
+    private static final int SNOW_ICE_EMISSION = 40;
+    private static final int RAIN_CLOUD_HEIGHT = 300;
     private static final int[][] DEMO_CELL_OFFSETS = {
         {0, 0, 0}, {1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}
     };
@@ -125,6 +127,7 @@ final class ForgeAtmospherePrototype {
     void onChunkUnload(ChunkEvent.Unload event) {
         if (event.getLevel() instanceof ServerLevel level && event.getChunk() instanceof LevelChunk chunk) {
             Runnable unload = () -> {
+                ForgeAtmosphereCapacity.clear(chunk);
                 ChunkKey key = chunkKey(level, chunk);
                 pendingLoads.remove(key, chunk);
                 ChunkState state = chunks.get(key);
@@ -315,6 +318,9 @@ final class ForgeAtmospherePrototype {
             capacities.computeIfAbsent(key, candidate -> capacityAt(server.getLevel(candidate.dimension()), candidate));
         var spread = grid.spread(serverTicks, capacityAt, key -> {
             if (condense(server.getLevel(key.dimension()), key, capacityAt.applyAsInt(key))) capacities.clear();
+        }, key -> {
+            ServerLevel level = server.getLevel(key.dimension());
+            return level != null && level.random.nextBoolean();
         });
         materialMoved += spread.moved();
         blockedOverflow = spread.blockedOverflow();
@@ -470,6 +476,15 @@ final class ForgeAtmospherePrototype {
             return;
         }
 
+        BlockPos frozenSurface = new BlockPos(x, chunk.getHeight(Heightmap.Types.WORLD_SURFACE, localX, localZ), z);
+        var surfaceState = chunk.getBlockState(frozenSurface);
+        if (level.isInWorldBounds(frozenSurface.above())
+            && (surfaceState.is(BlockTags.ICE) || surfaceState.is(Blocks.SNOW)
+            || surfaceState.is(Blocks.SNOW_BLOCK) || surfaceState.is(Blocks.POWDER_SNOW))) {
+            SourceKey frozenSource = new SourceKey(SourceKind.SNOW_ICE, level.dimension(), frozenSurface);
+            emitSource(level, emittedSources, frozenSource, cellKey(level, frozenSurface.above()), SNOW_ICE_EMISSION);
+        }
+
         BlockPos cloud = new BlockPos(x, RAIN_CLOUD_HEIGHT, z);
         SourceKey rainSource = new SourceKey(SourceKind.RAIN_CLOUD, level.dimension(), cloud.immutable());
         if (!level.dimensionType().ultraWarm()
@@ -531,7 +546,6 @@ final class ForgeAtmospherePrototype {
     private void syncPlayer(ServerPlayer player,
         Map<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer> capacities) {
         ResourceKey<Level> dimension = player.serverLevel().dimension();
-        AtmosphereGrid.CellKey<ResourceKey<Level>> playerCell = cellKey(player.serverLevel(), player.blockPosition());
         var nearby = new ArrayList<AtmosphereGrid.Cell<ResourceKey<Level>>>();
         var authoritativeChunks = new ArrayList<AtmosphereSyncPlanner.Chunk>();
         // Use Minecraft's subscription, including changes to client/server view distance.
@@ -549,7 +563,6 @@ final class ForgeAtmospherePrototype {
                 }
             }
         });
-        nearby.sort(Comparator.comparingLong(cell -> cellDistanceSquared(playerCell, cell.key())));
         var visible = new ArrayList<AtmosphereSyncPlanner.Cell>();
         for (var cell : nearby) {
             int capacity = capacities.computeIfAbsent(cell.key(), key -> capacityAt(player.serverLevel(), key));
@@ -595,6 +608,9 @@ final class ForgeAtmospherePrototype {
         if (state == null || !state.readable) {
             return -1;
         }
+        var cached = ForgeAtmosphereCapacity.get(state.chunk);
+        int known = cached.get(key.x(), key.y(), key.z());
+        if (known >= 0) return known;
         int size = AtmosphereGrid.CELL_SIZE;
         int air = 0;
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
@@ -608,7 +624,9 @@ final class ForgeAtmospherePrototype {
                 }
             }
         }
-        return AtmosphereGridLayout.capacityForAirBlocks(air);
+        int capacity = AtmosphereGridLayout.capacityForAirBlocks(air);
+        cached.put(key.x(), key.y(), key.z(), capacity);
+        return capacity;
     }
 
     private void importPendingChunks(MinecraftServer server) {
@@ -681,8 +699,10 @@ final class ForgeAtmospherePrototype {
             }
             var cell = grid.get(key);
             if (cell == null) {
-                state.cells.remove(key);
+                if (state.cells.remove(key) == null) continue;
             } else {
+                var persisted = state.cells.get(key);
+                if (persisted != null && persisted.amount() == cell.amount()) continue;
                 state.cells.put(key, new AtmosphereChunkData.Cell(key.x(), key.y(), key.z(), cell.amount()));
             }
             dirtyChunks.add(chunkKey);
@@ -717,23 +737,6 @@ final class ForgeAtmospherePrototype {
         }
     }
 
-    private long cellDistanceSquared(
-        AtmosphereGrid.CellKey<ResourceKey<Level>> first,
-        AtmosphereGrid.CellKey<ResourceKey<Level>> second
-    ) {
-        long dy = (long) first.y() - second.y();
-        return horizontalCellDistanceSquared(first, second) + dy * dy;
-    }
-
-    private long horizontalCellDistanceSquared(
-        AtmosphereGrid.CellKey<ResourceKey<Level>> first,
-        AtmosphereGrid.CellKey<ResourceKey<Level>> second
-    ) {
-        long dx = (long) first.x() - second.x();
-        long dz = (long) first.z() - second.z();
-        return dx * dx + dz * dz;
-    }
-
     private AtmosphereGrid.CellKey<ResourceKey<Level>> cellKey(ServerLevel level, BlockPos pos) {
         return new AtmosphereGrid.CellKey<>(
             level.dimension(),
@@ -765,7 +768,8 @@ final class ForgeAtmospherePrototype {
     private enum SourceKind {
         HIGH_TERRAIN,
         RAIN_CLOUD,
-        DARK_GROUND
+        DARK_GROUND,
+        SNOW_ICE
     }
 
     private record SourceKey(SourceKind kind, ResourceKey<Level> dimension, BlockPos pos) {
