@@ -320,6 +320,50 @@ class AtmosphereGridTest {
     }
 
     @Test
+    void tinyCleanupRetainsSourceWhenOnlyLargerNeighborIsAbove() {
+        AtmosphereGrid<String> grid = new AtmosphereGrid<>();
+        var source = key(0, 0, 0);
+        var above = key(0, 1, 0);
+        long due = AtmosphereGridLayout.nextSimulationTick(1);
+        grid.set(source, 10, 1, 1000);
+        grid.set(above, 20, due, 1000);
+
+        var result = grid.spread(due, capacities(Map.of(source, 1000, above, 1000)));
+
+        assertEquals(10, amount(grid, source));
+        assertEquals(20, amount(grid, above));
+        assertEquals(30, total(grid));
+        assertEquals(0, result.moved());
+    }
+
+    @Test
+    void tinyCleanupIgnoresLargerAboveCellAndSelectsHorizontalOrDown() {
+        AtmosphereGrid<String> grid = new AtmosphereGrid<>();
+        var source = key(0, 0, 0);
+        var above = key(0, 1, 0);
+        var east = key(1, 0, 0);
+        var below = key(0, -1, 0);
+        long due = AtmosphereGridLayout.nextSimulationTick(1);
+        grid.set(source, 10, 1, 1000);
+        grid.set(above, 100, due, 1000);
+        grid.set(east, 20, due, 1000);
+        grid.set(below, 30, due, 1000);
+
+        grid.spread(due, capacities(Map.of(
+            source, 1000,
+            above, 1000,
+            east, 1000,
+            below, 1000
+        )));
+
+        assertNull(grid.get(source));
+        assertEquals(100, amount(grid, above));
+        assertEquals(20, amount(grid, east));
+        assertEquals(40, amount(grid, below));
+        assertEquals(160, total(grid));
+    }
+
+    @Test
     void tinyCleanupRetainsSourceWithoutWholeAmountRoomOrKnownOccupiedNeighbor() {
         AtmosphereGrid<String> grid = new AtmosphereGrid<>();
         var source = key(0, 0, 0);

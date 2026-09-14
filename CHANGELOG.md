@@ -1,3 +1,8 @@
+# 0.12.1-alpha.1
+
+- Restrict tiny-cell cleanup to the four horizontal neighbors and the neighbor below; never consolidate upward. Ordinary six-face spreading is unchanged. Keep the <=10 threshold, strictly larger occupied destination, full free-capacity requirement, and conservative persisted/synchronized transfer.
+- Preserve biome-driven water evaporation, humidity-scaled removal emissions, 300-tick/10% producers, 200-tick simulation, and uniform Minecraft fog color from 0.12.0-alpha.1. No world reset or migration is required.
+
 # 0.12.0-alpha.1
 
 - New world-changing mechanic: sampled surface water evaporates. Plain water fluid blocks become air; waterlogged blocks keep their host with WATERLOGGED cleared. Non-water solids and unsupported hosts are preserved. Only a successful water-removal hook emits humidity-scaled material next tick, with no direct/depth-based emission or double counting. This includes condensed water and permits natural refilling. No world reset or migration is required; existing terrain-damage backup guidance still applies.

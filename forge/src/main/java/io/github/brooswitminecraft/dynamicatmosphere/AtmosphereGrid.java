@@ -28,6 +28,9 @@ public final class AtmosphereGrid<D> {
     private static final int[][] NEIGHBOR_OFFSETS = {
         {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
     };
+    private static final int[][] TINY_CELL_DESTINATION_OFFSETS = {
+        {1, 0, 0}, {-1, 0, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
+    };
 
     private final Map<CellKey<D>, Cell<D>> cells = new LinkedHashMap<>();
     private final PriorityQueue<WorkItem<D>> workQueue = new PriorityQueue<>(
@@ -176,7 +179,7 @@ public final class AtmosphereGrid<D> {
 
             Cell<D> destination = null;
             int destinationCapacity = 0;
-            for (CellKey<D> neighborKey : neighbors(sourceKey)) {
+            for (CellKey<D> neighborKey : tinyCellDestinations(sourceKey)) {
                 Cell<D> neighbor = cells.get(neighborKey);
                 if (neighbor == null || neighbor.amount <= source.amount) {
                     continue;
@@ -529,8 +532,16 @@ public final class AtmosphereGrid<D> {
     }
 
     private static <D> List<CellKey<D>> neighbors(CellKey<D> key) {
-        List<CellKey<D>> neighbors = new ArrayList<>(NEIGHBOR_OFFSETS.length);
-        for (int[] offset : NEIGHBOR_OFFSETS) {
+        return offsetNeighbors(key, NEIGHBOR_OFFSETS);
+    }
+
+    private static <D> List<CellKey<D>> tinyCellDestinations(CellKey<D> key) {
+        return offsetNeighbors(key, TINY_CELL_DESTINATION_OFFSETS);
+    }
+
+    private static <D> List<CellKey<D>> offsetNeighbors(CellKey<D> key, int[][] offsets) {
+        List<CellKey<D>> neighbors = new ArrayList<>(offsets.length);
+        for (int[] offset : offsets) {
             neighbors.add(new CellKey<>(
                 key.dimension,
                 key.x + offset[0],

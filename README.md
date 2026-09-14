@@ -24,7 +24,7 @@ boundaries and exhausted work/search budgets leave work pending, never authorize
 pressure destruction, and do not discard material.
 Excess that still cannot escape remains blocked and reported, not discarded;
 displacement is not unlimited.
-In 0.12.0-alpha.1, simulation retains a fixed **200-tick** interval, or **10 seconds**
+In 0.12.1-alpha.1, simulation retains a fixed **200-tick** interval, or **10 seconds**
 at 20 TPS, replacing the size-based 250-tick cadence. Producers are independent:
 passes are scheduled every **300 ticks** (15 seconds at 20 TPS) across all loaded
 chunks, not just player-offset samples. Each chunk has a random **10% default
@@ -90,7 +90,7 @@ distinguish current observations from retained visual history. There is no
 No world reset is needed. Both atmospheric amounts and broken terrain are saved.
 
 After bounded spreading, a selected due cell with at most 10 units can move its
-entire amount into an existing, loaded, face-adjacent cell with strictly more
+entire amount into an existing, loaded cell on one of the four horizontal faces or directly below (never above), with strictly more
 material and enough free capacity for the whole amount. Equal amounts never merge.
 Prefer the largest eligible destination with deterministic ties; no new cell,
 chunk load, or pressure overflow is created. The empty source is removed and both
@@ -142,7 +142,7 @@ rebuild it. While a new view is being refined, aligned 32-block cached volumes
 provide temporary coverage; unloaded near chunks use 16-block cached fallback.
 Neither fallback overlaps its detailed descendants.
 
-In 0.12.0-alpha.1, every near, far, and fallback volume uses Minecraft's current
+In 0.12.1-alpha.1, every near, far, and fallback volume uses Minecraft's current
 fog/horizon color, sampled once per render frame. There is no local light-based
 grayscale, distance color blend, or client terrain-light sampling cache.
 Constant RGB with no depth writes makes atmospheric alpha order-independent;
