@@ -79,7 +79,6 @@ public final class AtmosphereClient {
         syncWorld();
         if (observedLevel != null && !Minecraft.getInstance().isPaused()) {
             SESSION.cache().advance();
-            AtmosphereVolumeRenderer.tick(observedLevel);
             if (++saveTicks >= 200) {
                 saveTicks = 0;
                 checkpoint();

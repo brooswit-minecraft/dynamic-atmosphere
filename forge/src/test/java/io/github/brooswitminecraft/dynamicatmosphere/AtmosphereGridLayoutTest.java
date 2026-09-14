@@ -34,7 +34,7 @@ class AtmosphereGridLayoutTest {
 
     @Test
     void producerAndSimulationCadencesAreIndependent() {
-        assertEquals(50, AtmosphereGridLayout.PRODUCER_INTERVAL_TICKS);
+        assertEquals(300, AtmosphereGridLayout.PRODUCER_INTERVAL_TICKS);
         assertEquals(200, AtmosphereGridLayout.simulationIntervalTicks());
     }
 

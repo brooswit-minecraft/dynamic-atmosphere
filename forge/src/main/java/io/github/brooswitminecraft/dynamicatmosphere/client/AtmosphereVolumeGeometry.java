@@ -26,59 +26,6 @@ public final class AtmosphereVolumeGeometry {
 
     public record Slice(double depth, float alpha, List<Point> vertices) { }
 
-    static float horizonBlend(double distance, double viewBlocks) {
-        double t = Math.clamp((distance - viewBlocks * 0.5) / Math.max(1, viewBlocks * 0.5), 0, 1);
-        return (float) (t * t * (3 - 2 * t));
-    }
-
-    static float colorChannel(float horizonBlend, float fogChannel, float nearGray) {
-        float blend = Math.clamp(horizonBlend, 0, 1);
-        float gray = Math.clamp(nearGray, 0, 1);
-        return gray + (Math.clamp(fogChannel, 0, 1) - gray) * blend;
-    }
-
-    static AtmosphereClientCache.Cell cameraCell(Point camera) {
-        return new AtmosphereClientCache.Cell((int) Math.floor(camera.x() / CELL_SIZE),
-            (int) Math.floor(camera.y() / CELL_SIZE), (int) Math.floor(camera.z() / CELL_SIZE));
-    }
-
-    /** BSP painter order for disjoint aligned volumes, independent of camera rotation. */
-    static int backToFront(AtmosphereLodHierarchy.Volume a, AtmosphereLodHierarchy.Volume b,
-                           AtmosphereClientCache.Cell camera) {
-        int order = rootOrder(a.x, b.x, camera.x());
-        if (order == 0) order = rootOrder(a.z, b.z, camera.z());
-        if (order == 0) order = rootOrder(a.y, b.y, camera.y());
-        if (order != 0) return order;
-        // Within a 32-block root, visit the far side of each X/Z/Y split first.
-        // A fallback and its descendants can share a prefix, but never render together.
-        for (int bit = 2; bit >= 0; bit--) {
-            order = splitOrder(a.x, b.x, camera.x(), bit);
-            if (order == 0) order = splitOrder(a.z, b.z, camera.z(), bit);
-            if (order == 0) order = splitOrder(a.y, b.y, camera.y(), bit);
-            if (order != 0) return order;
-        }
-        return Integer.compare(b.level, a.level);
-    }
-
-    private static int rootOrder(int a, int b, int camera) {
-        a = Math.floorDiv(a, 8);
-        b = Math.floorDiv(b, 8);
-        camera = Math.floorDiv(camera, 8);
-        if (a == b) return 0;
-        if (a == camera) return 1;
-        if (b == camera) return -1;
-        // Opposite camera sides cannot cover the same ray; either side may go first.
-        return a > camera && b > camera ? Integer.compare(b, a) : Integer.compare(a, b);
-    }
-
-    private static int splitOrder(int a, int b, int camera, int bit) {
-        int edge = 1 << bit;
-        if ((a & edge) == (b & edge)) return 0;
-        int split = Math.floorDiv(a, edge * 2) * edge * 2 + edge;
-        boolean highSideFar = camera < split;
-        return ((a & edge) != 0) == highSideFar ? -1 : 1;
-    }
-
     public static float sliceAlpha(float amount, double thickness) {
         return (float) -Math.expm1(-0.6 * Math.clamp(amount, 0, 1000) / 1000.0 * thickness / CELL_SIZE);
     }

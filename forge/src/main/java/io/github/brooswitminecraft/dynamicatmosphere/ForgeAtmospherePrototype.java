@@ -15,6 +15,8 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
@@ -51,12 +53,10 @@ final class ForgeAtmospherePrototype {
     private static final int DEMO_PARTICLE_CAP = 24;
     private static final int MAX_CHUNK_IMPORTS_PER_TICK = 8;
     private static final int MAX_PRODUCER_CHUNKS_PER_TICK = 32;
-    private static final double PRODUCER_CHANCE = 0.25;
-    private static final int WATER_EMISSION_PER_DEPTH = 20;
+    private static final double PRODUCER_CHANCE = 0.10;
     private static final int HIGH_TERRAIN_EMISSION = 40;
     private static final int RAIN_CLOUD_EMISSION = 320;
     private static final int RAIN_CLOUD_HEIGHT = 192;
-    private static final int MAX_WATER_DEPTH = 8;
     private static final int[][] DEMO_CELL_OFFSETS = {
         {0, 0, 0}, {1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}
     };
@@ -286,8 +286,8 @@ final class ForgeAtmospherePrototype {
                 continue;
             }
             int capacity = capacityAt(level, key);
-            if (capacity >= 0 && grid.emit(key, entry.getValue(), serverTicks, capacity)) {
-                waterRemovalEmissions += entry.getValue() / AtmosphereWaterTransitions.MATERIAL_PER_BLOCK;
+            if (capacity >= 0 && grid.emit(key, entry.getValue().material(), serverTicks, capacity)) {
+                waterRemovalEmissions += entry.getValue().removals();
                 gridEmissions++;
             }
         }
@@ -429,10 +429,23 @@ final class ForgeAtmospherePrototype {
 
         sampleLandingSources(level, state.chunk, x, z, localX, localZ, emittedSources);
         if (state.chunk.getFluidState(surface).is(FluidTags.WATER)) {
-            int depth = sampleLoadedWaterDepth(state.chunk, surface);
-            AtmosphereGrid.CellKey<ResourceKey<Level>> cell = cellKey(level, new BlockPos(x, surfaceY, z));
-            SourceKey source = new SourceKey(SourceKind.WATER, level.dimension(), surface.immutable());
-            emitSource(level, emittedSources, source, cell, depth * WATER_EMISSION_PER_DEPTH);
+            double temperature = state.chunk.getNoiseBiome(x >> 2, surface.getY() >> 2, z >> 2)
+                .value().getModifiedClimateSettings().temperature();
+            if (!AtmosphereProducerSchedule.passesChance(
+                AtmosphereWaterTransitions.evaporationChance(temperature), level.random.nextDouble())) return;
+            var water = state.chunk.getBlockState(surface);
+            var action = AtmosphereWaterTransitions.evaporationAction(
+                water.getFluidState().is(FluidTags.WATER),
+                water.hasProperty(BlockStateProperties.WATERLOGGED)
+                    && water.getValue(BlockStateProperties.WATERLOGGED),
+                water.getBlock() instanceof LiquidBlock);
+            // Only the successful setBlockState hook emits material, on the next tick.
+            switch (action) {
+                case DRAIN_WATERLOGGED -> level.setBlockAndUpdate(surface,
+                    water.setValue(BlockStateProperties.WATERLOGGED, false));
+                case REMOVE_FLUID -> level.setBlockAndUpdate(surface, Blocks.AIR.defaultBlockState());
+                case KEEP -> { }
+            }
         } else if (surfaceY >= level.getSeaLevel() + HIGH_TERRAIN_ABOVE_SEA) {
             AtmosphereGrid.CellKey<ResourceKey<Level>> cell = cellKey(level, new BlockPos(x, surfaceY + 5, z));
             SourceKey source = new SourceKey(SourceKind.HIGH_TERRAIN, level.dimension(), surface.immutable());
@@ -497,18 +510,6 @@ final class ForgeAtmospherePrototype {
             return true;
         }
         return false;
-    }
-
-    private int sampleLoadedWaterDepth(LevelChunk chunk, BlockPos surface) {
-        int depth = 0;
-        for (int offset = 0; offset < MAX_WATER_DEPTH; offset++) {
-            BlockPos sample = surface.below(offset);
-            if (!chunk.getFluidState(sample).is(FluidTags.WATER)) {
-                break;
-            }
-            depth++;
-        }
-        return Math.max(1, depth);
     }
 
     private void syncPlayers(MinecraftServer server, boolean forceSnapshot) {
@@ -762,7 +763,6 @@ final class ForgeAtmospherePrototype {
     }
 
     private enum SourceKind {
-        WATER,
         HIGH_TERRAIN,
         RAIN_CLOUD,
         DARK_GROUND

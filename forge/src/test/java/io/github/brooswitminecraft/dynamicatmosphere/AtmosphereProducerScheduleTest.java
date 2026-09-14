@@ -14,12 +14,12 @@ class AtmosphereProducerScheduleTest {
 
     @Test
     void chanceGateUsesHalfOpenRollBoundary() {
-        assertTrue(AtmosphereProducerSchedule.passesChance(0.25, 0.0));
-        assertTrue(AtmosphereProducerSchedule.passesChance(0.25, Math.nextDown(0.25)));
-        assertFalse(AtmosphereProducerSchedule.passesChance(0.25, 0.25));
-        assertFalse(AtmosphereProducerSchedule.passesChance(0.25, Math.nextDown(1.0)));
+        assertTrue(AtmosphereProducerSchedule.passesChance(0.10, 0.0));
+        assertTrue(AtmosphereProducerSchedule.passesChance(0.10, Math.nextDown(0.10)));
+        assertFalse(AtmosphereProducerSchedule.passesChance(0.10, 0.10));
+        assertFalse(AtmosphereProducerSchedule.passesChance(0.10, Math.nextDown(1.0)));
         assertThrows(IllegalArgumentException.class,
-            () -> AtmosphereProducerSchedule.passesChance(0.25, Double.NaN));
+            () -> AtmosphereProducerSchedule.passesChance(0.10, Double.NaN));
     }
 
     @Test

@@ -1,1 +1,1 @@
-Persistent atmosphere, cached far fog, and water condensation for NeoForge 1.21.1. Real water can wet builds; destructive pressure can damage terrain. Back up worlds.
+Persistent atmosphere, cached far fog, and biome-driven water evaporation/condensation for NeoForge 1.21.1. Real water and destructive pressure change worlds. Back up worlds.

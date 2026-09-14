@@ -24,12 +24,12 @@ boundaries and exhausted work/search budgets leave work pending, never authorize
 pressure destruction, and do not discard material.
 Excess that still cannot escape remains blocked and reported, not discarded;
 displacement is not unlimited.
-In 0.11.0-alpha.1, simulation uses a fixed **200-tick** interval, or **10 seconds**
+In 0.12.0-alpha.1, simulation retains a fixed **200-tick** interval, or **10 seconds**
 at 20 TPS, replacing the size-based 250-tick cadence. Producers are independent:
-passes are scheduled every **50 ticks** (2.5 seconds at 20 TPS) across all loaded
-chunks, not just player-offset samples. Each chunk has a random **25% default
+passes are scheduled every **300 ticks** (15 seconds at 20 TPS) across all loaded
+chunks, not just player-offset samples. Each chunk has a random **10% default
 gate**, with one random X/Z column per pass. A bounded fair queue permits backlog,
-so scheduling is not a guarantee every chunk completes within 2.5 seconds. Checks
+so scheduling is not a guarantee every chunk completes within 15 seconds. Checks
 never force chunks to load. Actual simulation progress remains work-budgeted.
 Cache/render/sync intervals are unchanged; no data reset is required.
 Live cell visibility follows Minecraft's actual
@@ -45,13 +45,23 @@ gas transport, and world generation changes are not included yet.
 Rain still uses Minecraft's local rain/exposure check, but its emission is moved
 from ground level to cloud height **Y=192**. Each passed rain check adds **320 material
 units**, eight times the previous 40, instead of also adding ground-level rain
-fog. Water-depth fog, high-terrain clouds, and dark exposed-ground sources remain.
-The mod does not create rain or change the world's weather; condensation places
-water blocks independently of Minecraft's rain.
+fog. High-terrain clouds and dark exposed-ground sources remain.
+Sampled surface water now evaporates: plain water fluid blocks become air, while
+waterlogged blocks retain their host with WATERLOGGED cleared. Non-water solids
+and unsupported water-containing hosts are preserved. Depth-based direct emissions
+are removed. This removes real water, including previously condensed water;
+natural fluid updates may refill it. No world reset or data migration is required.
+The mod does not create rain or change the world's weather.
 
-A water-to-nonwater block transition emits **40 material units** at that
-position. Ordinary water-level changes do not qualify, and chunk unloads do not
-trigger this source.
+After the outer 10% chunk gate, scheduled water evaporation gets a second chance
+of `clamp(biome temperature / 2, 0, 1)`: temperature 0.8 gives 40%, 2 gives 100%,
+and 0 or below never evaporates. Only the scheduled producer uses this roll.
+Every successful water-to-nonwater mutation, including manual removals, emits
+`round(10 + 70 * clamp(biome downfall, 0, 1))` material units (10 dry to 80 wet).
+Downfall is a biome humidity proxy, not instantaneous rain or weather; climate
+comes from the loaded chunk's biome. Humidity is captured at removal and queued
+amounts are added without a second producer emission. Ordinary water-level
+changes, failed mutations, and chunk unloads do not trigger this source.
 
 Exposed non-fluid ground also emits according to effective light: zero at light
 15, rising to 40 units per pass at light 0. This uses the day/night-adjusted sky
@@ -78,6 +88,13 @@ sides together; earlier-protocol clients cannot connect.** Large snapshots use
 distinguish current observations from retained visual history. There is no
 512-cell draw cap; GPU batches bound buffer size.
 No world reset is needed. Both atmospheric amounts and broken terrain are saved.
+
+After bounded spreading, a selected due cell with at most 10 units can move its
+entire amount into an existing, loaded, face-adjacent cell with strictly more
+material and enough free capacity for the whole amount. Equal amounts never merge.
+Prefer the largest eligible destination with deterministic ties; no new cell,
+chunk load, or pressure overflow is created. The empty source is removed and both
+changes are persisted and synchronized. Solitary or blocked cells retain material.
 
 ## Water Condensation
 
@@ -125,23 +142,14 @@ rebuild it. While a new view is being refined, aligned 32-block cached volumes
 provide temporary coverage; unloaded near chunks use 16-block cached fallback.
 Neither fallback overlaps its detailed descendants.
 
-In 0.11.0-alpha.1, nearby light-based grayscale blends smoothly toward Minecraft's
-current fog/horizon color with distance, replacing the abrupt color transition.
-Color stays grayscale through `V/2` and reaches full horizon color at `V`, using
-smoothstep between them. Coarse volumes in that blend region use air-count-weighted
-base-cell light averages, not an unweighted mean of occupied cells.
-Nearby detail uses grayscale from the mean
-effective light of air blocks in that cell: light 0 is black and 15 is white.
-Non-air blocks are excluded; dark air counts. Minecraft sky darkening and block
-light are included. Sampling never loads chunks and runs for at most 32 base cells
-(2,048 blocks) per client tick, not per frame. Visible cells request refresh after
-20 ticks; busy queues can delay it. Unsampled cells use neutral 50% gray. This
-disposable lighting cache holds at most 8,192 volumes and clears on world changes.
-Mixed colors use cached spatial back-to-front ordering and bounded GPU batches;
-rotation does not re-sort volumes. The blend preserves opacity, protocol 5, and
-persistent world/personal cache formats.
+In 0.12.0-alpha.1, every near, far, and fallback volume uses Minecraft's current
+fog/horizon color, sampled once per render frame. There is no local light-based
+grayscale, distance color blend, or client terrain-light sampling cache.
+Constant RGB with no depth writes makes atmospheric alpha order-independent;
+rendering uses bounded GPU batches without sorting volumes. Opacity, protocol 5,
+and persistent world/personal cache formats are unchanged.
 
-LOD and color blending change rendering only. Server simulation uses 4x4x4-block cells and
+LOD and color tuning change rendering only. Server simulation uses 4x4x4-block cells and
 200-tick checks (10 seconds at 20 TPS), with unchanged condensation chance and
 consumption per check. Cache/render/sync intervals and persistent data are
 unchanged. Four-times-view cache reach remains, with distant visuals only from

@@ -5,7 +5,7 @@ public final class AtmosphereGridLayout {
 
     public static final int CELL_SIZE = 4;
     public static final int SIMULATION_INTERVAL_TICKS = 200;
-    public static final int PRODUCER_INTERVAL_TICKS = 50;
+    public static final int PRODUCER_INTERVAL_TICKS = 300;
     private static final int MINECRAFT_CHUNK_SIZE = 16;
     private static final int CELLS_PER_CHUNK = MINECRAFT_CHUNK_SIZE / CELL_SIZE;
 

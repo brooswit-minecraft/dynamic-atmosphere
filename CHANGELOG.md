@@ -1,3 +1,14 @@
+# 0.12.0-alpha.1
+
+- New world-changing mechanic: sampled surface water evaporates. Plain water fluid blocks become air; waterlogged blocks keep their host with WATERLOGGED cleared. Non-water solids and unsupported hosts are preserved. Only a successful water-removal hook emits humidity-scaled material next tick, with no direct/depth-based emission or double counting. This includes condensed water and permits natural refilling. No world reset or migration is required; existing terrain-damage backup guidance still applies.
+
+- Loaded-chunk producer passes now run every 300 ticks (15 seconds at 20 TPS), with a 10% per-chunk gate instead of 50 ticks and 25%. Bounded queue processing may delay checks; no chunks are force-loaded.
+- Use Minecraft's current fog/horizon color for every near, far, and fallback volume. Remove local light-based grayscale, distance color blending, the unused lighting cache, and unnecessary volume sorting. Preserve LOD coverage, opacity, depth testing, and bounded GPU batches.
+- Preserve 200-tick simulation checks, rain emissions of 320 units at Y=192, condensation, storage, and protocol behavior. No world reset is required.
+
+- Scheduled evaporation additionally rolls `clamp(biome temperature / 2, 0, 1)` after the chunk gate: hotter means more evaporation. All successful water removals, including manual changes, produce `round(10 + 70 * clamp(biome downfall, 0, 1))` units (10 dry to 80 wet). Climate uses loaded biome settings, not current weather; queued amounts snapshot humidity at removal.
+- After bounded spreading, a due cell with at most 10 units can merge wholly into an existing loaded face neighbor with strictly more material and sufficient free capacity. Prefer the largest destination with deterministic ties; equal amounts never merge. Preserve totals, persist/sync both changes, and remove the empty source. No new cell, chunk load, or pressure overflow; solitary/blocked cells retain material.
+
 # 0.11.0-alpha.1
 
 - Smoothstep from light-based grayscale through half the Minecraft view distance to full current fog/horizon color at the view distance. Coarse volumes in the blend region use air-count-weighted base-cell light averages, with at most 32 base cells sampled per client tick. Preserve LOD coverage and persistent visual caches.

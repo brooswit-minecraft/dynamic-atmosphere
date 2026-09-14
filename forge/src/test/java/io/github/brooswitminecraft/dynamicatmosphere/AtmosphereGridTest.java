@@ -278,6 +278,98 @@ class AtmosphereGridTest {
     }
 
     @Test
+    void tinySelectedSourceMovesWholeAmountIntoFullestStableOccupiedNeighbor() {
+        AtmosphereGrid<String> grid = new AtmosphereGrid<>();
+        var source = key(0, 0, 0);
+        var west = key(-1, 0, 0);
+        var east = key(1, 0, 0);
+        long due = AtmosphereGridLayout.nextSimulationTick(1);
+        grid.set(source, 10, 1, 1000);
+        grid.set(west, 20, due, 1000);
+        grid.set(east, 20, due, 1000);
+        grid.drainDirtyKeys();
+
+        var result = grid.spread(due,
+            capacities(Map.of(source, 1000, west, 1000, east, 1000)));
+
+        assertEquals(10, result.moved());
+        assertNull(grid.get(source));
+        assertEquals(30, amount(grid, west));
+        assertEquals(20, amount(grid, east));
+        assertEquals(50, total(grid));
+        assertEquals(Set.of(source, west), grid.drainDirtyKeys());
+    }
+
+    @Test
+    void tinyCleanupDoesNotMergeEqualSizedCells() {
+        AtmosphereGrid<String> grid = new AtmosphereGrid<>();
+        var source = key(0, 0, 0);
+        var equal = key(1, 0, 0);
+        long due = AtmosphereGridLayout.nextSimulationTick(1);
+        grid.set(source, 10, 1, 1000);
+        grid.set(equal, 10, due, 1000);
+        grid.drainDirtyKeys();
+
+        var result = grid.spread(due,
+            capacities(Map.of(source, 1000, equal, 1000)));
+
+        assertEquals(10, amount(grid, source));
+        assertEquals(10, amount(grid, equal));
+        assertEquals(20, total(grid));
+        assertEquals(0, result.moved());
+    }
+
+    @Test
+    void tinyCleanupRetainsSourceWithoutWholeAmountRoomOrKnownOccupiedNeighbor() {
+        AtmosphereGrid<String> grid = new AtmosphereGrid<>();
+        var source = key(0, 0, 0);
+        var full = key(1, 0, 0);
+        var unknown = key(-1, 0, 0);
+        var empty = key(0, 1, 0);
+        long due = AtmosphereGridLayout.nextSimulationTick(1);
+        grid.set(source, 10, 1, 1000);
+        grid.set(full, 995, due, 1000);
+        grid.set(unknown, 100, due, 1000);
+        grid.drainDirtyKeys();
+
+        var result = grid.spread(due, key -> {
+            if (key.equals(source)) return 1000;
+            if (key.equals(full)) return 1000;
+            if (key.equals(unknown)) return -1;
+            if (key.equals(empty)) return 1000;
+            return 0;
+        });
+
+        assertEquals(10, amount(grid, source));
+        assertEquals(995, amount(grid, full));
+        assertEquals(100, amount(grid, unknown));
+        assertNull(grid.get(empty));
+        assertEquals(1_105, total(grid));
+        assertEquals(0, result.moved());
+    }
+
+    @Test
+    void tinyCleanupOnlyExaminesTheBoundedSelectedSourceSet() {
+        AtmosphereGrid<String> grid = new AtmosphereGrid<>();
+        long due = AtmosphereGridLayout.nextSimulationTick(1);
+        for (int x = 0; x < 129; x++) {
+            grid.set(key(x * 3, 0, 0), 10, 1, 1000);
+        }
+        for (int x = 0; x < 129; x++) {
+            grid.set(key(x * 3 + 1, 0, 0), 20, due, 1000);
+        }
+
+        var first = grid.spread(due, key -> grid.get(key) == null ? 0 : 1000);
+
+        assertEquals(128, first.sourcesProcessed());
+        assertEquals(1, grid.cells().stream()
+            .filter(cell -> cell.amount() == 10)
+            .count());
+        assertTrue(first.workRemaining());
+        assertEquals(3_870, total(grid));
+    }
+
+    @Test
     void dirtyDrainAndRestoreSupportChunkPersistenceWithoutFullScans() {
         AtmosphereGrid<String> grid = new AtmosphereGrid<>();
         AtmosphereGrid.CellKey<String> source = key(2, 3, 4);

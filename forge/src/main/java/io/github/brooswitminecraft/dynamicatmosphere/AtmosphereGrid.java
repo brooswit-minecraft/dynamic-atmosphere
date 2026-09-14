@@ -23,6 +23,7 @@ public final class AtmosphereGrid<D> {
     public static final int MAX_STORED_AMOUNT = 1_000_000;
     public static final int MAX_SOURCES_PER_SPREAD = 128;
     public static final int MAX_OVERFLOW_VISITS = 512;
+    public static final int TINY_CELL_AMOUNT = 10;
 
     private static final int[][] NEIGHBOR_OFFSETS = {
         {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
@@ -139,19 +140,73 @@ public final class AtmosphereGrid<D> {
         for (CellKey<D> source : sources) beforeSpread.accept(source);
         int moved = spreadOneHop(tick, capacityAt, sources);
         SpreadResult<D> overflow = redistributeOverflowInternal(tick, capacityAt, sources);
+        int consolidated = consolidateTinySources(tick, capacityAt, sources);
         for (CellKey<D> source : sources) {
             if (cells.containsKey(source)) {
                 scheduleIfAbsent(source, AtmosphereGridLayout.nextSimulationTick(tick));
             }
         }
         return new SpreadResult<>(
-            moved + overflow.overflowMoved,
+            moved + overflow.overflowMoved + consolidated,
             overflow.overflowMoved,
             overflow.blockedCells,
             sources.size(),
             hasDueWork(tick),
             overflow.searchLimited
         );
+    }
+
+    /** Consolidates tiny selected sources without scanning the full grid or creating cells. */
+    private int consolidateTinySources(
+        long tick,
+        ToIntFunction<CellKey<D>> capacityAt,
+        List<CellKey<D>> sources
+    ) {
+        int moved = 0;
+        Comparator<CellKey<D>> coordinateOrder = Comparator
+            .comparingInt((CellKey<D> key) -> key.x)
+            .thenComparingInt(key -> key.y)
+            .thenComparingInt(key -> key.z);
+
+        for (CellKey<D> sourceKey : sources) {
+            Cell<D> source = cells.get(sourceKey);
+            if (source == null || source.amount <= 0 || source.amount > TINY_CELL_AMOUNT) {
+                continue;
+            }
+
+            Cell<D> destination = null;
+            int destinationCapacity = 0;
+            for (CellKey<D> neighborKey : neighbors(sourceKey)) {
+                Cell<D> neighbor = cells.get(neighborKey);
+                if (neighbor == null || neighbor.amount <= source.amount) {
+                    continue;
+                }
+                int rawCapacity = capacityAt.applyAsInt(neighborKey);
+                if (rawCapacity < 0) {
+                    continue;
+                }
+                int capacity = boundedCapacity(rawCapacity);
+                if ((long) neighbor.amount + source.amount > capacity) {
+                    continue;
+                }
+                if (destination == null
+                    || neighbor.amount > destination.amount
+                    || (neighbor.amount == destination.amount
+                        && coordinateOrder.compare(neighbor.key, destination.key) < 0)) {
+                    destination = neighbor;
+                    destinationCapacity = capacity;
+                }
+            }
+            if (destination == null) {
+                continue;
+            }
+
+            putCell(destination.key, destination.amount + source.amount, destinationCapacity,
+                destination.lastEmissionTick, tick);
+            moved += source.amount;
+            remove(sourceKey);
+        }
+        return moved;
     }
 
     public SpreadResult<D> redistributeOverflow(
