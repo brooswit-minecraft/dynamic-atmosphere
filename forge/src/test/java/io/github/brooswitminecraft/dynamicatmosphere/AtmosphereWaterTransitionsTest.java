@@ -3,10 +3,54 @@ package io.github.brooswitminecraft.dynamicatmosphere;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class AtmosphereWaterTransitionsTest {
+    @Test
+    void evaporationColumnWalksContiguousWaterAndDetectsImmediateMagma() {
+        Set<Integer> water = Set.of(70, 69, 68);
+        var column = AtmosphereWaterTransitions.evaporationColumn(
+            70, -64, water::contains, y -> y == 67);
+
+        assertEquals(68, column.bottomY());
+        assertEquals(true, column.magma());
+        assertEquals(true, column.removesSurface(70));
+    }
+
+    @Test
+    void evaporationColumnStopsAtGapAndIgnoresDeeperMagma() {
+        Set<Integer> water = Set.of(70, 68);
+        var column = AtmosphereWaterTransitions.evaporationColumn(
+            70, -64, water::contains, y -> y == 67);
+
+        assertEquals(70, column.bottomY());
+        assertEquals(false, column.magma());
+        assertEquals(false, column.removesSurface(70));
+    }
+
+    @Test
+    void evaporationColumnNeverQueriesBelowBuildHeightOrDuplicatesSingleLayer() {
+        Set<Integer> queriedWater = new java.util.HashSet<>();
+        Set<Integer> queriedMagma = new java.util.HashSet<>();
+        var column = AtmosphereWaterTransitions.evaporationColumn(0, 0,
+            y -> {
+                queriedWater.add(y);
+                return true;
+            },
+            y -> {
+                queriedMagma.add(y);
+                return true;
+            });
+
+        assertEquals(0, column.bottomY());
+        assertEquals(false, column.magma());
+        assertEquals(false, column.removesSurface(0));
+        assertEquals(Set.of(), queriedWater);
+        assertEquals(Set.of(), queriedMagma);
+    }
+
     @Test
     void biomeTemperatureChanceIsClampedAndHotterMeansMoreEvaporation() {
         assertEquals(0, AtmosphereWaterTransitions.evaporationChance(-1));
@@ -15,6 +59,17 @@ class AtmosphereWaterTransitionsTest {
         assertEquals(1, AtmosphereWaterTransitions.evaporationChance(2));
         assertEquals(1, AtmosphereWaterTransitions.evaporationChance(3));
         assertEquals(0, AtmosphereWaterTransitions.evaporationChance(Double.NaN));
+    }
+
+    @Test
+    void magmaBypassesTemperatureChanceWithoutReadingTheRoll() {
+        assertEquals(true, AtmosphereWaterTransitions.evaporationPasses(true, 0,
+            () -> {
+                throw new AssertionError("Magma must not consume a temperature roll");
+            }));
+        assertEquals(false, AtmosphereWaterTransitions.evaporationPasses(false, 0, () -> 0));
+        assertEquals(true, AtmosphereWaterTransitions.evaporationPasses(false, 0.8, () -> 0.39));
+        assertEquals(false, AtmosphereWaterTransitions.evaporationPasses(false, 0.8, () -> 0.4));
     }
 
     @Test

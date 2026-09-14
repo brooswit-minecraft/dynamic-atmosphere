@@ -2,50 +2,52 @@ package io.github.brooswitminecraft.dynamicatmosphere;
 
 import java.util.Arrays;
 
-/** Fixed-size transient capacity slots for one chunk; -1 means it needs a terrain read. */
-final class AtmosphereCapacityCache {
-    private static final int SIDE = 16 / AtmosphereGridLayout.CELL_SIZE;
+/** Fixed-size transient capacity slots for one smoke chunk. */
+final class SmokeCapacityCache {
+    private static final int SIDE = 16 / SmokeGridLayout.CELL_SIZE;
     private final int minCellY;
     private final short[] values;
     private final byte[] bedrock;
 
-    AtmosphereCapacityCache(int minBlockY, int maxBlockY) {
+    SmokeCapacityCache(int minBlockY, int maxBlockY) {
         if (maxBlockY <= minBlockY) throw new IllegalArgumentException("Empty chunk height");
-        minCellY = AtmosphereGridLayout.cellCoordinate(minBlockY);
-        int maxCellY = AtmosphereGridLayout.cellCoordinate(maxBlockY - 1);
+        minCellY = SmokeGridLayout.cellCoordinate(minBlockY);
+        int maxCellY = SmokeGridLayout.cellCoordinate(maxBlockY - 1);
         values = new short[Math.multiplyExact(maxCellY - minCellY + 1, SIDE * SIDE)];
         bedrock = new byte[values.length];
         clear();
     }
 
-    int get(int cellX, int cellY, int cellZ) {
-        int index = index(cellX, cellY, cellZ);
+    int get(int x, int y, int z) {
+        int index = index(x, y, z);
         return index < 0 ? -1 : values[index];
     }
 
-    void put(int cellX, int cellY, int cellZ, int capacity) {
-        put(cellX, cellY, cellZ, capacity, false);
+    void put(int x, int y, int z, int capacity) {
+        put(x, y, z, capacity, false);
     }
 
-    void put(int cellX, int cellY, int cellZ, int capacity, boolean containsBedrock) {
-        if (capacity < 0 || capacity > 1000) throw new IllegalArgumentException("Invalid capacity");
-        int index = index(cellX, cellY, cellZ);
+    void put(int x, int y, int z, int capacity, boolean containsBedrock) {
+        if (capacity < 0 || capacity > AtmosphereGrid.MAX_AMOUNT) {
+            throw new IllegalArgumentException("Invalid smoke capacity");
+        }
+        int index = index(x, y, z);
         if (index >= 0) {
             values[index] = (short) capacity;
             bedrock[index] = (byte) (containsBedrock ? 1 : 0);
         }
     }
 
-    int bedrock(int cellX, int cellY, int cellZ) {
-        int index = index(cellX, cellY, cellZ);
+    int bedrock(int x, int y, int z) {
+        int index = index(x, y, z);
         return index < 0 || values[index] < 0 ? -1 : bedrock[index];
     }
 
     void blockChanged(int x, int y, int z, boolean previousAir, boolean nextAir,
                       boolean previousBedrock, boolean nextBedrock) {
         if (previousAir == nextAir && previousBedrock == nextBedrock) return;
-        int index = index(AtmosphereGridLayout.cellCoordinate(x),
-            AtmosphereGridLayout.cellCoordinate(y), AtmosphereGridLayout.cellCoordinate(z));
+        int index = index(SmokeGridLayout.cellCoordinate(x), SmokeGridLayout.cellCoordinate(y),
+            SmokeGridLayout.cellCoordinate(z));
         if (index >= 0) values[index] = -1;
     }
 
@@ -57,8 +59,6 @@ final class AtmosphereCapacityCache {
         Arrays.fill(values, (short) -1);
         Arrays.fill(bedrock, (byte) 0);
     }
-
-    int size() { return values.length; }
 
     private int index(int x, int y, int z) {
         long row = (long) y - minCellY;

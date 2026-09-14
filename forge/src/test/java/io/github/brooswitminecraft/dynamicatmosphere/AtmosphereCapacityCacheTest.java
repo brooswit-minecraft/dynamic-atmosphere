@@ -33,6 +33,17 @@ class AtmosphereCapacityCacheTest {
     }
 
     @Test
+    void bedrockChangeInvalidatesEvenWhenBothBlocksAreSolid() {
+        var cache = new AtmosphereCapacityCache(-64, 320);
+        cache.put(0, 0, 0, 500, false);
+
+        cache.blockChanged(1, 1, 1, false, false, false, true);
+
+        assertEquals(-1, cache.get(0, 0, 0));
+        assertEquals(-1, cache.bedrock(0, 0, 0));
+    }
+
+    @Test
     void negativeCoordinatesAndVerticalEdgesStayInTheirOwnSlots() {
         var cache = new AtmosphereCapacityCache(-64, 320);
         assertEquals(1536, cache.size());

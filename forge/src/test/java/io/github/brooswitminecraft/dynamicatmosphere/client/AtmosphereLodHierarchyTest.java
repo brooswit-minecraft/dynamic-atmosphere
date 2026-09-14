@@ -15,11 +15,11 @@ class AtmosphereLodHierarchyTest {
     }
 
     @Test
-    void halfViewAndDoublingBandsUseAlignedFourEightSixteenAndThirtyTwoBlocks() {
+    void halfViewAndDoublingBandsUseOnlyFourEightAndSixteenBlocks() {
         var tree = new AtmosphereLodHierarchy();
         for (int x : new int[] {1, 10, 20, 40, 80}) seed(tree, x, 0, 0, 1000);
         var selected = tree.select(0, 0, 0, 4, 0).volumes();
-        assertEquals(List.of(4, 8, 16, 32), selected.stream().map(AtmosphereLodHierarchy.Volume::size).sorted().toList());
+        assertEquals(List.of(4, 8, 16), selected.stream().map(AtmosphereLodHierarchy.Volume::size).sorted().toList());
         for (var volume : selected) {
             assertEquals(0, Math.floorMod(volume.x, 1 << volume.level));
             assertEquals(0, Math.floorMod(volume.y, 1 << volume.level));
@@ -89,15 +89,15 @@ class AtmosphereLodHierarchyTest {
     @Test
     void negativeCoordinatesFloorAndVerticalDistanceAlsoSelectsLod() {
         var tree = new AtmosphereLodHierarchy();
-        seed(tree, -41, -1, -1, 1000);
-        seed(tree, 0, 40, 0, 1000);
+        seed(tree, -21, -1, -1, 1000);
+        seed(tree, 0, 20, 0, 1000);
         var volumes = tree.select(0, 0, 0, 4, 0).volumes();
         assertEquals(2, volumes.size());
-        assertTrue(volumes.stream().allMatch(v -> v.size() == 32));
+        assertTrue(volumes.stream().allMatch(v -> v.size() == 16));
         var negative = volumes.stream().filter(v -> v.x < 0).findFirst().orElseThrow();
-        assertEquals(-192, negative.blockX());
-        assertEquals(-32, negative.blockY());
-        assertEquals(-32, negative.blockZ());
+        assertEquals(-96, negative.blockX());
+        assertEquals(-16, negative.blockY());
+        assertEquals(-16, negative.blockZ());
     }
 
     @Test
@@ -117,7 +117,7 @@ class AtmosphereLodHierarchyTest {
                 for (int j = i + 1; j < visible.size(); j++) assertFalse(overlaps(visible.get(i), visible.get(j)));
             }
         }
-        for (int x = -20; x < 64; x++) {
+        for (int x = -20; x < 32; x++) {
             final double center = x * 4 + 2;
             assertEquals(1, selected.volumes().stream().filter(v -> center >= v.blockX() && center < v.blockX() + v.size()
                 && 2 >= v.blockY() && 2 < v.blockY() + v.size() && 2 >= v.blockZ() && 2 < v.blockZ() + v.size()).count());
@@ -136,7 +136,7 @@ class AtmosphereLodHierarchyTest {
         assertNotSame(initial, preview);
         assertEquals(1, preview.volumes().size());
         assertEquals(100000, preview.volumes().getFirst().blockX());
-        assertEquals(32, preview.volumes().getFirst().size());
+        assertEquals(16, preview.volumes().getFirst().size());
         var completed = tree.select(100000, 0, 0, 4, 1);
         assertFalse(tree.selectionPending());
         assertEquals(1, completed.volumes().size());
@@ -145,14 +145,14 @@ class AtmosphereLodHierarchyTest {
         assertTrue(tree.lastSelectionWork() <= AtmosphereLodHierarchy.SELECTION_WORK_PER_TICK);
         var busyPreview = tree.select(0, 0, 0, 4, 2);
         assertTrue(tree.selectionPending());
-        assertTrue(busyPreview.volumes().stream().allMatch(v -> v.size() == 32));
+        assertTrue(busyPreview.volumes().stream().allMatch(v -> v.size() == 16));
         assertTrue(busyPreview.volumes().stream().anyMatch(v -> v.x == 0 && v.y == 0 && v.z == 0));
     }
 
     private static void seedBusyRegion(AtmosphereLodHierarchy tree) {
         for (int x = -8; x < 8; x++) {
             for (int y = -8; y < 8; y++) {
-                for (int z = -8; z < 8; z++) seed(tree, x * 8, y * 8, z * 8, 1000);
+                for (int z = -8; z < 8; z++) seed(tree, x * 4, y * 4, z * 4, 1000);
             }
         }
     }
@@ -210,12 +210,12 @@ class AtmosphereLodHierarchyTest {
         var cache = new AtmosphereClientCache(1);
         cache.changeDimension("overworld");
         cache.restore(List.of(new AtmosphereClientCache.Update(cell(10, 0, 0), 100, 200),
-            new AtmosphereClientCache.Update(cell(40, 0, 0), 1000, 100)));
-        cache.setDetailedView(key -> key.x() == 40);
+            new AtmosphereClientCache.Update(cell(20, 0, 0), 1000, 100)));
+        cache.setDetailedView(key -> key.x() == 20);
         var selected = cache.lodSelection(0, 0, 0, 4);
         assertEquals(1, selected.volumes().size());
-        assertEquals(160, selected.volumes().getFirst().blockX());
-        assertEquals(List.of(new AtmosphereClientCache.Update(cell(40, 0, 0), 1000, 100)), cache.exportUpdates());
+        assertEquals(80, selected.volumes().getFirst().blockX());
+        assertEquals(List.of(new AtmosphereClientCache.Update(cell(20, 0, 0), 1000, 100)), cache.exportUpdates());
         cache.changeDimension("nether");
         assertTrue(cache.lodSelection(0, 0, 0, 4).volumes().isEmpty());
         assertTrue(cache.exportUpdates().isEmpty());

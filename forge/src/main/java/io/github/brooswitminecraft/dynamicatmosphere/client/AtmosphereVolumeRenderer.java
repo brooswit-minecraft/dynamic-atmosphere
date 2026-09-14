@@ -1,6 +1,7 @@
 package io.github.brooswitminecraft.dynamicatmosphere.client;
 
-import io.github.brooswitminecraft.dynamicatmosphere.AtmosphereGridLayout;
+import java.util.List;
+import java.util.function.Consumer;
 import net.minecraft.client.Minecraft;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.ByteBufferBuilder;
@@ -33,20 +34,19 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
     private static int renderedSliceCount;
     private static int renderedCoarseCount;
 
-    static void render(RenderLevelStageEvent event, ClientLevel level, AtmosphereClientCache cache) {
+    static void render(RenderLevelStageEvent event, ClientLevel level, AtmosphereClientCache cache,
+                       AtmosphereClientCache smoke) {
         renderedCellCount = 0;
         renderedSliceCount = 0;
         renderedCoarseCount = 0;
+        if (cache.size() == 0 && smoke.size() == 0) return;
         var position = event.getCamera().getPosition();
         var look = event.getCamera().getLookVector();
         var camera = new AtmosphereVolumeGeometry.Point(position.x, position.y, position.z);
         var forward = new AtmosphereVolumeGeometry.Point(look.x(), look.y(), look.z());
-        int viewChunks = Minecraft.getInstance().options.getEffectiveRenderDistance();
-        cache.setView(position.x, position.z, viewChunks);
-        var selection = cache.lodSelection(position.x, position.y, position.z, viewChunks);
-        double tick = cache.renderTick(event.getPartialTick().getGameTimeDeltaPartialTick(false));
-        double farDistance = viewChunks * 64.0;
-        if (selection.volumes().isEmpty() && selection.unloadedFallbacks().isEmpty()) return;
+        var ordered = new AtmosphereSliceOrder();
+        visit(event, level, smoke, camera, forward, slices -> ordered.add(slices, true));
+        boolean mixed = !ordered.isEmpty();
         if (storage == null) {
             storage = new ByteBufferBuilder(1024 * 1024);
             buffers = MultiBufferSource.immediate(storage);
@@ -57,48 +57,20 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
         var shader = RenderSystem.getShader();
         RenderSystem.setShaderColor(1, 1, 1, 1);
         try {
-            VertexConsumer vertices = null;
-            int batchSlices = 0;
+            var batch = new Batch(fogColor);
             // AFTER_PARTICLES already has the event model-view rotation on RenderSystem's
             // stack. These vertices are camera-relative: do not apply that matrix twice.
-            // Constant RGB and no depth writes make atmosphere alpha order-independent.
-            // Keep bounded batches without sorting or rebuilding a combined volume list.
-            for (int pass = 0; pass < 2; pass++) {
-                boolean fallback = pass == 1;
-                for (var cell : fallback ? selection.unloadedFallbacks() : selection.volumes()) {
-                    // Chunk sections own fallback membership, so load/unload never double-covers detail.
-                    boolean loaded = level.getChunkSource().hasChunk(
-                        AtmosphereGridLayout.chunkCoordinate(cell.x), AtmosphereGridLayout.chunkCoordinate(cell.z));
-                    if (!AtmosphereLodHierarchy.visibleWhenLoaded(cell, fallback, loaded)) continue;
-                    double distanceSquared = AtmosphereLodHierarchy.distanceSquared(cell, position.x, position.y, position.z);
-                    if (distanceSquared > farDistance * farDistance || !event.getFrustum().isVisible(bounds(cell))) continue;
-                    var slices = AtmosphereVolumeGeometry.lodSlices(cell, cell.amount(tick), camera, forward);
-                    if (!slices.isEmpty()) {
-                        if (cell.level > 0) renderedCoarseCount++;
-                        else renderedCellCount++;
-                    }
-                    for (var slice : slices) {
-                        if (vertices == null) {
-                            vertices = buffers.getBuffer(VOLUME);
-                        }
-                        var polygon = slice.vertices();
-                        for (int i = 1; i < polygon.size() - 1; i++) {
-                            vertex(vertices, polygon.getFirst(), slice.alpha(), fogColor[0], fogColor[1], fogColor[2]);
-                            vertex(vertices, polygon.get(i), slice.alpha(), fogColor[0], fogColor[1], fogColor[2]);
-                            vertex(vertices, polygon.get(i + 1), slice.alpha(), fogColor[0], fogColor[1], fogColor[2]);
-                        }
-                        renderedSliceCount++;
-                        if (++batchSlices == SLICES_PER_BATCH) {
-                            buffers.endBatch(VOLUME);
-                            vertices = null;
-                            batchSlices = 0;
-                        }
-                    }
-                }
+            // Keep the constant-RGB vapor path unsorted when no smoke is visible.
+            // Otherwise merge slices, not volume centers: materials can overlap.
+            visit(event, level, cache, camera, forward, slices -> {
+                if (mixed) ordered.add(slices, false);
+                else for (var slice : slices) batch.draw(slice, false);
+            });
+            while (!ordered.isEmpty()) {
+                var slice = ordered.next();
+                batch.draw(slice.slice(), slice.smoke());
             }
-            if (vertices != null) {
-                buffers.endBatch(VOLUME);
-            }
+            batch.flush();
         } finally {
             // RenderType.draw does not clear its state if the GPU upload throws.
             try {
@@ -107,6 +79,64 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
                 RenderSystem.setShader(() -> shader);
                 RenderSystem.setShaderColor(color[0], color[1], color[2], color[3]);
             }
+        }
+    }
+
+    private static void visit(RenderLevelStageEvent event, ClientLevel level, AtmosphereClientCache cache,
+                              AtmosphereVolumeGeometry.Point camera, AtmosphereVolumeGeometry.Point forward,
+                              Consumer<List<AtmosphereVolumeGeometry.Slice>> consume) {
+        int viewChunks = Minecraft.getInstance().options.getEffectiveRenderDistance();
+        cache.setView(camera.x(), camera.z(), viewChunks);
+        var selection = cache.lodSelection(camera.x(), camera.y(), camera.z(), viewChunks);
+        double tick = cache.renderTick(event.getPartialTick().getGameTimeDeltaPartialTick(false));
+        for (int pass = 0; pass < 2; pass++) {
+            boolean fallback = pass == 1;
+            for (var cell : fallback ? selection.unloadedFallbacks() : selection.volumes()) {
+                boolean loaded = level.getChunkSource().hasChunk(
+                    Math.floorDiv(cell.x, 16 / cell.baseCellSize), Math.floorDiv(cell.z, 16 / cell.baseCellSize));
+                if (!AtmosphereLodHierarchy.visibleWhenLoaded(cell, fallback, loaded)) continue;
+                if (!AtmosphereLodHierarchy.withinReach(cell, camera.x(), camera.y(), camera.z(), viewChunks)
+                    || !event.getFrustum().isVisible(bounds(cell))) continue;
+                var slices = AtmosphereVolumeGeometry.lodSlices(cell, cell.amount(tick), camera, forward);
+                double dx = Math.max(Math.abs(cell.blockX() - camera.x()), Math.abs(cell.blockX() + cell.size() - camera.x()));
+                double dy = Math.max(Math.abs(cell.blockY() - camera.y()), Math.abs(cell.blockY() + cell.size() - camera.y()));
+                double dz = Math.max(Math.abs(cell.blockZ() - camera.z()), Math.abs(cell.blockZ() + cell.size() - camera.z()));
+                double reach = Math.max(1, viewChunks) * 32.0;
+                if (dx * dx + dy * dy + dz * dz > reach * reach) {
+                    slices = AtmosphereVolumeGeometry.clipToReach(slices, forward, reach);
+                }
+                if (!slices.isEmpty()) {
+                    if (cell.level > 0) renderedCoarseCount++;
+                    else renderedCellCount++;
+                    consume.accept(slices);
+                }
+            }
+        }
+    }
+
+    private static final class Batch {
+        private final float[] fogColor;
+        private VertexConsumer vertices;
+        private int slices;
+        Batch(float[] fogColor) { this.fogColor = fogColor; }
+
+        void draw(AtmosphereVolumeGeometry.Slice slice, boolean smoke) {
+            if (vertices == null) vertices = buffers.getBuffer(VOLUME);
+            float r = smoke ? 0 : fogColor[0], g = smoke ? 0 : fogColor[1], b = smoke ? 0 : fogColor[2];
+            var polygon = slice.vertices();
+            for (int i = 1; i < polygon.size() - 1; i++) {
+                vertex(vertices, polygon.getFirst(), slice.alpha(), r, g, b);
+                vertex(vertices, polygon.get(i), slice.alpha(), r, g, b);
+                vertex(vertices, polygon.get(i + 1), slice.alpha(), r, g, b);
+            }
+            renderedSliceCount++;
+            if (++slices == SLICES_PER_BATCH) flush();
+        }
+
+        void flush() {
+            if (vertices != null) buffers.endBatch(VOLUME);
+            vertices = null;
+            slices = 0;
         }
     }
 

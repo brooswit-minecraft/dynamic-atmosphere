@@ -46,6 +46,20 @@ This is **not** the full terrain-aware atmospheric simulation. Condensation can
 place real water sources (below), but does not generate Minecraft rain. Pollution,
 gas transport, and world generation changes are not included yet.
 
+### Upcoming Changes (Unreleased)
+
+The next minor release splits each passed rain check's 320 units between ground
+and Y=192: an integer ground allocation from 0 through 320, with the remainder
+at cloud height. The existing rain gate is retained; the total is not doubled.
+Evaporation traces the sampled contiguous water column to its bottom. Bottom water
+directly above magma bypasses the temperature roll and also targets the original
+surface, once if both positions coincide. The outer 300-tick/10% chunk gate remains.
+Waterlogged hosts are drained, not destroyed; only successful mutations emit through
+the existing humidity-scaled removal hook. No existing atmosphere or world is cleared.
+These changes are pending verification and are not part of 0.13.2-alpha.1.
+
+### Published Rain Behavior
+
 Rain still uses Minecraft's local rain/exposure check, but its emission is moved
 from ground level to the previous cloud altitude **Y=192**. Each passed rain check adds **320 material
 units**, eight times the previous 40, instead of also adding ground-level rain

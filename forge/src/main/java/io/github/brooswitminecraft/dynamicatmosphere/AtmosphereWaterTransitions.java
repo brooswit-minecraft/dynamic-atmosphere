@@ -10,6 +10,8 @@ import net.minecraft.world.level.chunk.LevelChunk;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.function.DoubleSupplier;
+import java.util.function.IntPredicate;
 
 /** Defers successful water-loss mutations until the owning server tick. */
 public final class AtmosphereWaterTransitions {
@@ -39,6 +41,26 @@ public final class AtmosphereWaterTransitions {
 
     enum EvaporationAction { KEEP, DRAIN_WATERLOGGED, REMOVE_FLUID }
 
+    record EvaporationColumn(int bottomY, boolean magma) {
+        boolean removesSurface(int surfaceY) {
+            return magma && bottomY != surfaceY;
+        }
+    }
+
+    static EvaporationColumn evaporationColumn(
+        int surfaceY,
+        int minBuildHeight,
+        IntPredicate waterAtY,
+        IntPredicate magmaAtY
+    ) {
+        int bottomY = surfaceY;
+        while (bottomY > minBuildHeight && waterAtY.test(bottomY - 1)) {
+            bottomY--;
+        }
+        boolean magma = bottomY > minBuildHeight && magmaAtY.test(bottomY - 1);
+        return new EvaporationColumn(bottomY, magma);
+    }
+
     static EvaporationAction evaporationAction(boolean water, boolean waterlogged, boolean liquidBlock) {
         if (!water) return EvaporationAction.KEEP;
         if (waterlogged) return EvaporationAction.DRAIN_WATERLOGGED;
@@ -47,6 +69,10 @@ public final class AtmosphereWaterTransitions {
 
     static double evaporationChance(double temperature) {
         return Double.isNaN(temperature) ? 0 : Math.clamp(temperature / 2, 0, 1);
+    }
+
+    static boolean evaporationPasses(boolean magma, double temperature, DoubleSupplier roll) {
+        return magma || AtmosphereProducerSchedule.passesChance(evaporationChance(temperature), roll.getAsDouble());
     }
 
     static int materialForHumidity(double downfall) {

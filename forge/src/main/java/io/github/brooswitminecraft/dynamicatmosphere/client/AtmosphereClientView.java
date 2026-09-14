@@ -22,12 +22,16 @@ public final class AtmosphereClientView {
     }
 
     public static boolean coarseVisible(CoarseCell cell, double cameraX, double cameraZ, int viewChunks, boolean loaded) {
-        return containsChunk(cell.x(), cell.z(), cameraX, cameraZ, viewChunks * 4)
+        return containsChunk(cell.x(), cell.z(), cameraX, cameraZ, viewChunks * 2)
             && !(loaded && containsChunk(cell.x(), cell.z(), cameraX, cameraZ, viewChunks));
     }
 
     public static List<CoarseCell> aggregate(List<AtmosphereClientCache.VisibleCell> cells) {
-        int cellsPerEdge = 16 / AtmosphereGridLayout.CELL_SIZE;
+        return aggregate(cells, AtmosphereGridLayout.CELL_SIZE);
+    }
+
+    static List<CoarseCell> aggregate(List<AtmosphereClientCache.VisibleCell> cells, int baseCellSize) {
+        int cellsPerEdge = 16 / baseCellSize;
         int cellsPerVolume = cellsPerEdge * cellsPerEdge * cellsPerEdge;
         var totals = new HashMap<Section, Float>();
         for (var cell : cells) {

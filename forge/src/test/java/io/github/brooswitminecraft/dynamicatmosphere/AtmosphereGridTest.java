@@ -161,6 +161,16 @@ class AtmosphereGridTest {
     }
 
     @Test
+    void separateMaterialGridCanUseItsOwnSimulationCadence() {
+        AtmosphereGrid<String> independent = new AtmosphereGrid<>(tick -> tick + 7);
+        AtmosphereGrid.CellKey<String> source = key(0, 0, 0);
+        independent.set(source, 40, 10, 1000);
+
+        assertEquals(0, independent.spread(16, ignored -> 0).sourcesProcessed());
+        assertEquals(1, independent.spread(17, ignored -> 0).sourcesProcessed());
+    }
+
+    @Test
     void ordinarySpreadIsOneHopAndCannotRespendIncomingMaterial() {
         AtmosphereGrid<String> grid = new AtmosphereGrid<>();
         AtmosphereGrid.CellKey<String> west = key(-1, 0, 0);
@@ -431,6 +441,61 @@ class AtmosphereGridTest {
             .count());
         assertTrue(first.workRemaining());
         assertEquals(3_870, total(grid));
+    }
+
+    @Test
+    void directedTransferRuleBlocksOnlyDownwardOrdinarySpread() {
+        AtmosphereGrid<String> grid = new AtmosphereGrid<>();
+        var source = key(0, 0, 0);
+        var below = key(0, -1, 0);
+        var east = key(1, 0, 0);
+        grid.set(source, 600, 1, 1000);
+
+        grid.spread(AtmosphereGridLayout.nextSimulationTick(1),
+            capacities(Map.of(source, 1000, below, 1000, east, 1000)),
+            ignored -> { }, ignored -> true,
+            (from, to) -> to.y() >= from.y());
+
+        assertNull(grid.get(below));
+        assertEquals(300, amount(grid, source));
+        assertEquals(300, amount(grid, east));
+        assertEquals(600, total(grid));
+    }
+
+    @Test
+    void prohibitedDownwardUnknownDoesNotMakeOverflowSearchLimited() {
+        AtmosphereGrid<String> grid = new AtmosphereGrid<>();
+        var source = key(0, 0, 0);
+        var below = key(0, -1, 0);
+        grid.set(source, 1001, 1, 1000);
+
+        var result = grid.spread(AtmosphereGridLayout.nextSimulationTick(1), key -> {
+            if (key.equals(source)) return 1000;
+            if (key.equals(below)) return -1;
+            return 0;
+        }, ignored -> { }, ignored -> true, (from, to) -> to.y() >= from.y());
+
+        assertFalse(result.searchLimited());
+        assertTrue(result.mayBreakForPressure());
+        assertEquals(1, result.blockedOverflow());
+        assertEquals(1001, amount(grid, source));
+    }
+
+    @Test
+    void directedTransferRuleAlsoBlocksDownwardTinyCleanup() {
+        AtmosphereGrid<String> grid = new AtmosphereGrid<>();
+        var source = key(0, 0, 0);
+        var below = key(0, -1, 0);
+        long due = AtmosphereGridLayout.nextSimulationTick(1);
+        grid.set(source, 10, 1, 1000);
+        grid.set(below, 20, due, 1000);
+
+        grid.spread(due, capacities(Map.of(source, 1000, below, 1000)),
+            ignored -> { }, ignored -> true, (from, to) -> to.y() >= from.y());
+
+        assertEquals(10, amount(grid, source));
+        assertEquals(20, amount(grid, below));
+        assertEquals(30, total(grid));
     }
 
     @Test

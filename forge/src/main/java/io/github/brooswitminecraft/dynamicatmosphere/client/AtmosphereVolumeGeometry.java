@@ -26,8 +26,50 @@ public final class AtmosphereVolumeGeometry {
 
     public record Slice(double depth, float alpha, List<Point> vertices) { }
 
+    /** Clip boundary-crossing slices to an inscribed reach disk; no fallback can draw past reach. */
+    static List<Slice> clipToReach(List<Slice> slices, Point look, double reach) {
+        Point forward = look.normalized();
+        Point right = forward.cross(Math.abs(forward.y) < 0.9 ? new Point(0, 1, 0) : new Point(1, 0, 0)).normalized();
+        Point up = right.cross(forward);
+        double reachSquared = reach * reach;
+        var result = new ArrayList<Slice>(slices.size());
+        for (Slice slice : slices) {
+            if (slice.depth() >= reach) continue;
+            if (slice.vertices().stream().allMatch(p -> p.dot(p) <= reachSquared)) {
+                result.add(slice);
+                continue;
+            }
+            // An inscribed 32-sided disk is conservative and only needed at the outer boundary.
+            double limit = Math.sqrt(Math.max(0, reachSquared - slice.depth() * slice.depth())) * Math.cos(Math.PI / 32);
+            List<Point> polygon = slice.vertices();
+            for (int edge = 0; edge < 32 && polygon.size() >= 3; edge++) {
+                double angle = (edge + 0.5) * Math.PI / 16;
+                Point normal = right.scale(Math.cos(angle)).add(up.scale(Math.sin(angle)));
+                var clipped = new ArrayList<Point>();
+                Point previous = polygon.getLast();
+                double previousGap = previous.dot(normal) - limit;
+                for (Point point : polygon) {
+                    double gap = point.dot(normal) - limit;
+                    if ((gap <= 0) != (previousGap <= 0)) {
+                        clipped.add(previous.add(point.subtract(previous).scale(previousGap / (previousGap - gap))));
+                    }
+                    if (gap <= 0) clipped.add(point);
+                    previous = point;
+                    previousGap = gap;
+                }
+                polygon = clipped;
+            }
+            if (polygon.size() >= 3) result.add(new Slice(slice.depth(), slice.alpha(), List.copyOf(polygon)));
+        }
+        return result;
+    }
+
     public static float sliceAlpha(float amount, double thickness) {
-        return (float) -Math.expm1(-0.6 * Math.clamp(amount, 0, 1000) / 1000.0 * thickness / CELL_SIZE);
+        return sliceAlpha(amount, thickness, CELL_SIZE);
+    }
+
+    static float sliceAlpha(float amount, double thickness, int baseCellSize) {
+        return (float) -Math.expm1(-0.6 * Math.clamp(amount, 0, 1000) / 1000.0 * thickness / baseCellSize);
     }
 
     public static List<Slice> slices(AtmosphereClientCache.Cell cell, float amount, Point camera, Point look) {
@@ -43,11 +85,16 @@ public final class AtmosphereVolumeGeometry {
     static List<Slice> lodSlices(AtmosphereLodHierarchy.Volume volume, float amount, Point camera, Point look) {
         int size = volume.size();
         return boxSlices(volume.blockX(), volume.blockY(), volume.blockZ(), size,
-            size == CELL_SIZE ? SLICE_SPACING : size, amount, camera, look);
+            volume.level == 0 ? volume.baseCellSize / 4.0 : size, amount, camera, look, volume.baseCellSize);
     }
 
     private static List<Slice> boxSlices(double x, double y, double z, int size, double spacing,
                                          float amount, Point camera, Point look) {
+        return boxSlices(x, y, z, size, spacing, amount, camera, look, CELL_SIZE);
+    }
+
+    private static List<Slice> boxSlices(double x, double y, double z, int size, double spacing,
+                                         float amount, Point camera, Point look, int baseCellSize) {
         if (amount <= 0) return List.of();
         Point forward = look.normalized();
         Point right = forward.cross(Math.abs(forward.y) < 0.9 ? new Point(0, 1, 0) : new Point(1, 0, 0)).normalized();
@@ -106,7 +153,7 @@ public final class AtmosphereVolumeGeometry {
             }
             Point centroid = center.scale(1.0 / polygon.size());
             polygon.sort(Comparator.comparingDouble(p -> Math.atan2(p.subtract(centroid).dot(up), p.subtract(centroid).dot(right))));
-            result.add(new Slice(depth, sliceAlpha(amount, high - low), List.copyOf(polygon)));
+            result.add(new Slice(depth, sliceAlpha(amount, high - low, baseCellSize), List.copyOf(polygon)));
         }
         return result;
     }

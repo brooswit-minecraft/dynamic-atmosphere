@@ -20,6 +20,15 @@ Simulation work remains budgeted across ticks. Clients render
 translucent cells with opacity based on material amount divided by capacity.
 This is an incremental alpha, not a complete weather simulation.
 
+**Upcoming, unreleased:** Rain will split a total of 320 units per passed check
+between ground (a random integer from 0 through 320) and Y=192 (the remainder),
+using the existing rain gate. Evaporation will trace contiguous water to its bottom;
+bottom water directly above magma bypasses the temperature roll and also targets
+the original surface, once when both coincide. The outer 300-tick/10% chunk gate
+remains, waterlogged hosts are preserved, and only successful mutations emit through
+the humidity-scaled removal hook. These gameplay changes await verification for a
+fresh minor release, not 0.13.2-alpha.1. Existing atmosphere and worlds are retained.
+
 ## Current Scope
 
 - New snow/ice surface vapor: a WORLD_SURFACE lookup selects ICE-tagged blocks, SNOW, SNOW_BLOCK, or POWDER_SNOW to emit 40 units without consuming the block. Reuse the existing 15-second / 10% loaded-chunk gate; no additional column scan or forced chunk load. A capacity scan may still occur.

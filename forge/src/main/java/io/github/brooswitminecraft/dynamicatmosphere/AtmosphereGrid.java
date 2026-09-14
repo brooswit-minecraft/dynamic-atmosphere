@@ -12,8 +12,10 @@ import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Queue;
 import java.util.Set;
+import java.util.function.BiPredicate;
 import java.util.function.Predicate;
 import java.util.function.Consumer;
+import java.util.function.LongUnaryOperator;
 import java.util.function.ToIntFunction;
 
 /** A bounded-work, server-owned atmospheric material grid. */
@@ -40,7 +42,16 @@ public final class AtmosphereGrid<D> {
     private final Map<CellKey<D>, Long> dueByKey = new HashMap<>();
     private final Set<CellKey<D>> dirtyKeys = new LinkedHashSet<>();
     private final Map<CellKey<D>, OverflowSearch<D>> overflowSearches = new HashMap<>();
+    private final LongUnaryOperator nextSimulationTick;
     private long nextSequence;
+
+    public AtmosphereGrid() {
+        this(AtmosphereGridLayout::nextSimulationTick);
+    }
+
+    public AtmosphereGrid(LongUnaryOperator nextSimulationTick) {
+        this.nextSimulationTick = nextSimulationTick;
+    }
 
     public static int cellCoordinate(int blockCoordinate) {
         return Math.floorDiv(blockCoordinate, CELL_SIZE);
@@ -77,7 +88,7 @@ public final class AtmosphereGrid<D> {
             return false;
         }
         putCell(key, nextAmount, boundedCapacity, tick, tick);
-        scheduleIfAbsent(key, AtmosphereGridLayout.nextSimulationTick(tick));
+        scheduleIfAbsent(key, nextSimulationTick.applyAsLong(tick));
         return true;
     }
 
@@ -96,7 +107,7 @@ public final class AtmosphereGrid<D> {
         }
         int boundedAmount = Math.min(amount, MAX_STORED_AMOUNT);
         putCell(key, boundedAmount, boundedCapacity, tick, tick);
-        scheduleIfAbsent(key, AtmosphereGridLayout.nextSimulationTick(tick));
+        scheduleIfAbsent(key, nextSimulationTick.applyAsLong(tick));
         return true;
     }
 
@@ -116,7 +127,7 @@ public final class AtmosphereGrid<D> {
             cell.lastEmissionTick,
             cell.lastUpdateTick
         );
-        scheduleIfAbsent(cell.key, AtmosphereGridLayout.nextSimulationTick(tick));
+        scheduleIfAbsent(cell.key, nextSimulationTick.applyAsLong(tick));
         return true;
     }
 
@@ -140,6 +151,12 @@ public final class AtmosphereGrid<D> {
 
     public SpreadResult<D> spread(long tick, ToIntFunction<CellKey<D>> capacityAt,
         Consumer<CellKey<D>> beforeSpread, Predicate<CellKey<D>> shouldSimulate) {
+        return spread(tick, capacityAt, beforeSpread, shouldSimulate, (source, destination) -> true);
+    }
+
+    public SpreadResult<D> spread(long tick, ToIntFunction<CellKey<D>> capacityAt,
+        Consumer<CellKey<D>> beforeSpread, Predicate<CellKey<D>> shouldSimulate,
+        BiPredicate<CellKey<D>, CellKey<D>> canTransfer) {
         List<CellKey<D>> dueSources = pollDueSources(tick, MAX_SOURCES_PER_SPREAD);
         if (dueSources.isEmpty()) {
             return SpreadResult.empty(hasDueWork(tick));
@@ -150,12 +167,12 @@ public final class AtmosphereGrid<D> {
         }
 
         for (CellKey<D> source : sources) beforeSpread.accept(source);
-        int moved = spreadOneHop(tick, capacityAt, sources);
-        SpreadResult<D> overflow = redistributeOverflowInternal(tick, capacityAt, sources);
-        int consolidated = consolidateTinySources(tick, capacityAt, sources);
+        int moved = spreadOneHop(tick, capacityAt, sources, canTransfer);
+        SpreadResult<D> overflow = redistributeOverflowInternal(tick, capacityAt, sources, canTransfer);
+        int consolidated = consolidateTinySources(tick, capacityAt, sources, canTransfer);
         for (CellKey<D> source : dueSources) {
             if (cells.containsKey(source)) {
-                scheduleIfAbsent(source, AtmosphereGridLayout.nextSimulationTick(tick));
+                scheduleIfAbsent(source, nextSimulationTick.applyAsLong(tick));
             }
         }
         return new SpreadResult<>(
@@ -172,7 +189,8 @@ public final class AtmosphereGrid<D> {
     private int consolidateTinySources(
         long tick,
         ToIntFunction<CellKey<D>> capacityAt,
-        List<CellKey<D>> sources
+        List<CellKey<D>> sources,
+        BiPredicate<CellKey<D>, CellKey<D>> canTransfer
     ) {
         int moved = 0;
         Comparator<CellKey<D>> coordinateOrder = Comparator
@@ -189,6 +207,9 @@ public final class AtmosphereGrid<D> {
             Cell<D> destination = null;
             int destinationCapacity = 0;
             for (CellKey<D> neighborKey : tinyCellDestinations(sourceKey)) {
+                if (!canTransfer.test(sourceKey, neighborKey)) {
+                    continue;
+                }
                 Cell<D> neighbor = cells.get(neighborKey);
                 if (neighbor == null || neighbor.amount <= source.amount) {
                     continue;
@@ -226,6 +247,15 @@ public final class AtmosphereGrid<D> {
         ToIntFunction<CellKey<D>> capacityAt,
         Iterable<CellKey<D>> sourceKeys
     ) {
+        return redistributeOverflow(tick, capacityAt, sourceKeys, (source, destination) -> true);
+    }
+
+    public SpreadResult<D> redistributeOverflow(
+        long tick,
+        ToIntFunction<CellKey<D>> capacityAt,
+        Iterable<CellKey<D>> sourceKeys,
+        BiPredicate<CellKey<D>, CellKey<D>> canTransfer
+    ) {
         List<CellKey<D>> sources = new ArrayList<>();
         for (CellKey<D> key : sourceKeys) {
             if (sources.size() == MAX_SOURCES_PER_SPREAD) {
@@ -235,7 +265,7 @@ public final class AtmosphereGrid<D> {
                 sources.add(key);
             }
         }
-        return redistributeOverflowInternal(tick, capacityAt, sources);
+        return redistributeOverflowInternal(tick, capacityAt, sources, canTransfer);
     }
 
     public Set<CellKey<D>> drainDirtyKeys() {
@@ -274,12 +304,15 @@ public final class AtmosphereGrid<D> {
     private int spreadOneHop(
         long tick,
         ToIntFunction<CellKey<D>> capacityAt,
-        List<CellKey<D>> sources
+        List<CellKey<D>> sources,
+        BiPredicate<CellKey<D>, CellKey<D>> canTransfer
     ) {
         Set<CellKey<D>> localKeys = new LinkedHashSet<>();
         for (CellKey<D> source : sources) {
             localKeys.add(source);
-            localKeys.addAll(neighbors(source));
+            for (CellKey<D> neighbor : neighbors(source)) {
+                if (canTransfer.test(source, neighbor)) localKeys.add(neighbor);
+            }
         }
         Map<CellKey<D>, Integer> capacitySnapshot = new HashMap<>();
         for (CellKey<D> key : localKeys) {
@@ -307,6 +340,9 @@ public final class AtmosphereGrid<D> {
             int totalCapacity = boundedCapacity(sourceCapacity);
 
             for (CellKey<D> neighbor : neighbors(sourceKey)) {
+                if (!canTransfer.test(sourceKey, neighbor)) {
+                    continue;
+                }
                 int capacity = capacitySnapshot.get(neighbor);
                 if (capacity <= 0) {
                     continue;
@@ -351,7 +387,8 @@ public final class AtmosphereGrid<D> {
     private SpreadResult<D> redistributeOverflowInternal(
         long tick,
         ToIntFunction<CellKey<D>> capacityAt,
-        List<CellKey<D>> sources
+        List<CellKey<D>> sources,
+        BiPredicate<CellKey<D>, CellKey<D>> canTransfer
     ) {
         int visitsRemaining = MAX_OVERFLOW_VISITS;
         int moved = 0;
@@ -378,7 +415,7 @@ public final class AtmosphereGrid<D> {
             OverflowSearch<D> search = overflowSearches.get(sourceKey);
             boolean resumedSearch = search != null;
             if (search == null) {
-                search = new OverflowSearch<>(sourceKey, neighbors(sourceKey));
+                search = new OverflowSearch<>(sourceKey, transferEdges(sourceKey, canTransfer));
                 overflowSearches.put(sourceKey, search);
             }
             boolean budgetExhausted = false;
@@ -388,14 +425,18 @@ public final class AtmosphereGrid<D> {
                     budgetExhausted = true;
                     break;
                 }
-                CellKey<D> candidate = search.frontier.remove();
+                TransferEdge<D> edge = search.frontier.remove();
+                CellKey<D> candidate = edge.destination;
                 if (search.visited.contains(candidate)) {
+                    continue;
+                }
+                if (!canTransfer.test(edge.source, candidate)) {
                     continue;
                 }
                 visitsRemaining--;
                 int rawCapacity = capacityAt.applyAsInt(candidate);
                 if (rawCapacity < 0) {
-                    search.unknownFrontier.add(candidate);
+                    search.unknownFrontier.add(edge);
                     continue;
                 }
                 search.visited.add(candidate);
@@ -409,12 +450,12 @@ public final class AtmosphereGrid<D> {
                 int transfer = Math.min(remaining, Math.max(0, capacity - candidateAmount));
                 if (transfer > 0) {
                     putCell(candidate, candidateAmount + transfer, capacity, tick, tick);
-                    scheduleIfAbsent(candidate, AtmosphereGridLayout.nextSimulationTick(tick));
+                    scheduleIfAbsent(candidate, nextSimulationTick.applyAsLong(tick));
                     remaining -= transfer;
                     moved += transfer;
                 }
                 if (remaining > 0) {
-                    search.frontier.addAll(neighbors(candidate));
+                    search.frontier.addAll(transferEdges(candidate, canTransfer));
                 }
             }
 
@@ -475,7 +516,7 @@ public final class AtmosphereGrid<D> {
             long emissionTick = existing == null ? tick : existing.lastEmissionTick;
             putCell(key, next, capacity, emissionTick, tick);
             if (existing == null) {
-                scheduleIfAbsent(key, AtmosphereGridLayout.nextSimulationTick(tick));
+                scheduleIfAbsent(key, nextSimulationTick.applyAsLong(tick));
             }
         }
     }
@@ -561,6 +602,19 @@ public final class AtmosphereGrid<D> {
         return neighbors;
     }
 
+    private static <D> List<TransferEdge<D>> transferEdges(
+        CellKey<D> source,
+        BiPredicate<CellKey<D>, CellKey<D>> canTransfer
+    ) {
+        List<TransferEdge<D>> edges = new ArrayList<>(NEIGHBOR_OFFSETS.length);
+        for (CellKey<D> destination : neighbors(source)) {
+            if (canTransfer.test(source, destination)) {
+                edges.add(new TransferEdge<>(source, destination));
+            }
+        }
+        return edges;
+    }
+
     public record CellKey<D>(D dimension, int x, int y, int z) {}
 
     public record Cell<D>(
@@ -600,12 +654,14 @@ public final class AtmosphereGrid<D> {
 
     private record WorkItem<D>(CellKey<D> key, long dueTick, long sequence) {}
 
-    private static final class OverflowSearch<D> {
-        private final Queue<CellKey<D>> frontier;
-        private final Set<CellKey<D>> visited = new HashSet<>();
-        private final List<CellKey<D>> unknownFrontier = new ArrayList<>();
+    private record TransferEdge<D>(CellKey<D> source, CellKey<D> destination) {}
 
-        private OverflowSearch(CellKey<D> source, List<CellKey<D>> initialFrontier) {
+    private static final class OverflowSearch<D> {
+        private final Queue<TransferEdge<D>> frontier;
+        private final Set<CellKey<D>> visited = new HashSet<>();
+        private final List<TransferEdge<D>> unknownFrontier = new ArrayList<>();
+
+        private OverflowSearch(CellKey<D> source, List<TransferEdge<D>> initialFrontier) {
             frontier = new ArrayDeque<>(initialFrontier);
             visited.add(source);
         }

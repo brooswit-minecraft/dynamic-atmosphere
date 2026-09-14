@@ -28,7 +28,8 @@ public final class AtmosphereClientCache {
     }
 
     private final Map<Cell, Amount> cells = new LinkedHashMap<>(16, 0.75f, true);
-    private final AtmosphereLodHierarchy lod = new AtmosphereLodHierarchy();
+    private final AtmosphereLodHierarchy lod;
+    private final int baseCellSize;
     private final int cellBudget;
     private Predicate<Cell> detailedView = cell -> true;
     private Map<Cell, Update> snapshot;
@@ -51,8 +52,14 @@ public final class AtmosphereClientCache {
     }
 
     AtmosphereClientCache(int cellBudget) {
+        this(cellBudget, AtmosphereGridLayout.CELL_SIZE, 2, 2);
+    }
+
+    AtmosphereClientCache(int cellBudget, int baseCellSize, int rootLevel, int reachMultiplier) {
         if (cellBudget < 1) throw new IllegalArgumentException("cell budget must be positive");
         this.cellBudget = cellBudget;
+        this.baseCellSize = baseCellSize;
+        this.lod = new AtmosphereLodHierarchy(baseCellSize, rootLevel, reachMultiplier);
     }
 
     public void changeDimension(String nextDimension) {
@@ -134,8 +141,8 @@ public final class AtmosphereClientCache {
         trim();
     }
 
-    private static Chunk chunk(Cell cell) {
-        return new Chunk(AtmosphereGridLayout.chunkCoordinate(cell.x()), AtmosphereGridLayout.chunkCoordinate(cell.z()));
+    private Chunk chunk(Cell cell) {
+        return new Chunk(Math.floorDiv(cell.x(), 16 / baseCellSize), Math.floorDiv(cell.z(), 16 / baseCellSize));
     }
 
     /** Raw last-known values, never interpolated opacity. Disk integration owns world/dimension identity. */
@@ -172,7 +179,10 @@ public final class AtmosphereClientCache {
         viewX = x;
         viewZ = z;
         viewDistance = viewChunks;
-        setDetailedView(cell -> AtmosphereClientView.contains(cell, cameraX, cameraZ, viewChunks));
+        setDetailedView(cell -> {
+            Chunk chunk = chunk(cell);
+            return AtmosphereClientView.containsChunk(chunk.x(), chunk.z(), cameraX, cameraZ, viewChunks);
+        });
     }
 
     private void trim() {
@@ -245,7 +255,7 @@ public final class AtmosphereClientCache {
     /** Rebuild at most twice per second, never aggregate the entire cache each frame. */
     public List<AtmosphereClientView.CoarseCell> coarseCells() {
         if (coarseTick == Long.MIN_VALUE || tick - coarseTick >= 10) {
-            coarseCells = AtmosphereClientView.aggregate(visible(0));
+            coarseCells = AtmosphereClientView.aggregate(visible(0), baseCellSize);
             coarseTick = tick;
         }
         return coarseCells;

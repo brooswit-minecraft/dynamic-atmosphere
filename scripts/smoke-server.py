@@ -3,6 +3,7 @@ import hashlib
 import os
 from pathlib import Path
 import queue
+import re
 import shutil
 import signal
 import subprocess
@@ -13,7 +14,7 @@ import time
 import urllib.request
 
 
-def boot(root):
+def boot(root, verify_smoke=False):
     process = subprocess.Popen(
         ["bash", "run.sh", "nogui"], cwd=root, stdin=subprocess.PIPE,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True,
@@ -35,6 +36,33 @@ def boot(root):
                 raise RuntimeError("Server exited before reaching ready")
             if 'Done (' in line and 'For help, type "help"' in line:
                 break
+        if verify_smoke:
+            process.stdin.write(
+                "forceload add 0 0\n"
+                "setblock 0 64 0 minecraft:netherrack\n"
+                "setblock 0 65 0 minecraft:fire\n"
+            )
+            process.stdin.flush()
+            deadline = time.monotonic() + 90
+            next_query = 0
+            while True:
+                now = time.monotonic()
+                if now >= deadline:
+                    raise RuntimeError("Fire did not produce Smoke within 90 seconds")
+                if now >= next_query:
+                    process.stdin.write("dynamicatmosphere smoke status\n")
+                    process.stdin.flush()
+                    next_query = now + 2
+                try:
+                    line = lines.get(timeout=min(2, deadline - now))
+                except queue.Empty:
+                    continue
+                if line is None:
+                    raise RuntimeError("Server exited during Smoke production check")
+                match = re.search(r"Smoke grid: cells=(\d+), emissions=(\d+)", line)
+                if match and int(match.group(1)) > 0 and int(match.group(2)) > 0:
+                    print("Verified fire produces server-owned Smoke", flush=True)
+                    break
         process.stdin.write("stop\n")
         process.stdin.flush()
         if process.wait(timeout=45) != 0:
@@ -68,7 +96,7 @@ if __name__ == "__main__":
         (root / "mods").mkdir(exist_ok=True)
         shutil.copy2(jar, root / "mods" / jar.name)
         print("Booting without Flowing Fluids", flush=True)
-        boot(root)
+        boot(root, verify_smoke="--verify-smoke" in sys.argv)
         fluid = urllib.request.urlopen(
             "https://cdn.modrinth.com/data/s1I3BT95/versions/k37oVEnG/flowing_fluids-1.0.6-1.21-neoforge.jar",
             timeout=60,
@@ -78,5 +106,5 @@ if __name__ == "__main__":
         )
         (root / "mods" / "flowing_fluids.jar").write_bytes(fluid)
         print("Booting with Flowing Fluids 1.0.6", flush=True)
-        boot(root)
+        boot(root, verify_smoke="--verify-smoke" in sys.argv)
         print("Both production-jar startup checks passed", flush=True)

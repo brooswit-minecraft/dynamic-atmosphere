@@ -1,3 +1,13 @@
+# 0.14.0-alpha.1
+
+- Add independent, chunk-persisted 8-block Smoke cells produced by fire, synchronized to clients and rendered black with mixed-material depth ordering. Other planned Smoke sources and other materials are not enabled yet.
+- Vapor and Smoke stop rendering beyond twice view distance, including fallback visuals. Bedrock in a source cell prevents downward transfers.
+- Natural surface hostile spawns require more than 50% Vapor capacity without consuming material; other normal spawning restrictions remain.
+
+- Split each passed rain check's 320-unit emission between ground and a random height between ground and Y=192: choose an integer ground allocation from 0 through 320, with the remainder allocated to the airborne position. Keep the existing rain gate and separate source identities; this is not two 320-unit emissions.
+- Trace the sampled contiguous water column to its bottom. Evaporation targets bottom water; when it sits directly above magma, bypass the temperature roll and also target the original surface, once if both positions coincide. Keep the 300-tick/10% outer chunk gate. Drain waterlogged hosts without destroying them; successful water mutations alone generate humidity-scaled atmospheric material through the existing hook.
+- These are gameplay changes for the next minor release, pending verification. Preserve existing atmosphere and worlds; no reset or clearing.
+
 # 0.13.2-alpha.1
 
 - Restore rain emission altitude from Y=300 to Y=192, retaining 320 material per passed rain check. This does not move or clear existing atmosphere.

@@ -123,6 +123,22 @@ class AtmospherePressureTest {
     }
 
     @Test
+    void directedTransferRulePreventsPressureSearchFromGoingDown() {
+        var below = cell(0, -1, 0);
+        var east = cell(1, 0, 0);
+        var world = Map.of(
+            SOURCE, AIR,
+            below, scan(false, block(0, -4, 0, 0)),
+            east, scan(false, block(4, 0, 0, 1)));
+
+        var result = AtmospherePressure.select(SOURCE, world::containsKey, world::get, XYZ,
+            AtmospherePressure.MAX_VISITED_CELLS, (from, to) -> to.y() >= from.y());
+
+        assertEquals(east, result.selection().orElseThrow().cell());
+        assertFalse(result.searchLimited());
+    }
+
+    @Test
     void breadthFirstSearchPrefersNearCellBeforeSofterFarCell() {
         var near = cell(0, 0, -1);
         var result = select(Map.of(

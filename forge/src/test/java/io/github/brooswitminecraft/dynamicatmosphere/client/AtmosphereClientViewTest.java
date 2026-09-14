@@ -22,14 +22,14 @@ class AtmosphereClientViewTest {
     }
 
     @Test
-    void coarseLayerUsesFourTimesViewAndCannotOverlapLoadedDetailChunks() {
+    void coarseLayerUsesTwoTimesViewAndCannotOverlapLoadedDetailChunks() {
         var near = new AtmosphereClientView.CoarseCell(3, 0, 0, 500);
         assertFalse(AtmosphereClientView.coarseVisible(near, 0, 0, 8, true));
         assertTrue(AtmosphereClientView.coarseVisible(near, 0, 0, 8, false));
-        var far = new AtmosphereClientView.CoarseCell(32, 0, 0, 500);
+        var far = new AtmosphereClientView.CoarseCell(16, 0, 0, 500);
         assertTrue(AtmosphereClientView.coarseVisible(far, 0, 0, 8, false));
         assertTrue(AtmosphereClientView.coarseVisible(far, 0, 0, 8, true));
-        assertFalse(AtmosphereClientView.coarseVisible(new AtmosphereClientView.CoarseCell(33, 0, 0, 500), 0, 0, 8, false));
+        assertFalse(AtmosphereClientView.coarseVisible(new AtmosphereClientView.CoarseCell(17, 0, 0, 500), 0, 0, 8, false));
     }
     @Test
     void renderDistanceChangesViewWithoutFixedBlockRadius() {

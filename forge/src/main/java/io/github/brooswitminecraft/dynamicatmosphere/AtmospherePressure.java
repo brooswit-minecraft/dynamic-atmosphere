@@ -6,6 +6,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.BiPredicate;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
@@ -52,10 +53,23 @@ final class AtmospherePressure {
         Comparator<? super B> blockOrder,
         int maxVisitedCells
     ) {
+        return select(source, activeLoaded, scan, blockOrder, maxVisitedCells,
+            (from, to) -> true);
+    }
+
+    static <D, B> SearchResult<D, B> select(
+        AtmosphereGrid.CellKey<D> source,
+        Predicate<AtmosphereGrid.CellKey<D>> activeLoaded,
+        Function<AtmosphereGrid.CellKey<D>, CellScan<B>> scan,
+        Comparator<? super B> blockOrder,
+        int maxVisitedCells,
+        BiPredicate<AtmosphereGrid.CellKey<D>, AtmosphereGrid.CellKey<D>> canTransfer
+    ) {
         Objects.requireNonNull(source, "source");
         Objects.requireNonNull(activeLoaded, "activeLoaded");
         Objects.requireNonNull(scan, "scan");
         Objects.requireNonNull(blockOrder, "blockOrder");
+        Objects.requireNonNull(canTransfer, "canTransfer");
         if (maxVisitedCells <= 0 || maxVisitedCells > MAX_VISITED_CELLS) {
             throw new IllegalArgumentException("visit budget must be between 1 and " + MAX_VISITED_CELLS);
         }
@@ -96,7 +110,7 @@ final class AtmospherePressure {
                     continue;
                 }
                 var next = new AtmosphereGrid.CellKey<>(cell.dimension(), (int) x, (int) y, (int) z);
-                if (discovered.contains(next)) {
+                if (discovered.contains(next) || !canTransfer.test(cell, next)) {
                     continue;
                 }
                 if (discovered.size() >= maxVisitedCells) {

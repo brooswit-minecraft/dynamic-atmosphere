@@ -2,13 +2,23 @@ package io.github.brooswitminecraft.dynamicatmosphere.client;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 /** Buffers one subscribed view until the client world exists; disconnect drops all state. */
 public final class AtmosphereClientSession {
-    private AtmosphereClientCache active = new AtmosphereClientCache();
-    private AtmosphereClientCache pending = new AtmosphereClientCache();
+    private final Supplier<AtmosphereClientCache> factory;
+    private AtmosphereClientCache active;
+    private AtmosphereClientCache pending;
     private String dimension;
     private String pendingDimension;
+
+    public AtmosphereClientSession() { this(AtmosphereClientCache::new); }
+
+    AtmosphereClientSession(Supplier<AtmosphereClientCache> factory) {
+        this.factory = Objects.requireNonNull(factory);
+        active = factory.get();
+        pending = factory.get();
+    }
 
     public AtmosphereClientCache cache() { return dimension == null ? pending : active; }
 
@@ -33,7 +43,7 @@ public final class AtmosphereClientSession {
         dimension = next;
         if (next != null && next.equals(pendingDimension)) {
             active = pending;
-            pending = new AtmosphereClientCache();
+            pending = factory.get();
         } else {
             active.changeDimension(next);
             pending.clear();

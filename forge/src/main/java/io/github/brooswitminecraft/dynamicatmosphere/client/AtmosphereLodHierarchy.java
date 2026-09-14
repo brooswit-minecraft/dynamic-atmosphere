@@ -9,7 +9,9 @@ import java.util.TreeMap;
 /** Sparse, aligned octree. Amounts are sums of base-cell fullness, never raw material. */
 final class AtmosphereLodHierarchy {
     static final int SELECTION_WORK_PER_TICK = 4096;
-    private static final int ROOT_LEVEL = 3;
+    private final int baseCellSize;
+    private final int rootLevel;
+    private final int reachMultiplier;
     private static final int TRANSITION_TICKS = 10;
     private static final int VIEW_REGION_SIZE = 16;
 
@@ -22,24 +24,26 @@ final class AtmosphereLodHierarchy {
 
     static final class Volume {
         final int x, y, z, level;
+        final int baseCellSize;
         private final Volume[] children;
         private Signal signal;
         private int count;
         private double target;
         private TreeMap<Long, Double> corrections;
 
-        private Volume(int x, int y, int z, int level) {
+        private Volume(int x, int y, int z, int level, int baseCellSize) {
             this.x = x;
             this.y = y;
             this.z = z;
             this.level = level;
+            this.baseCellSize = baseCellSize;
             children = level == 0 ? null : new Volume[8];
         }
 
-        int size() { return AtmosphereVolumeGeometry.CELL_SIZE << level; }
-        double blockX() { return (double) x * AtmosphereVolumeGeometry.CELL_SIZE; }
-        double blockY() { return (double) y * AtmosphereVolumeGeometry.CELL_SIZE; }
-        double blockZ() { return (double) z * AtmosphereVolumeGeometry.CELL_SIZE; }
+        int size() { return baseCellSize << level; }
+        double blockX() { return (double) x * baseCellSize; }
+        double blockY() { return (double) y * baseCellSize; }
+        double blockZ() { return (double) z * baseCellSize; }
 
         float amount(double tick) {
             if (count == 0) return 0;
@@ -87,6 +91,16 @@ final class AtmosphereLodHierarchy {
     private long workedTick = Long.MIN_VALUE;
     private int lastWork;
 
+    AtmosphereLodHierarchy() { this(4, 2, 2); }
+
+    AtmosphereLodHierarchy(int baseCellSize, int rootLevel, int reachMultiplier) {
+        if ((baseCellSize != 4 && baseCellSize != 8) || rootLevel < 1 || rootLevel > 3
+            || reachMultiplier < 1 || reachMultiplier > 4) throw new IllegalArgumentException("Unsupported LOD layout");
+        this.baseCellSize = baseCellSize;
+        this.rootLevel = rootLevel;
+        this.reachMultiplier = reachMultiplier;
+    }
+
     void put(AtmosphereClientCache.Cell cell, float from, float target, long since, long tick) {
         update(cell, new Signal(from, target, since), tick);
     }
@@ -94,11 +108,12 @@ final class AtmosphereLodHierarchy {
     void remove(AtmosphereClientCache.Cell cell, long tick) { update(cell, null, tick); }
 
     private void update(AtmosphereClientCache.Cell cell, Signal signal, long tick) {
-        var key = new Key(Math.floorDiv(cell.x(), 8), Math.floorDiv(cell.y(), 8), Math.floorDiv(cell.z(), 8));
+        int edge = 1 << rootLevel;
+        var key = new Key(Math.floorDiv(cell.x(), edge), Math.floorDiv(cell.y(), edge), Math.floorDiv(cell.z(), edge));
         Volume root = root(key);
         if (root == null) {
             if (signal == null) return;
-            root = new Volume(key.x() * 8, key.y() * 8, key.z() * 8, ROOT_LEVEL);
+            root = new Volume(key.x() * edge, key.y() * edge, key.z() * edge, rootLevel, baseCellSize);
             roots.computeIfAbsent(key.x(), ignored -> new TreeMap<>())
                 .computeIfAbsent(key.z(), ignored -> new TreeMap<>()).put(key.y(), root);
         }
@@ -133,7 +148,7 @@ final class AtmosphereLodHierarchy {
             Volume child = node.children[index];
             if (child == null) {
                 if (signal == null) return null;
-                child = new Volume(node.x + dx * edge, node.y + dy * edge, node.z + dz * edge, node.level - 1);
+                child = new Volume(node.x + dx * edge, node.y + dy * edge, node.z + dz * edge, node.level - 1, baseCellSize);
                 node.children[index] = child;
             }
             previous = update(child, cell, signal, tick);
@@ -161,7 +176,7 @@ final class AtmosphereLodHierarchy {
         if (build != null && !view.equals(build.view)) build = null;
         if (build == null && (!view.equals(selectedView) || selectedRevision != revision)) {
             build = new Build(view, revision, x, y, z);
-            double rootSize = AtmosphereVolumeGeometry.CELL_SIZE << ROOT_LEVEL;
+            double rootSize = baseCellSize << rootLevel;
             build.seed = root(new Key((int) Math.floor(x / rootSize), (int) Math.floor(y / rootSize),
                 (int) Math.floor(z / rootSize)));
             if (build.seed != null) {
@@ -199,14 +214,14 @@ final class AtmosphereLodHierarchy {
             double viewBlocks = Math.max(1, build.view.chunks()) * 16.0;
             // Query/render distance is padded for movement inside the cached view
             // region; the renderer applies the current camera's exact reach/frustum.
-            if (distance > square(viewBlocks * 4 + VIEW_REGION_SIZE * Math.sqrt(3))) continue;
+            if (distance > square(viewBlocks * reachMultiplier + VIEW_REGION_SIZE * Math.sqrt(3))) continue;
             double threshold = viewBlocks * (1 << node.level) / 4.0;
-            if (node.level == 0 || distance >= square(threshold)) {
+            if (node.level == 0 || distance > square(threshold)) {
                 build.volumes.add(node);
             } else {
                 // A subdivided 16-block node is exactly one chunk section. On unload,
                 // use it instead of its 4/8-block descendants, never alongside them.
-                if (node.level == 2) build.fallbacks.add(node);
+                if (node.size() == 16) build.fallbacks.add(node);
                 for (Volume child : node.children) if (child != null) build.pending.push(child);
             }
         }
@@ -246,7 +261,7 @@ final class AtmosphereLodHierarchy {
         return y.getValue();
     }
 
-    private static final class Build {
+    private final class Build {
         final View view;
         final long revision;
         final double x, y, z;
@@ -266,8 +281,8 @@ final class AtmosphereLodHierarchy {
             this.x = x;
             this.y = y;
             this.z = z;
-            double rootSize = AtmosphereVolumeGeometry.CELL_SIZE << ROOT_LEVEL;
-            double radius = Math.max(1, view.chunks()) * 64.0;
+            double rootSize = baseCellSize << rootLevel;
+            double radius = Math.max(1, view.chunks()) * 16.0 * reachMultiplier;
             cursorX = (int) Math.floor((view.x() * VIEW_REGION_SIZE - radius) / rootSize) - 1;
             cursorY = minY = (int) Math.floor((view.y() * VIEW_REGION_SIZE - radius) / rootSize) - 1;
             cursorZ = minZ = (int) Math.floor((view.z() * VIEW_REGION_SIZE - radius) / rootSize) - 1;
@@ -284,7 +299,11 @@ final class AtmosphereLodHierarchy {
     }
 
     static boolean visibleWhenLoaded(Volume volume, boolean fallback, boolean loaded) {
-        return fallback ? !loaded : volume.level >= 2 || loaded;
+        return fallback ? !loaded : volume.size() >= 16 || loaded;
+    }
+
+    static boolean withinReach(Volume volume, double x, double y, double z, int viewChunks) {
+        return distanceSquared(volume, x, y, z) <= square(Math.max(1, viewChunks) * 32.0);
     }
 
     private static double gap(double camera, double min, int size) { return Math.max(0, Math.max(min - camera, camera - min - size)); }

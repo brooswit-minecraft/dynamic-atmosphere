@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.BiPredicate;
 import java.util.function.Predicate;
 
 /** Loaded-world adapter; the caller owns pressure state and the per-pass budget. */
@@ -40,11 +41,14 @@ final class ForgeAtmospherePressure {
     static PressureResult breakForPressure(
         ServerLevel level,
         AtmosphereGrid.CellKey<ResourceKey<Level>> source,
-        Predicate<AtmosphereGrid.CellKey<ResourceKey<Level>>> activeLoaded
+        Predicate<AtmosphereGrid.CellKey<ResourceKey<Level>>> activeLoaded,
+        BiPredicate<AtmosphereGrid.CellKey<ResourceKey<Level>>,
+            AtmosphereGrid.CellKey<ResourceKey<Level>>> canTransfer
     ) {
         Objects.requireNonNull(level, "level");
         Objects.requireNonNull(source, "source");
         Objects.requireNonNull(activeLoaded, "activeLoaded");
+        Objects.requireNonNull(canTransfer, "canTransfer");
         if (!level.getServer().isSameThread()) {
             throw new IllegalStateException("pressure destruction must run on the server thread");
         }
@@ -54,7 +58,8 @@ final class ForgeAtmospherePressure {
                 && level.hasChunk(AtmosphereGridLayout.chunkCoordinate(cell.x()),
                     AtmosphereGridLayout.chunkCoordinate(cell.z()));
         var selected = AtmospherePressure.select(
-            source, eligible, cell -> scan(level, cell), BLOCK_ORDER, AtmospherePressure.MAX_VISITED_CELLS);
+            source, eligible, cell -> scan(level, cell), BLOCK_ORDER,
+            AtmospherePressure.MAX_VISITED_CELLS, canTransfer);
         if (selected.selection().isEmpty()) {
             return new PressureResult(Optional.empty(), selected.searchLimited());
         }

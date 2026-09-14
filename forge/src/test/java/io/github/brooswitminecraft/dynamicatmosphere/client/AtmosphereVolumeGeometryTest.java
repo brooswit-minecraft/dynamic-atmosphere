@@ -22,7 +22,7 @@ class AtmosphereVolumeGeometryTest {
 
     @Test
     void everyLodUsesItsOwnBoundsAndDensityIntegratedOverWorldThickness() {
-        for (int cellX : new int[] {1, 10, 20, 40}) {
+        for (int cellX : new int[] {1, 10, 20}) {
             var tree = new AtmosphereLodHierarchy();
             tree.put(new AtmosphereClientCache.Cell(cellX, 0, 0), 1000, 1000, 0, 0);
             var volume = tree.select(0, 0, 0, 4, 0).volumes().getFirst();
