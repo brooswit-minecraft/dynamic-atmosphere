@@ -593,14 +593,14 @@ final class ForgeAtmospherePrototype {
             AtmosphereGrid.CellKey<ResourceKey<Level>>> canTransfer =
                 (source, destination) -> canTransferDown(server, source, destination, false);
         var spread = grid.spread(serverTicks, capacityAt, key -> {
-            applyFans(server.getLevel(key.dimension()), grid, key, AtmosphereGrid.CELL_SIZE, capacityAt, canTransfer);
             growPlants(server.getLevel(key.dimension()), grid, key, AtmosphereGrid.CELL_SIZE, capacityAt);
             capacities.clear();
             if (condense(server.getLevel(key.dimension()), key, capacityAt.applyAsInt(key))) capacities.clear();
         }, key -> {
             ServerLevel level = server.getLevel(key.dimension());
-            return level != null && level.random.nextDouble() < tuning().vapor().skipChance();
-        }, canTransfer);
+            return level != null && level.random.nextDouble() >= tuning().vapor().skipChance();
+        }, canTransfer, key -> applyFans(server.getLevel(key.dimension()), grid, key,
+            AtmosphereGrid.CELL_SIZE, capacityAt, canTransfer));
         materialMoved += spread.moved();
         blockedOverflow += spread.blockedOverflow();
         sourcesProcessed += spread.sourcesProcessed();
@@ -682,7 +682,6 @@ final class ForgeAtmospherePrototype {
                 (source, destination) -> canTransferDown(server, source, destination, true);
         var spread = smokeGrid.spread(serverTicks, capacityAt, key -> {
             ServerLevel level = server.getLevel(key.dimension());
-            applyFans(level, smokeGrid, key, SmokeGridLayout.CELL_SIZE, capacityAt, canTransfer);
             var cell = smokeGrid.get(key);
             if (level == null || cell == null) return;
             int size = SmokeGridLayout.CELL_SIZE;
@@ -692,7 +691,8 @@ final class ForgeAtmospherePrototype {
             var current = smokeGrid.get(key);
             if (used > 0 && current != null) smokeGrid.set(key,
                 Math.max(0, current.amount() - used), serverTicks, capacityAt.applyAsInt(key));
-        }, ignored -> true, canTransfer);
+        }, ignored -> true, canTransfer, key -> applyFans(server.getLevel(key.dimension()), smokeGrid, key,
+            SmokeGridLayout.CELL_SIZE, capacityAt, canTransfer));
         materialMoved += spread.moved();
         blockedOverflow += spread.blockedOverflow();
         sourcesProcessed += spread.sourcesProcessed();
@@ -715,7 +715,6 @@ final class ForgeAtmospherePrototype {
             var spread = materialGrid.spread(serverTicks, capacityAt, key -> {
                 ServerLevel cellLevel = server.getLevel(key.dimension());
                 if (cellLevel == null) return;
-                applyFans(cellLevel, materialGrid, key, material.cellSize(), capacityAt, canTransfer);
                 BlockPos origin = materialCellOrigin(material, key);
                 if (material == AtmosphereMaterial.VIOLENCE) violenceGameplay.onProcessedCell(cellLevel, origin);
                 if (material == AtmosphereMaterial.SLIME) slimeGameplay.onProcessedCell(cellLevel, origin);
@@ -735,7 +734,8 @@ final class ForgeAtmospherePrototype {
                     }
                     dissipateDust(level, materialGrid, key, capacityAt);
                 }
-            }, ignored -> true, canTransfer);
+            }, ignored -> true, canTransfer, key -> applyFans(server.getLevel(key.dimension()), materialGrid, key,
+                material.cellSize(), capacityAt, canTransfer));
             materialMoved += spread.moved();
             blockedOverflow += spread.blockedOverflow();
             sourcesProcessed += spread.sourcesProcessed();

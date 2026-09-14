@@ -1,7 +1,7 @@
 # Dust and Ender Gas Gameplay Defaults
 
 These are the configurable implementation defaults for the combined
-`0.16.0-alpha.1` release. Both materials use the shared 200-tick simulation and
+`0.16.1-alpha.1` release. Both materials use the shared 200-tick simulation and
 300-tick scheduled-producer cadence. Event producers remain event-driven. All
 queries are bounded and loaded-only; neither system scans a dimension or forces a
 chunk to load.

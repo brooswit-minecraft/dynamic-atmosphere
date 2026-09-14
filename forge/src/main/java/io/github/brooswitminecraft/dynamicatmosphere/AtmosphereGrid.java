@@ -157,6 +157,13 @@ public final class AtmosphereGrid<D> {
     public SpreadResult<D> spread(long tick, ToIntFunction<CellKey<D>> capacityAt,
         Consumer<CellKey<D>> beforeSpread, Predicate<CellKey<D>> shouldSimulate,
         BiPredicate<CellKey<D>, CellKey<D>> canTransfer) {
+        return spread(tick, capacityAt, beforeSpread, shouldSimulate, canTransfer, ignored -> { });
+    }
+
+    /** Runs afterSpread for every selected source after all transport, before rescheduling. */
+    public SpreadResult<D> spread(long tick, ToIntFunction<CellKey<D>> capacityAt,
+        Consumer<CellKey<D>> beforeSpread, Predicate<CellKey<D>> shouldSimulate,
+        BiPredicate<CellKey<D>, CellKey<D>> canTransfer, Consumer<CellKey<D>> afterSpread) {
         List<CellKey<D>> dueSources = pollDueSources(tick, MAX_SOURCES_PER_SPREAD);
         if (dueSources.isEmpty()) {
             return SpreadResult.empty(hasDueWork(tick));
@@ -170,6 +177,7 @@ public final class AtmosphereGrid<D> {
         int moved = spreadOneHop(tick, capacityAt, sources, canTransfer);
         SpreadResult<D> overflow = redistributeOverflowInternal(tick, capacityAt, sources, canTransfer);
         int consolidated = consolidateTinySources(tick, capacityAt, sources, canTransfer);
+        for (CellKey<D> source : sources) afterSpread.accept(source);
         for (CellKey<D> source : dueSources) {
             if (cells.containsKey(source)) {
                 scheduleIfAbsent(source, nextSimulationTick.applyAsLong(tick));
@@ -360,15 +368,24 @@ public final class AtmosphereGrid<D> {
             int sourceTarget = weightedTarget(totalAmount, capacities.getFirst(), totalCapacity);
             int alreadyOutgoing = Math.min(0, deltas.getOrDefault(sourceKey, 0));
             int available = Math.max(0, sourceAmount - sourceTarget + alreadyOutgoing);
-            for (int index = 1; index < neighborhood.size() && available > 0; index++) {
+            int[] deficits = new int[neighborhood.size()];
+            int totalDeficit = 0;
+            for (int index = 1; index < neighborhood.size(); index++) {
                 CellKey<D> neighbor = neighborhood.get(index);
                 int neighborAmount = amountSnapshot.getOrDefault(neighbor, 0) + deltas.getOrDefault(neighbor, 0);
                 int target = weightedTarget(totalAmount, capacities.get(index), totalCapacity);
-                int transfer = Math.min(available, Math.max(0, target - neighborAmount));
+                deficits[index] = Math.max(0, target - neighborAmount);
+                totalDeficit += deficits[index];
+            }
+            // Share a limited source proportionally; fixed face order must not favor X over Z.
+            // Integer remainders stay at the source rather than favoring the first neighbor.
+            int outgoing = Math.min(available, totalDeficit);
+            for (int index = 1; index < neighborhood.size() && outgoing > 0; index++) {
+                CellKey<D> neighbor = neighborhood.get(index);
+                int transfer = (int) ((long) outgoing * deficits[index] / totalDeficit);
                 if (transfer > 0) {
                     deltas.merge(sourceKey, -transfer, Integer::sum);
                     deltas.merge(neighbor, transfer, Integer::sum);
-                    available -= transfer;
                 }
             }
         }

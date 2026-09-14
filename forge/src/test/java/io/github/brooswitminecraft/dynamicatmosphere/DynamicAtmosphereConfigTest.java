@@ -22,7 +22,7 @@ class DynamicAtmosphereConfigTest {
         assertEquals(24, first.vapor().highTerrainBlocksAboveSeaLevel());
         assertEquals(200, first.runtime().simulationIntervalTicks());
         assertEquals(300, first.runtime().producerIntervalTicks());
-        assertEquals(0.10, first.integrations().createFanTransportPerRpm());
+        assertEquals(1.0, first.integrations().createFanTransportPerRpm());
     }
 
     @Test

@@ -1,6 +1,6 @@
 # Multiple Atmospheric Materials
 
-This document describes the combined `0.16.0-alpha.1` atmospheric-material
+This document describes the combined `0.16.1-alpha.1` atmospheric-material
 runtime. All seven materials are active, independently stored, independently
 rendered, sparse, chunk-persisted server systems. Numeric values are configurable
 defaults, not permanent balance guarantees.
@@ -53,7 +53,8 @@ unavailable. Unknown unloaded boundaries never authorize destruction or loss.
 When Create is installed, each rotating Encased Fan found inside a processed
 source cell requests movement one cell in its facing direction. The requested
 amount is `floor(abs(RPM) * createFanTransportPerRpm)`, capped at the grid's
-maximum amount; the default coefficient is 0.10. Reverse RPM changes neither the
+maximum amount; the default coefficient is 1.0. Transfers run after normal spreading.
+Reverse RPM changes neither the
 target direction nor the quantity formula. The actual transfer is limited by
 remaining source material, destination spare capacity, loaded/readable terrain,
 and the same liquid/bedrock edge rules.
@@ -76,7 +77,7 @@ check. Explosions emit 80 plus 10 per successfully destroyed block. Fire and lav
 presence transitions emit without duplicating ordinary age, level, or fluid-flow
 changes.
 
-Each processed Smoke turn makes independent effect rolls. `0.16.0-alpha.1`
+Each processed Smoke turn makes independent effect rolls. `0.16.1-alpha.1`
 increases all four chances to 10x their earlier defaults, capped at 1:
 
 - Leaf removal: 1.0, removing at most one leaf for 40 Smoke.

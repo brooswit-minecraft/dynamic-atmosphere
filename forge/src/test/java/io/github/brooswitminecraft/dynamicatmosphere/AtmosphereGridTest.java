@@ -17,6 +17,133 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AtmosphereGridTest {
     @Test
+    void multipleSourcesAreInvariantUnderHorizontalReflectionAndInsertionOrder() {
+        var sources = List.of(key(1, 0, 0), key(-1, 0, 0), key(0, 0, 1), key(0, 0, -1));
+        var forward = new AtmosphereGrid<String>();
+        var reverse = new AtmosphereGrid<String>();
+        for (var source : sources) forward.set(source, 600, 1, 1000);
+        for (var source : sources.reversed()) reverse.set(source, 600, 1, 1000);
+        long due = AtmosphereGridLayout.nextSimulationTick(1);
+        forward.spread(due, ignored -> 1000);
+        reverse.spread(due, ignored -> 1000);
+        assertEquals(amounts(forward), amounts(reverse));
+        for (var cell : forward.cells()) {
+            var pos = cell.key();
+            assertEquals(cell.amount(), amount(forward, key(pos.z(), pos.y(), pos.x())));
+            assertEquals(cell.amount(), amount(forward, key(-pos.x(), pos.y(), pos.z())));
+        }
+        assertEquals(2400, total(forward));
+        assertEquals(2400, total(reverse));
+    }
+
+    @Test
+    void competingSourcesShareDestinationCapacityWithoutOrderBiasOrOverflow() {
+        var grid = new AtmosphereGrid<String>();
+        var center = key(0, 0, 0);
+        var sources = List.of(key(1, 0, 0), key(-1, 0, 0), key(0, 1, 0), key(0, -1, 0),
+            key(0, 0, 1), key(0, 0, -1));
+        for (var source : sources) grid.set(source, 1000, 1, 1000);
+        var result = grid.spread(AtmosphereGridLayout.nextSimulationTick(1),
+            cell -> cell.equals(center) ? 100 : sources.contains(cell) ? 1000 : 0);
+        assertEquals(96, amount(grid, center));
+        for (var source : sources) assertEquals(984, amount(grid, source));
+        assertEquals(6000, total(grid));
+        assertEquals(0, result.overflowMoved());
+        assertTrue(grid.cells().stream().allMatch(cell -> cell.amount() <= cell.capacity()));
+    }
+
+    @Test
+    void afterSpreadRunsAfterOverflowAndSharesTheProcessedSourceBudget() {
+        var grid = new AtmosphereGrid<String>();
+        var source = key(0, 0, 0);
+        var east = key(1, 0, 0);
+        var farEast = key(2, 0, 0);
+        grid.set(source, 3000, 1, 1000);
+        long due = AtmosphereGridLayout.nextSimulationTick(1);
+        var result = grid.spread(due, capacities(Map.of(source, 1000, east, 1000, farEast, 1000)),
+            cell -> { }, cell -> true, (from, to) -> true, cell -> {
+                assertEquals(1000, amount(grid, farEast));
+                assertEquals(3000, total(grid));
+            });
+        assertEquals(1000, result.overflowMoved());
+
+        var bounded = new AtmosphereGrid<String>();
+        for (int i = 0; i < 130; i++) bounded.set(key(i * 3, 0, 0), 100, 1, 1000);
+        var calls = new ArrayList<AtmosphereGrid.CellKey<String>>();
+        ToIntFunction<AtmosphereGrid.CellKey<String>> capacity = cell -> cell.x() % 3 == 0 ? 1000 : 0;
+        var first = bounded.spread(due, capacity, cell -> { }, cell -> true, (from, to) -> true, calls::add);
+        assertEquals(128, calls.size());
+        assertTrue(first.workRemaining());
+        bounded.spread(due, capacity, cell -> { }, cell -> true, (from, to) -> true, calls::add);
+        assertEquals(130, calls.size());
+        assertEquals(130, new HashSet<>(calls).size());
+        assertEquals(13000, total(bounded));
+    }
+
+    @Test
+    void limitedSourceSpreadsSymmetricallyAcrossHorizontalAxes() {
+        var grid = new AtmosphereGrid<String>();
+        long due = AtmosphereGridLayout.nextSimulationTick(1);
+        grid.set(key(0, 0, 0), 600, 1, 1000);
+        grid.set(key(0, 1, 0), 600, due, 1000);
+
+        grid.spread(due, ignored -> 1000);
+
+        int east = amount(grid, key(1, 0, 0));
+        assertTrue(east > 0);
+        assertEquals(east, amount(grid, key(-1, 0, 0)));
+        assertEquals(east, amount(grid, key(0, 0, 1)));
+        assertEquals(east, amount(grid, key(0, 0, -1)));
+        assertEquals(1200, total(grid));
+        assertTrue(grid.cells().stream().allMatch(cell -> cell.amount() <= cell.capacity()));
+    }
+
+    @Test
+    void afterSpreadSeesCompletedTransportAndCanRemoveSourceBeforeRescheduling() {
+        var grid = new AtmosphereGrid<String>();
+        var source = key(0, 0, 0);
+        var east = key(1, 0, 0);
+        long due = AtmosphereGridLayout.nextSimulationTick(1);
+        grid.set(source, 600, 1, 1000);
+        var calls = new ArrayList<String>();
+        var capacity = capacities(Map.of(source, 1000, east, 1000));
+        var result = grid.spread(due, capacity, cell -> calls.add("before"), cell -> true,
+            (from, to) -> true, cell -> {
+                calls.add("after");
+                assertEquals(source, cell);
+                assertEquals(300, amount(grid, source));
+                assertEquals(300, amount(grid, east));
+                grid.remove(source);
+            });
+        assertEquals(List.of("before", "after"), calls);
+        assertEquals(1, result.sourcesProcessed());
+        var next = new ArrayList<AtmosphereGrid.CellKey<String>>();
+        grid.spread(AtmosphereGridLayout.nextSimulationTick(due), capacity, next::add);
+        assertEquals(List.of(east), next);
+    }
+
+    @Test
+    void afterSpreadIncludesConsolidatedSourcesButSkipsUnselectedSources() {
+        var grid = new AtmosphereGrid<String>();
+        var source = key(0, 0, 0);
+        var east = key(1, 0, 0);
+        var skipped = key(10, 0, 0);
+        long due = AtmosphereGridLayout.nextSimulationTick(1);
+        grid.set(source, 10, 1, 1000);
+        grid.set(east, 20, due, 1000);
+        grid.set(skipped, 100, 1, 1000);
+        var calls = new ArrayList<AtmosphereGrid.CellKey<String>>();
+        grid.spread(due, capacities(Map.of(source, 1000, east, 1000, skipped, 1000)),
+            cell -> { }, cell -> !cell.equals(skipped), (from, to) -> true, cell -> {
+                calls.add(cell);
+                assertNull(grid.get(source));
+                assertEquals(30, amount(grid, east));
+            });
+        assertEquals(List.of(source), calls);
+        assertEquals(130, total(grid));
+    }
+
+    @Test
     void skippedSourceWaitsForNextNormalTurnWithoutDoingSimulationWork() {
         AtmosphereGrid<String> grid = new AtmosphereGrid<>();
         var source = key(0, 0, 0);

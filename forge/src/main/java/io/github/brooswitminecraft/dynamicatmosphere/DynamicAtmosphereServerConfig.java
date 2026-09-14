@@ -212,7 +212,7 @@ public final class DynamicAtmosphereServerConfig {
         builder.pop();
 
         builder.push("integrations");
-        CREATE_FAN_RPM_COEFFICIENT = decimal(builder, "createFanTransportPerRpm", 0.10, 0, 1000);
+        CREATE_FAN_RPM_COEFFICIENT = decimal(builder, "createFanTransportPerRpm", 1.0, 0, 1000);
         builder.pop();
         SPEC = builder.build();
         cached = readSnapshot();

@@ -1,3 +1,9 @@
+# 0.16.1-alpha.1
+
+- Increase default Create fan transfer tenfold, to 1 material unit per RPM per processed turn, and apply it after normal spreading.
+- Remove fixed-face preference when a source cannot satisfy all neighbors: distribute its outgoing material proportionally to neighbor deficits, retaining integer remainders at the source.
+- Correct the configurable Vapor skip probability: zero skips no cells, one skips all cells; the default 50% behavior is unchanged.
+
 # 0.16.0-alpha.1
 
 - Use detailed volumetric slice spacing at every rendering LOD, retaining cell aggregation and distance cutoffs. Integrated optical density stays unchanged.
