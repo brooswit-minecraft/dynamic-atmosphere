@@ -1,8 +1,11 @@
 package io.github.brooswitminecraft.dynamicatmosphere.mixin;
 
 import io.github.brooswitminecraft.dynamicatmosphere.AtmosphereWaterTransitions;
+import io.github.brooswitminecraft.dynamicatmosphere.ForgeSmokeGameplay;
 import io.github.brooswitminecraft.dynamicatmosphere.ForgeAtmosphereCapacity;
 import io.github.brooswitminecraft.dynamicatmosphere.ForgeSmokeCapacity;
+import io.github.brooswitminecraft.dynamicatmosphere.ForgeMaterialCapacity;
+import io.github.brooswitminecraft.dynamicatmosphere.VaporOverheadTerrain;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -24,6 +27,9 @@ abstract class LevelChunkWaterTransitionMixin {
         // Capacity invalidation must also run for transport mutations whose emissions are suppressed.
         ForgeAtmosphereCapacity.blockChanged((LevelChunk) (Object) this, pos, callback.getReturnValue(), next);
         ForgeSmokeCapacity.blockChanged((LevelChunk) (Object) this, pos, callback.getReturnValue(), next);
+        ForgeMaterialCapacity.blockChanged((LevelChunk) (Object) this, pos, callback.getReturnValue(), next);
+        VaporOverheadTerrain.blockChanged((LevelChunk) (Object) this, pos, callback.getReturnValue(), next);
         AtmosphereWaterTransitions.observe((LevelChunk) (Object) this, pos, callback.getReturnValue(), next);
+        ForgeSmokeGameplay.observeMutation((LevelChunk) (Object) this, pos, callback.getReturnValue(), next);
     }
 }

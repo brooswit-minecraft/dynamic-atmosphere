@@ -5,14 +5,17 @@ import io.github.brooswitminecraft.dynamicatmosphere.engine.EngineInfo;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.neoforged.bus.api.IEventBus;
+import net.neoforged.bus.api.EventPriority;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.fml.common.Mod;
 import org.slf4j.Logger;
 
+import java.util.Optional;
+
 /**
  * The mod's NeoForge entry point. The engine reference remains the packaging
- * proof; the Forge event adapter is a deliberately small visual delivery
- * spike and is not the planned material simulation.
+ * proof; the Forge adapter owns the bounded server material grids and their
+ * NeoForge event integration.
  */
 @Mod(DynamicAtmosphereMod.MODID)
 public class DynamicAtmosphereMod {
@@ -29,6 +32,8 @@ public class DynamicAtmosphereMod {
         ForgeAtmosphereCapacity.register(modEventBus);
         ForgeSmokeStorage.register(modEventBus);
         ForgeSmokeCapacity.register(modEventBus);
+        ForgeMaterialStorage.register(modEventBus);
+        ForgeMaterialCapacity.register(modEventBus);
         prototype = new ForgeAtmospherePrototype();
         NeoForge.EVENT_BUS.addListener(prototype::onServerTick);
         NeoForge.EVENT_BUS.addListener(prototype::onChunkLoad);
@@ -38,6 +43,22 @@ public class DynamicAtmosphereMod {
         NeoForge.EVENT_BUS.addListener(prototype::onPlayerRespawn);
         NeoForge.EVENT_BUS.addListener(prototype::onServerStopped);
         NeoForge.EVENT_BUS.addListener(VaporHostileSpawnGate::onSpawnPlacementCheck);
+        NeoForge.EVENT_BUS.addListener(VaporOverheadTerrain::onTagsUpdated);
+        DustGameplay dust = prototype.dustGameplay();
+        NeoForge.EVENT_BUS.addListener(dust::onEntityTick);
+        NeoForge.EVENT_BUS.addListener(dust::onLivingDamage);
+        NeoForge.EVENT_BUS.addListener(EventPriority.LOWEST, dust::onBlockBreak);
+        NeoForge.EVENT_BUS.addListener(EventPriority.LOWEST, dust::onBlockPlace);
+        NeoForge.EVENT_BUS.addListener(dust::onEntityLeave);
+        EnderGasGameplay enderGas = prototype.enderGasGameplay();
+        NeoForge.EVENT_BUS.addListener(enderGas::onEntityTick);
+        NeoForge.EVENT_BUS.addListener(EventPriority.LOWEST, enderGas::onEntityJoin);
+        NeoForge.EVENT_BUS.addListener(EventPriority.LOWEST, enderGas::onProjectileImpact);
+        NeoForge.EVENT_BUS.addListener(enderGas::onEntityLeave);
+        NeoForge.EVENT_BUS.addListener(EnderGasSpawnGate::onSpawnPlacementCheck);
+        NeoForge.EVENT_BUS.addListener(prototype.violenceGameplay()::onLivingDeath);
+        NeoForge.EVENT_BUS.addListener(prototype.exhaustGameplay()::onEntityTick);
+        NeoForge.EVENT_BUS.addListener(prototype.exhaustGameplay()::onLivingDamage);
         LOGGER.info("[{}] bounded atmospheric grid enabled", MODID);
     }
 
@@ -45,5 +66,53 @@ public class DynamicAtmosphereMod {
     public static boolean isVaporMoreThanHalfFull(ServerLevel level, BlockPos pos) {
         ForgeAtmospherePrototype current = prototype;
         return current != null && current.isVaporMoreThanHalfFull(level, pos);
+    }
+
+    /** Loaded-only producer boundary for every shared-grid material. */
+    public static boolean emitMaterial(ServerLevel level, AtmosphereMaterial material, BlockPos source, int amount) {
+        ForgeAtmospherePrototype current = prototype;
+        return current != null && current.emitMaterial(level, material, source, amount);
+    }
+
+    /** Registers bounded loaded-chunk production without introducing another world scan. */
+    public static void registerMaterialProducer(
+        AtmosphereMaterial material, AtmosphereMaterialProducer producer
+    ) {
+        ForgeAtmospherePrototype current = prototype;
+        if (current == null) throw new IllegalStateException("Dynamic Atmosphere is not initialized");
+        current.registerMaterialProducer(material, producer);
+    }
+
+    /** Loaded-only producer boundary for the existing Vapor grid. */
+    public static boolean emitVapor(ServerLevel level, BlockPos source, int amount) {
+        ForgeAtmospherePrototype current = prototype;
+        return current != null && current.emitVapor(level, source, amount);
+    }
+
+    /** Returns empty for unloaded, deferred, corrupt, or out-of-world material cells. */
+    public static Optional<AtmosphereMaterialState> materialState(
+        ServerLevel level, AtmosphereMaterial material, BlockPos source
+    ) {
+        ForgeAtmospherePrototype current = prototype;
+        return current == null ? Optional.empty() : current.materialState(level, material, source);
+    }
+
+    /** Server-thread exact debit used after a gameplay transformation succeeds. */
+    public static boolean consumeMaterial(
+        ServerLevel level, AtmosphereMaterial material, BlockPos source, int amount
+    ) {
+        ForgeAtmospherePrototype current = prototype;
+        return current != null && current.consumeMaterial(level, material, source, amount);
+    }
+
+    public static boolean isMaterialMoreThanHalfFull(
+        ServerLevel level, AtmosphereMaterial material, BlockPos source
+    ) {
+        return materialState(level, material, source)
+            .map(AtmosphereMaterialState::moreThanHalfFull).orElse(false);
+    }
+
+    public static boolean isEnderGasMoreThanHalfFull(ServerLevel level, BlockPos source) {
+        return isMaterialMoreThanHalfFull(level, AtmosphereMaterial.ENDER_GAS, source);
     }
 }

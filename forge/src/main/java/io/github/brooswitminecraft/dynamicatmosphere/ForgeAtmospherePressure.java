@@ -45,6 +45,20 @@ final class ForgeAtmospherePressure {
         BiPredicate<AtmosphereGrid.CellKey<ResourceKey<Level>>,
             AtmosphereGrid.CellKey<ResourceKey<Level>>> canTransfer
     ) {
+        return breakForPressure(level, source, activeLoaded, canTransfer, AtmosphereGridLayout.CELL_SIZE);
+    }
+
+    static PressureResult breakForPressure(
+        ServerLevel level,
+        AtmosphereGrid.CellKey<ResourceKey<Level>> source,
+        Predicate<AtmosphereGrid.CellKey<ResourceKey<Level>>> activeLoaded,
+        BiPredicate<AtmosphereGrid.CellKey<ResourceKey<Level>>,
+            AtmosphereGrid.CellKey<ResourceKey<Level>>> canTransfer,
+        int cellSize
+    ) {
+        if (cellSize < 1 || cellSize > 16 || 16 % cellSize != 0) {
+            throw new IllegalArgumentException("cell size must divide a Minecraft chunk");
+        }
         Objects.requireNonNull(level, "level");
         Objects.requireNonNull(source, "source");
         Objects.requireNonNull(activeLoaded, "activeLoaded");
@@ -55,11 +69,11 @@ final class ForgeAtmospherePressure {
 
         Predicate<AtmosphereGrid.CellKey<ResourceKey<Level>>> eligible = cell ->
             level.dimension().equals(cell.dimension()) && activeLoaded.test(cell)
-                && level.hasChunk(AtmosphereGridLayout.chunkCoordinate(cell.x()),
-                    AtmosphereGridLayout.chunkCoordinate(cell.z()));
-        var selected = AtmospherePressure.select(
-            source, eligible, cell -> scan(level, cell), BLOCK_ORDER,
-            AtmospherePressure.MAX_VISITED_CELLS, canTransfer);
+                && level.getChunkSource().getChunkNow(Math.floorDiv(cell.x(), 16 / cellSize),
+                    Math.floorDiv(cell.z(), 16 / cellSize)) != null;
+        var selected = AtmospherePressure.selectForAttempt(
+            source, eligible, cell -> scan(level, cell, cellSize), BLOCK_ORDER,
+            AtmospherePressure.MAX_VISITED_CELLS, canTransfer, level.random::nextDouble);
         if (selected.selection().isEmpty()) {
             return new PressureResult(Optional.empty(), selected.searchLimited());
         }
@@ -81,13 +95,12 @@ final class ForgeAtmospherePressure {
     }
 
     private static AtmospherePressure.CellScan<BlockPos> scan(
-        ServerLevel level, AtmosphereGrid.CellKey<ResourceKey<Level>> cell
+        ServerLevel level, AtmosphereGrid.CellKey<ResourceKey<Level>> cell, int size
     ) {
-        int size = AtmosphereGridLayout.CELL_SIZE;
         long originX = (long) cell.x() * size;
         long originY = (long) cell.y() * size;
         long originZ = (long) cell.z() * size;
-        boolean hasAir = false;
+        int emptyBlocks = 0;
         var candidates = new ArrayList<AtmospherePressure.Candidate<BlockPos>>();
         var pos = new BlockPos.MutableBlockPos();
         for (int y = 0; y < size; y++) {
@@ -107,7 +120,7 @@ final class ForgeAtmospherePressure {
                     }
                     var state = level.getBlockState(pos);
                     if (state.isAir()) {
-                        hasAir = true;
+                        emptyBlocks++;
                     } else if (state.getFluidState().isEmpty()) {
                         // Vanilla destroyBlock replaces waterlogged blocks with water.
                         // They cannot create air capacity and must not stall relief.
@@ -117,7 +130,7 @@ final class ForgeAtmospherePressure {
                 }
             }
         }
-        return new AtmospherePressure.CellScan<>(hasAir, candidates);
+        return new AtmospherePressure.CellScan<>(emptyBlocks, size * size * size, candidates);
     }
 
     private ForgeAtmospherePressure() {

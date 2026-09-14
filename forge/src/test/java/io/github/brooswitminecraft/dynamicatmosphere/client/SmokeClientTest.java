@@ -160,12 +160,12 @@ class SmokeClientTest {
     @Test
     void mixedSlicesInterleaveByDepthRatherThanMaterialOrVolumeCenter() {
         var order = new AtmosphereSliceOrder();
-        order.add(List.of(slice(1), slice(5), slice(9)), false);
-        order.add(List.of(slice(3), slice(7)), true);
+        order.add(List.of(slice(1), slice(5), slice(9)), AtmosphereRenderMaterial.VAPOR);
+        order.add(List.of(slice(3), slice(7)), AtmosphereRenderMaterial.SMOKE);
         for (int i = 0; i < 5; i++) {
             var next = order.next();
             assertEquals(9 - 2 * i, next.slice().depth());
-            assertEquals(i % 2 == 1, next.smoke());
+            assertEquals(i % 2 == 1 ? AtmosphereRenderMaterial.SMOKE : AtmosphereRenderMaterial.VAPOR, next.material());
         }
         assertTrue(order.isEmpty());
     }

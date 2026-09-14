@@ -55,7 +55,7 @@ public final class AtmosphereClientCache {
         this(cellBudget, AtmosphereGridLayout.CELL_SIZE, 2, 2);
     }
 
-    AtmosphereClientCache(int cellBudget, int baseCellSize, int rootLevel, int reachMultiplier) {
+    AtmosphereClientCache(int cellBudget, int baseCellSize, int rootLevel, double reachMultiplier) {
         if (cellBudget < 1) throw new IllegalArgumentException("cell budget must be positive");
         this.cellBudget = cellBudget;
         this.baseCellSize = baseCellSize;

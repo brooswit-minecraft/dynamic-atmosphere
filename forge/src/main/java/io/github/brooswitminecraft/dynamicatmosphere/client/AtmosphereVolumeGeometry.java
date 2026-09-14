@@ -69,7 +69,12 @@ public final class AtmosphereVolumeGeometry {
     }
 
     static float sliceAlpha(float amount, double thickness, int baseCellSize) {
-        return (float) -Math.expm1(-0.6 * Math.clamp(amount, 0, 1000) / 1000.0 * thickness / baseCellSize);
+        return sliceAlpha(amount, thickness, baseCellSize, 1);
+    }
+
+    static float sliceAlpha(float amount, double thickness, int baseCellSize, double opticalDensityMultiplier) {
+        return (float) -Math.expm1(-0.6 * Math.clamp(amount, 0, 1000) / 1000.0
+            * opticalDensityMultiplier * thickness / baseCellSize);
     }
 
     public static List<Slice> slices(AtmosphereClientCache.Cell cell, float amount, Point camera, Point look) {
@@ -83,18 +88,24 @@ public final class AtmosphereVolumeGeometry {
     }
 
     static List<Slice> lodSlices(AtmosphereLodHierarchy.Volume volume, float amount, Point camera, Point look) {
+        return lodSlices(volume, amount, camera, look, 1);
+    }
+
+    static List<Slice> lodSlices(AtmosphereLodHierarchy.Volume volume, float amount, Point camera, Point look,
+                                 double opticalDensityMultiplier) {
         int size = volume.size();
         return boxSlices(volume.blockX(), volume.blockY(), volume.blockZ(), size,
-            volume.level == 0 ? volume.baseCellSize / 4.0 : size, amount, camera, look, volume.baseCellSize);
+            volume.level == 0 ? volume.baseCellSize / 4.0 : size, amount, camera, look, volume.baseCellSize,
+            opticalDensityMultiplier);
     }
 
     private static List<Slice> boxSlices(double x, double y, double z, int size, double spacing,
                                          float amount, Point camera, Point look) {
-        return boxSlices(x, y, z, size, spacing, amount, camera, look, CELL_SIZE);
+        return boxSlices(x, y, z, size, spacing, amount, camera, look, CELL_SIZE, 1);
     }
 
     private static List<Slice> boxSlices(double x, double y, double z, int size, double spacing,
-                                         float amount, Point camera, Point look, int baseCellSize) {
+                                         float amount, Point camera, Point look, int baseCellSize, double opticalDensityMultiplier) {
         if (amount <= 0) return List.of();
         Point forward = look.normalized();
         Point right = forward.cross(Math.abs(forward.y) < 0.9 ? new Point(0, 1, 0) : new Point(1, 0, 0)).normalized();
@@ -153,7 +164,7 @@ public final class AtmosphereVolumeGeometry {
             }
             Point centroid = center.scale(1.0 / polygon.size());
             polygon.sort(Comparator.comparingDouble(p -> Math.atan2(p.subtract(centroid).dot(up), p.subtract(centroid).dot(right))));
-            result.add(new Slice(depth, sliceAlpha(amount, high - low, baseCellSize), List.copyOf(polygon)));
+            result.add(new Slice(depth, sliceAlpha(amount, high - low, baseCellSize, opticalDensityMultiplier), List.copyOf(polygon)));
         }
         return result;
     }

@@ -7,8 +7,9 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.IntUnaryOperator;
 
-/** Per-player snapshot/delta planner for the independent smoke grid. */
+/** Per-player snapshot/delta planner for a grid with an integral number of cells per chunk. */
 final class SmokeSyncPlanner<P, D> {
     record Chunk(int x, int z) { }
     record Cell(int x, int y, int z, int amount, int capacity) { }
@@ -24,11 +25,17 @@ final class SmokeSyncPlanner<P, D> {
     private record PlayerView<D>(D dimension, Set<Chunk> chunks, Map<Coordinate, Cell> cells) { }
 
     private final int batchSize;
+    private final IntUnaryOperator chunkCoordinate;
     private final Map<P, PlayerView<D>> views = new HashMap<>();
 
     SmokeSyncPlanner(int batchSize) {
+        this(batchSize, SmokeGridLayout::chunkCoordinate);
+    }
+
+    SmokeSyncPlanner(int batchSize, IntUnaryOperator chunkCoordinate) {
         if (batchSize <= 0) throw new IllegalArgumentException("batchSize must be positive");
         this.batchSize = batchSize;
+        this.chunkCoordinate = chunkCoordinate;
     }
 
     List<Update<D>> plan(P player, D dimension, List<Chunk> authoritativeChunks, List<Cell> visibleCells) {
@@ -95,7 +102,7 @@ final class SmokeSyncPlanner<P, D> {
 
     private int batchCount(int size) { return (size + batchSize - 1) / batchSize; }
 
-    private static Chunk chunkOf(Coordinate cell) {
-        return new Chunk(SmokeGridLayout.chunkCoordinate(cell.x()), SmokeGridLayout.chunkCoordinate(cell.z()));
+    private Chunk chunkOf(Coordinate cell) {
+        return new Chunk(chunkCoordinate.applyAsInt(cell.x()), chunkCoordinate.applyAsInt(cell.z()));
     }
 }

@@ -11,7 +11,7 @@ final class AtmosphereLodHierarchy {
     static final int SELECTION_WORK_PER_TICK = 4096;
     private final int baseCellSize;
     private final int rootLevel;
-    private final int reachMultiplier;
+    private final double reachMultiplier;
     private static final int TRANSITION_TICKS = 10;
     private static final int VIEW_REGION_SIZE = 16;
 
@@ -93,9 +93,10 @@ final class AtmosphereLodHierarchy {
 
     AtmosphereLodHierarchy() { this(4, 2, 2); }
 
-    AtmosphereLodHierarchy(int baseCellSize, int rootLevel, int reachMultiplier) {
-        if ((baseCellSize != 4 && baseCellSize != 8) || rootLevel < 1 || rootLevel > 3
-            || reachMultiplier < 1 || reachMultiplier > 4) throw new IllegalArgumentException("Unsupported LOD layout");
+    AtmosphereLodHierarchy(int baseCellSize, int rootLevel, double reachMultiplier) {
+        if ((baseCellSize != 1 && baseCellSize != 2 && baseCellSize != 4 && baseCellSize != 8 && baseCellSize != 16)
+            || rootLevel < 0 || rootLevel > 3 || !Double.isFinite(reachMultiplier)
+            || reachMultiplier < 0.25 || reachMultiplier > 4) throw new IllegalArgumentException("Unsupported LOD layout");
         this.baseCellSize = baseCellSize;
         this.rootLevel = rootLevel;
         this.reachMultiplier = reachMultiplier;
@@ -215,7 +216,7 @@ final class AtmosphereLodHierarchy {
             // Query/render distance is padded for movement inside the cached view
             // region; the renderer applies the current camera's exact reach/frustum.
             if (distance > square(viewBlocks * reachMultiplier + VIEW_REGION_SIZE * Math.sqrt(3))) continue;
-            double threshold = viewBlocks * (1 << node.level) / 4.0;
+            double threshold = viewBlocks * reachMultiplier / (1 << (rootLevel - node.level + 1));
             if (node.level == 0 || distance > square(threshold)) {
                 build.volumes.add(node);
             } else {
@@ -303,7 +304,11 @@ final class AtmosphereLodHierarchy {
     }
 
     static boolean withinReach(Volume volume, double x, double y, double z, int viewChunks) {
-        return distanceSquared(volume, x, y, z) <= square(Math.max(1, viewChunks) * 32.0);
+        return withinReach(volume, x, y, z, viewChunks, 2);
+    }
+
+    static boolean withinReach(Volume volume, double x, double y, double z, int viewChunks, double reach) {
+        return distanceSquared(volume, x, y, z) <= square(Math.max(1, viewChunks) * 16.0 * reach);
     }
 
     private static double gap(double camera, double min, int size) { return Math.max(0, Math.max(min - camera, camera - min - size)); }

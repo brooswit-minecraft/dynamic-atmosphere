@@ -9,8 +9,13 @@ public record MaterialSettings(
     int cellSize,
     List<LodBand> lod,
     double simulationSpeed,
-    OptionalDouble producerSpeed
+    OptionalDouble producerSpeed,
+    double opticalDensityMultiplier
 ) {
+    public MaterialSettings(int cellSize, List<LodBand> lod, double simulationSpeed, OptionalDouble producerSpeed) {
+        this(cellSize, lod, simulationSpeed, producerSpeed, 1);
+    }
+
     public MaterialSettings {
         if (cellSize <= 0) {
             throw new IllegalArgumentException("cellSize must be positive");
@@ -31,6 +36,9 @@ public record MaterialSettings(
         requirePositiveFinite(simulationSpeed);
         Objects.requireNonNull(producerSpeed, "producerSpeed");
         producerSpeed.ifPresent(MaterialSettings::requirePositiveFinite);
+        if (!Double.isFinite(opticalDensityMultiplier) || opticalDensityMultiplier <= 0) {
+            throw new IllegalArgumentException("optical density multiplier must be finite and positive");
+        }
     }
 
     /** Speed scales frequency: callers divide their base interval by this multiplier. */

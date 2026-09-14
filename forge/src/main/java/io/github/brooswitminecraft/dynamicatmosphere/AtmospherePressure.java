@@ -9,6 +9,7 @@ import java.util.Optional;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.DoubleSupplier;
 
 /** Pure selection for pressure that could not discharge into existing space. */
 final class AtmospherePressure {
@@ -25,10 +26,17 @@ final class AtmospherePressure {
     }
 
     /** Candidates must be blocks whose destruction can create air. */
-    record CellScan<B>(boolean hasAir, List<Candidate<B>> candidates) {
+    record CellScan<B>(int emptyBlocks, int totalBlocks, List<Candidate<B>> candidates) {
         CellScan {
+            if (totalBlocks <= 0 || emptyBlocks < 0 || emptyBlocks > totalBlocks) {
+                throw new IllegalArgumentException("invalid cell occupancy");
+            }
             candidates = List.copyOf(candidates);
         }
+        CellScan(boolean hasAir, List<Candidate<B>> candidates) {
+            this(hasAir ? 1 : 0, 1, candidates);
+        }
+        boolean hasAir() { return emptyBlocks > 0; }
     }
 
     record Selection<D, B>(AtmosphereGrid.CellKey<D> cell, B block) {
@@ -37,9 +45,37 @@ final class AtmospherePressure {
     record SearchResult<D, B>(Optional<Selection<D, B>> selection, boolean searchLimited) {
     }
 
+    /** One scope roll per authorized attempt, including the zero/all-air endpoints. */
+    static <D, B> SearchResult<D, B> selectForAttempt(
+        AtmosphereGrid.CellKey<D> source,
+        Predicate<AtmosphereGrid.CellKey<D>> activeLoaded,
+        Function<AtmosphereGrid.CellKey<D>, CellScan<B>> scan,
+        Comparator<? super B> blockOrder,
+        int maxVisitedCells,
+        BiPredicate<AtmosphereGrid.CellKey<D>, AtmosphereGrid.CellKey<D>> canTransfer,
+        DoubleSupplier roll
+    ) {
+        if (maxVisitedCells <= 0 || maxVisitedCells > MAX_VISITED_CELLS) {
+            throw new IllegalArgumentException("invalid visit budget");
+        }
+        if (!activeLoaded.test(source)) return new SearchResult<>(Optional.empty(), true);
+        CellScan<B> contents = Objects.requireNonNull(scan.apply(source));
+        double draw = roll.getAsDouble();
+        if (!(draw >= 0 && draw < 1)) throw new IllegalArgumentException("roll must be in [0,1)");
+        boolean neighbors = draw < (double) contents.emptyBlocks() / contents.totalBlocks();
+        if (!neighbors) {
+            return select(source, source::equals, ignored -> contents, blockOrder, 1, (from, to) -> false);
+        }
+        // Strip source candidates without rescanning it; only neighbor scope may be selected now.
+        CellScan<B> transit = new CellScan<>(contents.emptyBlocks(), contents.totalBlocks(), List.of());
+        return select(source, activeLoaded, cell -> cell.equals(source) ? transit : scan.apply(cell),
+            blockOrder, maxVisitedCells, canTransfer);
+    }
+
     /**
      * Prefers the weakest eligible block in the source cell, then the first
-     * breakable cell in face-neighbor BFS order. Hardness ties use blockOrder.
+     * nearest breakable face-neighbor layer. Select its weakest block;
+     * hardness ties use blockOrder.
      * A cell with no air may be broken into but is never traversed. This is
      * cell-level adjacency, not a claim of exact voxel paths within a cell.
      *
@@ -80,6 +116,10 @@ final class AtmospherePressure {
         discovered.add(source);
         boolean searchLimited = false;
         while (!queue.isEmpty()) {
+            int layerSize = queue.size();
+            Candidate<B> layerWeakest = null;
+            AtmosphereGrid.CellKey<D> weakestCell = null;
+            for (int layerIndex = 0; layerIndex < layerSize; layerIndex++) {
             AtmosphereGrid.CellKey<D> cell = queue.removeFirst();
             if (!activeLoaded.test(cell)) {
                 continue;
@@ -95,7 +135,12 @@ final class AtmospherePressure {
                 }
             }
             if (weakest != null) {
-                return new SearchResult<>(Optional.of(new Selection<>(cell, weakest.block())), false);
+                if (layerWeakest == null || weakest.hardness() < layerWeakest.hardness()
+                    || (weakest.hardness() == layerWeakest.hardness()
+                        && blockOrder.compare(weakest.block(), layerWeakest.block()) < 0)) {
+                    layerWeakest = weakest;
+                    weakestCell = cell;
+                }
             }
             if (!contents.hasAir()) {
                 continue;
@@ -119,6 +164,10 @@ final class AtmospherePressure {
                 }
                 discovered.add(next);
                 queue.addLast(next);
+            }
+            }
+            if (layerWeakest != null) {
+                return new SearchResult<>(Optional.of(new Selection<>(weakestCell, layerWeakest.block())), false);
             }
         }
         return new SearchResult<>(Optional.empty(), searchLimited);

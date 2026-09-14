@@ -9,7 +9,8 @@ MIT licensed.
 and can damage terrain and builds. Back up the world before upgrading. There is
 no claim/protected-area integration.**
 
-The server maintains a world-aligned atmospheric grid of 4x4x4-block cells.
+The server maintains seven independent atmospheric grids. Vapor uses world-aligned
+4x4x4-block cells; the following overview describes Vapor unless stated otherwise.
 Water fog, high-terrain clouds, rain-driven cloud-height emissions, and dark exposed
 ground add material to their cells. There is no natural decay: material spreads
 by equalizing fullness across the six face-adjacent cells, not diagonally.
@@ -24,7 +25,7 @@ boundaries and exhausted work/search budgets leave work pending, never authorize
 pressure destruction, and do not discard material.
 Excess that still cannot escape remains blocked and reported, not discarded;
 displacement is not unlimited.
-In 0.14.0-alpha.1, Vapor simulation retains a fixed **200-tick** interval, or **10 seconds**
+In 0.15.0-alpha.1, Vapor simulation retains a fixed **200-tick** interval, or **10 seconds**
 at 20 TPS, replacing the size-based 250-tick cadence. Producers are independent:
 passes are scheduled every **300 ticks** (15 seconds at 20 TPS) across all loaded
 chunks, not just player-offset samples. Each chunk has a random **10% default
@@ -43,9 +44,9 @@ every 200 ticks, and simulation processes at most 128 source cells per tick.
 Nearby clients receive a snapshot
 and batched changes, and render translucent cells with opacity based on fullness.
 This is **not** the full terrain-aware atmospheric simulation. Condensation can
-place real water sources (below), but does not generate Minecraft rain. Pollution,
-world generation changes, and the remaining planned materials are not included yet.
-Vapor and fire-produced Smoke are the two implemented atmospheric materials.
+place real water sources (below), but does not generate Minecraft rain or change
+world generation. All seven materials and their MVP gameplay systems are enabled
+(see below); exact terrain-aware transport and further balance tuning remain future work.
 
 ### Rain and Evaporation in 0.14.0
 
@@ -103,7 +104,7 @@ units; capacity remains 0..1000.
 
 Install this version on **both server and client**, or in a single-player NeoForge
 instance. Earlier particle-only releases did not require a client installation;
-the new grid renderer and sync protocol do. **Protocol 6 requires updating both
+the new grid renderer and sync protocol do. **Protocol 8 requires updating both
 sides together; earlier-protocol clients cannot connect.** Large snapshots use
 512-cell packets and a completion marker. Snapshot scope and chunk freshness
 distinguish current observations from retained visual history. There is no
@@ -142,18 +143,79 @@ before upgrading.** It changes the world, not just the visual cache. Existing
 destructive-pressure warnings remain unchanged, and no data or world reset is
 required.
 
-## Fire Smoke
+## Seven Materials
 
-0.14.0-alpha.1 adds black Smoke from fire in an independent, sparse **8x8x8-block
-grid**. Loaded fire-tagged blocks emit into the Smoke cell above the fire; Smoke
-amounts save with chunks, restore independently, and synchronize through their
-own payload. They do not add to Vapor or use Vapor's water-condensation rules.
-The client keeps Smoke in separate session memory, cleared on world/session
-changes; it does not write Smoke into the persistent Vapor visual disk cache.
+0.15.0-alpha.1 enables all seven independent materials, each with chunk-persisted
+server amounts and separate client state. These are active MVP systems, not
+placeholders for future runtime support. Numeric defaults are initial tuning,
+not a claim of balance or measured performance.
 
-Other planned Smoke sources, including lava, explosions, furnaces, torches and
-campfires, are not enabled by this fire-only slice. Dust, Hostility, Exhaust,
-Slime and Ender Gas remain future systems, not active runtime materials.
+| Material | Base cell edge | Scheduled simulation interval | Color | Optical density |
+| --- | --- | --- | --- | --- |
+| Vapor | 4 blocks | 200 ticks | Minecraft fog/horizon | 1x |
+| Smoke | 8 blocks | 200 ticks | Black | 4x |
+| Dust | 2 blocks | 50 ticks | Brown | 1x |
+| Ender Gas | 1 block | 25 ticks | Purple | 4x |
+| Violence | 8 blocks | 200 ticks | Red | 4x |
+| Exhaust | 2 blocks | 50 ticks | Yellow | 1x |
+| Slime | 16 blocks | 400 ticks | Green | 4x |
+
+Intervals are scheduled game ticks, subject to bounded work queues, not guaranteed
+wall-clock completion. Vapor retains its 50% due-check skip and condensation.
+Material amounts do not combine across identities. Only Vapor uses the persistent
+client visual disk cache; the other six keep independent session-only visual caches.
+
+### Producers and Effects
+
+- **Smoke:** fire and lava emit 40 units, lit furnaces and campfires 20, and lit
+  torches 2 per producer check. Explosions add an 80-unit burst plus 10 for each
+  successfully destroyed block. Fire/lava presence transitions also emit; ordinary
+  fire-age/fluid-level changes and scoped fluid transport do not duplicate them.
+  Per processed Smoke turn, independent rolls can remove one leaf (10%), turn
+  farmland into dirt (1/128), or change an eligible villager to a nitwit (1/256).
+  Each successful effect costs 40 units. The profession change invalidates trades;
+  farmland conversion can affect crops.
+- **Dust:** movement, running, jumping, landing, fall damage, block breaking,
+  placement, and falling-block landing produce Dust. Initial amounts include
+  walking 1, running 3, jumping 8, landing 6, breaking 16, and placement 12.
+  A processed cell can turn plain water into mud: chance rises linearly from zero
+  at 50% fullness to 100% at full capacity, costing half the current amount rounded
+  up on success. Waterlogged hosts are not replaced. Above capacity, a 1/16 roll
+  can place gravel in air; this MVP gravel effect consumes no Dust.
+  Independently, a 1/64 processed-turn roll dissipates up to 40 Dust units.
+- **Ender Gas:** Endermen, endermites, the Ender Dragon, witches, shulkers, ender
+  chests, portals/portal occupants, soul torches/fire/sand, and ender-pearl use and
+  impact are sources. Pearl use adds 24 and impact 48. A full-moon loaded-chunk
+  check has a 1/256 chance of an 8,000-unit burst, independent of the Vapor gate.
+  Natural Endermen require strictly more than 50% local Ender Gas fullness,
+  including underground, without consuming it; other normal spawn restrictions
+  still apply. Other natural surface hostiles retain the Vapor fullness gate.
+- **Violence:** hostile mob deaths add 40, sampled netherrack adds 2, and a
+  world-bottom producer has a 1/8 chance to add 8. At 10% through 25% fullness,
+  eligible villagers can receive three bread for vanilla breeding readiness,
+  costing 5% of the current amount rounded up; this does not force a birth.
+  At 75% fullness or higher, a 1/32 processed-turn roll attempts a zombie spawn,
+  with a quarter-capacity material cost and normal spawn-position/rule checks.
+- **Exhaust:** passive living-mob emissions use a 1/128 chance, or 1/16 for
+  creepers, adding 1 unit. Damage emits four units per damage point, rounded up
+  and capped at 64; Exhaust's own damage does not recursively emit.
+  Eye-position exposure on processed checks deals 1 damage point at 50% fullness,
+  rising to 4 at 100%, consuming 25% through 50% of the current amount when damage
+  succeeds. Vapor and Exhaust can also grow eligible crops/saplings through
+  normal bonemeal behavior: a 10% roll and 40-unit cost on successful growth.
+- **Slime:** vanilla-seeded slime chunks can produce 8 units below Y=40 on a
+  1/8 producer roll. At 75% fullness or higher, a 1/32 processed-turn roll
+  attempts a slime spawn with a quarter-capacity cost and spawn checks.
+
+Producer hooks and effect scans are bounded and loaded-only; not every block or
+entity is sampled each tick. Effects requiring material cannot spend unavailable
+amounts. Spawn costs are charged after finding an eligible position, before the
+spawn call; an attempted spawn is not a guarantee an entity appears.
+The coarse transport model and these numerical defaults remain open to tuning.
+
+**These mechanics can damage builds, remove leaves, change farmland and villager
+trades, place gravel/mud/water, damage living entities, and spawn mobs. Back up
+worlds. Updating does not clear existing material or undo previous world changes.**
 
 ## Distance-Based Rendering
 
@@ -168,6 +230,10 @@ render distance from the viewer:
 | `V < d <= 2V` | 16x16x16 blocks | 32x32x32 blocks |
 | `d > 2V` | Not rendered | Not rendered |
 
+Violence and Slime use base cells through V and 2x cells through 2V, with nothing
+beyond. Dust, Exhaust, and Ender Gas use base cells only through V/4, with nothing
+beyond. These cutoffs include cached fallback geometry and preserve stored cache data.
+
 Each coarser volume recursively averages eight children, counting empty volumes
 in that average rather than averaging only occupied children. Coverage does not
 overlap: a coarse parent is not drawn over its finer children. The coarser bands
@@ -178,16 +244,19 @@ Bands use aligned parent decisions, so boundary-crossing volumes can remain fine
 Selection is cached in 16-block camera regions and queries only nearby cached
 roots, with at most 4,096 selection work units per client tick. Rotation does not
 rebuild it. While a new view is being refined, aligned 16-block Vapor or 32-block
-Smoke volumes provide temporary coverage; unloaded near chunks use 16-block
-fallbacks. Neither fallback overlaps its detailed descendants, and boundary
-geometry is clipped at 2V. Shorter render reach does not delete cached data.
+Smoke volumes provide temporary coverage; Vapor's unloaded near chunks use 16-block
+fallbacks. Fallbacks never overlap their detailed descendants, and boundary
+geometry is clipped at each material's reach. Shorter render reach does not delete cached data.
 
 Vapor near, far, and fallback volumes use Minecraft's current
 fog/horizon color, sampled once per render frame. There is no local light-based
 grayscale, distance color blend, or client terrain-light sampling cache.
-Smoke uses black RGB. Vapor-only frames retain the constant-color unsorted path;
-when Smoke is visible, both materials' slices are merged back-to-front through
-shared bounded GPU batches. Mixed black and fog colors are not order-independent.
+The other six materials use the colors in the table above. Vapor-only frames retain
+the constant-color unsorted path; mixed-material slices are merged back-to-front
+through shared bounded GPU batches. Mixed colors are not order-independent.
+Smoke, Ender Gas, Violence, and Slime multiply optical density by four before
+thickness-integrated alpha, not per-triangle alpha. This changes rendering only,
+not material amounts, capacity, or simulation fullness.
 
 In 0.13.1-alpha.1, detailed 4-block volumes use four 1-block camera-facing
 slices instead of eight 0.5-block slices. Alpha remains integrated over each
@@ -199,7 +268,7 @@ Actual performance and in-game appearance remain for user verification.
 LOD changes rendering only. Vapor simulation uses 4x4x4-block cells and
 200-tick checks (10 seconds at 20 TPS), with unchanged condensation chance and
 consumption per check. Cache/render/sync intervals and persistent data are
-unchanged. Both materials stop rendering at twice view distance, with cached visuals only from
+unchanged. Each material stops at its own cutoff, with cached visuals only from
 previously seen areas; LOD does not load distant chunks. No world reset is needed.
 
 ## Persistent Visual Cache
@@ -212,7 +281,7 @@ approximate visual cache, not simulation, current terrain knowledge, or a way to
 load distant chunks. Fresh server observations supersede cached visuals for
 their snapshot/chunk scope; cached visuals never add material to the server.
 
-A stable world UUID stored in server SavedData scopes protocol-6 snapshots and
+A stable world UUID stored in server SavedData scopes protocol-8 snapshots and
 chunk freshness. Client files live under
 `gameDirectory/dynamicatmosphere-cache`, keyed by hashed server/world/dimension/
 layout identity. Worlds are separate; a newly reset world receives a fresh UUID
@@ -230,12 +299,20 @@ Operators can run `/dynamicatmosphere status` to inspect runtime counters and
 
 ## Destructive Pressure
 
-Pressure relief is included in 0.6.0-alpha.1 and enabled by default. Trapped
-excess breaks the eligible block with the lowest hardness in the source cell,
-dropping items. Once source-cell blocks are gone, relief tries neighboring cells
-and proceeds outward toward room. Each broken block adds **1 material unit**.
+Pressure relief remains enabled by default for all materials. Only confirmed
+blocked overflow can authorize it, with a fresh overflow search before destruction.
+Each authorized attempt chooses a scope: neighbor probability equals the source
+cell's air-block fraction, and source-cell probability equals its occupied fraction.
+This chooses where to search, not a separate probability of breaking a block.
+The source scope selects its weakest eligible block; the neighbor scope excludes
+the source and selects the weakest block in the nearest reachable face-neighbor
+layer. Hardness ties use deterministic coordinates. A scope without a candidate
+does not fall back to the other scope. Unknown boundaries or exhausted search
+budgets cannot authorize destruction. Bedrock in a source cell blocks downward
+transfer, not side/up transfer. Successful breaks use vanilla item drops and add
+**1 material unit** at the broken cell before another overflow-relief check.
 Negative-hardness and intrinsically unbreakable blocks are exempt; there is no
-claim/protected-area support. Pressure is limited to four attempts per sampling
+claim/protected-area support. Pressure shares a limit of four attempts per sampling
 interval. Work is
 bounded per pass, not an unlimited search
 or guarantee of immediate relief. Closed unbreakable surroundings leave excess
@@ -259,8 +336,8 @@ The jar is `forge/build/libs/dynamicatmosphere-<version>.jar`.
 - `engine/` is a pure Java library. Its tests and `verifyNoMinecraft` task enforce
   that Minecraft and NeoForge are absent from its classpath.
 - `forge/` contains the Minecraft adapter and packages the engine's compiled
-  classes directly into the shipped jar. The atmospheric grid does not depend on
-  the unfinished material simulation.
+  classes directly into the shipped jar. Runtime material grids use the Forge
+  adapter; the additive pure-Java definition foundation remains separate.
 
 ## Automated Releases
 

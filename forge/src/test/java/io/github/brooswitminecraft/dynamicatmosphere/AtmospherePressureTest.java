@@ -45,6 +45,77 @@ class AtmospherePressureTest {
     }
 
     @Test
+    void scopeRollUsesExactEmptyCountAndOccursOnceAtBothEndpoints() {
+        for (int empty : new int[]{0, 32, 64}) {
+            for (double draw : new double[]{0, 0.499999, 0.5, 0.999999}) {
+                var rolls = new AtomicInteger();
+                var scans = new AtomicInteger();
+                var east = cell(1, 0, 0);
+                var world = Map.of(SOURCE,
+                    new AtmospherePressure.CellScan<>(empty, 64, List.of(block(0, 0, 0, 1))),
+                    east, scan(false, block(4, 0, 0, 2)));
+                var result = AtmospherePressure.selectForAttempt(SOURCE, world::containsKey, key -> {
+                    if (key.equals(SOURCE)) scans.incrementAndGet();
+                    return world.get(key);
+                }, XYZ, 1024, (from, to) -> true, () -> { rolls.incrementAndGet(); return draw; });
+                assertEquals(draw < empty / 64.0 ? east : SOURCE, result.selection().orElseThrow().cell());
+                assertEquals(1, rolls.get());
+                assertEquals(1, scans.get());
+            }
+        }
+    }
+
+    @Test
+    void sourceScopeDoesNotFallBackOrRerollWhenUnbreakable() {
+        var rolls = new AtomicInteger();
+        var scans = new AtomicInteger();
+        var result = AtmospherePressure.selectForAttempt(SOURCE, key -> true, key -> {
+            scans.incrementAndGet();
+            return new AtmospherePressure.CellScan<>(32, 64, List.of(block(0, 0, 0, -1)));
+        }, XYZ, 1024, (from, to) -> true, () -> { rolls.incrementAndGet(); return 0.75; });
+        assertTrue(result.selection().isEmpty());
+        assertEquals(1, rolls.get());
+        assertEquals(1, scans.get());
+    }
+
+    @Test
+    void unavailableNeighborScopeDoesNotFallBackToBreakableSourceOrReroll() {
+        var rolls = new AtomicInteger();
+        var source = new AtmospherePressure.CellScan<>(32, 64, List.of(block(0, 0, 0, 1)));
+        var result = AtmospherePressure.selectForAttempt(SOURCE, SOURCE::equals,
+            key -> source, XYZ, 1024, (from, to) -> true,
+            () -> { rolls.incrementAndGet(); return 0.25; });
+
+        assertTrue(result.selection().isEmpty());
+        assertFalse(result.searchLimited());
+        assertEquals(1, rolls.get());
+    }
+
+    @Test
+    void neighborScopeChoosesWeakestInNearestLayerAndHonorsDirectedEdges() {
+        var east = cell(1, 0, 0);
+        var west = cell(-1, 0, 0);
+        var below = cell(0, -1, 0);
+        var world = Map.of(SOURCE, new AtmospherePressure.CellScan<>(32, 64, List.of(block(0, 0, 0, 0))),
+            east, scan(false, block(4, 0, 0, 5)), west, scan(false, block(-4, 0, 0, 1)),
+            below, scan(false, block(0, -4, 0, 0)));
+        var result = AtmospherePressure.selectForAttempt(SOURCE, world::containsKey, world::get,
+            XYZ, 1024, (from, to) -> to.y() >= from.y(), () -> 0.25);
+        assertEquals(west, result.selection().orElseThrow().cell());
+    }
+
+    @Test
+    void oneAirBlockInLargeCellUsesUnroundedFractionAndBudgetRemainsBounded() {
+        var source = new AtmospherePressure.CellScan<Block>(1, 4096, List.of(block(0, 0, 0, 1)));
+        var rolls = new AtomicInteger();
+        var result = AtmospherePressure.selectForAttempt(SOURCE, key -> true, key -> source,
+            XYZ, 1, (from, to) -> true, () -> { rolls.incrementAndGet(); return 0.0002; });
+        assertTrue(result.selection().isEmpty());
+        assertTrue(result.searchLimited());
+        assertEquals(1, rolls.get());
+    }
+
+    @Test
     void selectsWeakestInSourceEvenWhenSolidAndNeighborIsSofter() {
         var result = select(Map.of(
             SOURCE, scan(false, block(0, 0, 0, 5), block(1, 0, 0, 2)),

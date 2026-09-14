@@ -2,10 +2,11 @@ package io.github.brooswitminecraft.dynamicatmosphere;
 
 import net.minecraft.world.entity.MobCategory;
 import net.minecraft.world.entity.MobSpawnType;
+import net.minecraft.world.entity.EntityType;
 import net.neoforged.neoforge.event.entity.living.MobSpawnEvent;
 
 /**
- * Denies exposed vanilla hostile spawning unless the local vapor cell is
+ * Denies hostile spawning without qualifying overhead terrain unless the local vapor cell is
  * strictly more than half full. This gate never consumes vapor and never
  * forces a chunk load. Commands, eggs, spawners, and underground spawning
  * retain their normal behavior.
@@ -20,16 +21,18 @@ public final class VaporHostileSpawnGate {
     static Decision evaluate(
         MobSpawnType spawnType,
         MobCategory category,
-        boolean canSeeSky,
+        boolean qualifyingTerrainAbove,
         boolean vaporMoreThanHalfFull
     ) {
-        if (!appliesTo(spawnType, category) || !canSeeSky) {
+        if (!appliesTo(spawnType, category) || qualifyingTerrainAbove) {
             return Decision.PASS_THROUGH;
         }
         return vaporMoreThanHalfFull ? Decision.PASS_THROUGH : Decision.DENY;
     }
 
     public static void onSpawnPlacementCheck(MobSpawnEvent.SpawnPlacementCheck event) {
+        // Endermen use the independent, purple-only Ender Gas gate.
+        if (event.getEntityType() == EntityType.ENDERMAN) return;
         MobSpawnType spawnType = event.getSpawnType();
         MobCategory category = event.getEntityType().getCategory();
         if (!appliesTo(spawnType, category)) {
@@ -37,10 +40,11 @@ public final class VaporHostileSpawnGate {
         }
 
         var pos = event.getPos();
-        boolean canSeeSky = event.getLevel().canSeeSky(pos);
-        boolean vaporMoreThanHalfFull = canSeeSky
-            && DynamicAtmosphereMod.isVaporMoreThanHalfFull(event.getLevel().getLevel(), pos);
-        if (evaluate(spawnType, category, canSeeSky, vaporMoreThanHalfFull) == Decision.DENY) {
+        var level = event.getLevel().getLevel();
+        boolean qualifyingTerrainAbove = VaporOverheadTerrain.hasQualifyingTerrainAbove(level, pos);
+        boolean vaporMoreThanHalfFull = !qualifyingTerrainAbove
+            && DynamicAtmosphereMod.isVaporMoreThanHalfFull(level, pos);
+        if (evaluate(spawnType, category, qualifyingTerrainAbove, vaporMoreThanHalfFull) == Decision.DENY) {
             event.setResult(MobSpawnEvent.SpawnPlacementCheck.Result.FAIL);
         }
     }

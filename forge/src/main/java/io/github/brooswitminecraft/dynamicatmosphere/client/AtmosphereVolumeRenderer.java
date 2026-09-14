@@ -1,6 +1,7 @@
 package io.github.brooswitminecraft.dynamicatmosphere.client;
 
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 import net.minecraft.client.Minecraft;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -35,17 +36,20 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
     private static int renderedCoarseCount;
 
     static void render(RenderLevelStageEvent event, ClientLevel level, AtmosphereClientCache cache,
-                       AtmosphereClientCache smoke) {
+                       Map<AtmosphereRenderMaterial, MaterialClientSession> materials) {
         renderedCellCount = 0;
         renderedSliceCount = 0;
         renderedCoarseCount = 0;
-        if (cache.size() == 0 && smoke.size() == 0) return;
+        if (cache.size() == 0 && materials.values().stream().allMatch(session -> session.cache().size() == 0)) return;
         var position = event.getCamera().getPosition();
         var look = event.getCamera().getLookVector();
         var camera = new AtmosphereVolumeGeometry.Point(position.x, position.y, position.z);
         var forward = new AtmosphereVolumeGeometry.Point(look.x(), look.y(), look.z());
         var ordered = new AtmosphereSliceOrder();
-        visit(event, level, smoke, camera, forward, slices -> ordered.add(slices, true));
+        for (var entry : materials.entrySet()) {
+            visit(event, level, entry.getValue().cache(), camera, forward, entry.getKey(),
+                slices -> ordered.add(slices, entry.getKey()));
+        }
         boolean mixed = !ordered.isEmpty();
         if (storage == null) {
             storage = new ByteBufferBuilder(1024 * 1024);
@@ -60,15 +64,15 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
             var batch = new Batch(fogColor);
             // AFTER_PARTICLES already has the event model-view rotation on RenderSystem's
             // stack. These vertices are camera-relative: do not apply that matrix twice.
-            // Keep the constant-RGB vapor path unsorted when no smoke is visible.
+            // Keep the constant-RGB vapor path unsorted when no other material is visible.
             // Otherwise merge slices, not volume centers: materials can overlap.
-            visit(event, level, cache, camera, forward, slices -> {
-                if (mixed) ordered.add(slices, false);
-                else for (var slice : slices) batch.draw(slice, false);
+            visit(event, level, cache, camera, forward, AtmosphereRenderMaterial.VAPOR, slices -> {
+                if (mixed) ordered.add(slices, AtmosphereRenderMaterial.VAPOR);
+                else for (var slice : slices) batch.draw(slice, AtmosphereRenderMaterial.VAPOR);
             });
             while (!ordered.isEmpty()) {
                 var slice = ordered.next();
-                batch.draw(slice.slice(), slice.smoke());
+                batch.draw(slice.slice(), slice.material());
             }
             batch.flush();
         } finally {
@@ -84,6 +88,7 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
 
     private static void visit(RenderLevelStageEvent event, ClientLevel level, AtmosphereClientCache cache,
                               AtmosphereVolumeGeometry.Point camera, AtmosphereVolumeGeometry.Point forward,
+                              AtmosphereRenderMaterial material,
                               Consumer<List<AtmosphereVolumeGeometry.Slice>> consume) {
         int viewChunks = Minecraft.getInstance().options.getEffectiveRenderDistance();
         cache.setView(camera.x(), camera.z(), viewChunks);
@@ -95,13 +100,14 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
                 boolean loaded = level.getChunkSource().hasChunk(
                     Math.floorDiv(cell.x, 16 / cell.baseCellSize), Math.floorDiv(cell.z, 16 / cell.baseCellSize));
                 if (!AtmosphereLodHierarchy.visibleWhenLoaded(cell, fallback, loaded)) continue;
-                if (!AtmosphereLodHierarchy.withinReach(cell, camera.x(), camera.y(), camera.z(), viewChunks)
+                if (!AtmosphereLodHierarchy.withinReach(cell, camera.x(), camera.y(), camera.z(), viewChunks, material.reach)
                     || !event.getFrustum().isVisible(bounds(cell))) continue;
-                var slices = AtmosphereVolumeGeometry.lodSlices(cell, cell.amount(tick), camera, forward);
+                var slices = AtmosphereVolumeGeometry.lodSlices(cell, cell.amount(tick), camera, forward,
+                    material.opticalDensityMultiplier);
                 double dx = Math.max(Math.abs(cell.blockX() - camera.x()), Math.abs(cell.blockX() + cell.size() - camera.x()));
                 double dy = Math.max(Math.abs(cell.blockY() - camera.y()), Math.abs(cell.blockY() + cell.size() - camera.y()));
                 double dz = Math.max(Math.abs(cell.blockZ() - camera.z()), Math.abs(cell.blockZ() + cell.size() - camera.z()));
-                double reach = Math.max(1, viewChunks) * 32.0;
+                double reach = Math.max(1, viewChunks) * 16.0 * material.reach;
                 if (dx * dx + dy * dy + dz * dz > reach * reach) {
                     slices = AtmosphereVolumeGeometry.clipToReach(slices, forward, reach);
                 }
@@ -120,9 +126,9 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
         private int slices;
         Batch(float[] fogColor) { this.fogColor = fogColor; }
 
-        void draw(AtmosphereVolumeGeometry.Slice slice, boolean smoke) {
+        void draw(AtmosphereVolumeGeometry.Slice slice, AtmosphereRenderMaterial material) {
             if (vertices == null) vertices = buffers.getBuffer(VOLUME);
-            float r = smoke ? 0 : fogColor[0], g = smoke ? 0 : fogColor[1], b = smoke ? 0 : fogColor[2];
+            float r = material.channel(0, fogColor), g = material.channel(1, fogColor), b = material.channel(2, fogColor);
             var polygon = slice.vertices();
             for (int i = 1; i < polygon.size() - 1; i++) {
                 vertex(vertices, polygon.getFirst(), slice.alpha(), r, g, b);

@@ -11,6 +11,19 @@ import org.junit.jupiter.api.Test;
 
 class AtmosphericMaterialsTest {
     @Test
+    void opticalDensityIsRenderingOnlyAndUnspecifiedSettingsDefaultToOne() {
+        assertEquals(List.of(1.0, 1.0, 4.0, 4.0, 1.0, 4.0, 4.0),
+            AtmosphericMaterials.ALL.stream().map(m -> m.settings().opticalDensityMultiplier()).toList());
+        var vapor = AtmosphericMaterials.VAPOR.settings();
+        assertEquals(1, new MaterialSettings(vapor.cellSize(), vapor.lod(), vapor.simulationSpeed(),
+            vapor.producerSpeed()).opticalDensityMultiplier());
+        for (double bad : new double[] {0, -1, Double.NaN, Double.POSITIVE_INFINITY}) {
+            assertThrows(IllegalArgumentException.class, () -> new MaterialSettings(
+                vapor.cellSize(), vapor.lod(), vapor.simulationSpeed(), vapor.producerSpeed(), bad));
+        }
+    }
+
+    @Test
     void catalogMatchesIndependentSizesColorsAndSimulationSpeeds() {
         assertEquals(List.of("vapor", "dust", "smoke", "violence", "exhaust", "slime", "ender_gas"),
             AtmosphericMaterials.ALL.stream().map(MaterialDefinition::id).toList());

@@ -2,6 +2,7 @@ package io.github.brooswitminecraft.dynamicatmosphere.client;
 
 import io.github.brooswitminecraft.dynamicatmosphere.AtmosphereGridPayload;
 import io.github.brooswitminecraft.dynamicatmosphere.SmokeGridPayload;
+import io.github.brooswitminecraft.dynamicatmosphere.MaterialGridPayload;
 import io.github.brooswitminecraft.dynamicatmosphere.AtmosphereNetwork;
 import io.github.brooswitminecraft.dynamicatmosphere.DynamicAtmosphereMod;
 import net.minecraft.client.Minecraft;
@@ -17,12 +18,21 @@ import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
 
 import java.lang.ref.WeakReference;
+import java.util.EnumMap;
 import com.mojang.logging.LogUtils;
 
 @EventBusSubscriber(modid = DynamicAtmosphereMod.MODID, value = Dist.CLIENT)
 public final class AtmosphereClient {
     private static final AtmosphereClientSession SESSION = new AtmosphereClientSession();
-    private static final SmokeClientSession SMOKE = new SmokeClientSession();
+    private static final EnumMap<AtmosphereRenderMaterial, MaterialClientSession> MATERIALS = materialSessions();
+
+    private static EnumMap<AtmosphereRenderMaterial, MaterialClientSession> materialSessions() {
+        var sessions = new EnumMap<AtmosphereRenderMaterial, MaterialClientSession>(AtmosphereRenderMaterial.class);
+        for (var material : AtmosphereRenderMaterial.values()) {
+            if (material != AtmosphereRenderMaterial.VAPOR) sessions.put(material, new MaterialClientSession(material));
+        }
+        return sessions;
+    }
     private static ClientLevel observedLevel;
     private static ClientLevel unloadedLevel;
     private static WeakReference<Connection> disconnectedConnection = new WeakReference<>(null);
@@ -45,8 +55,22 @@ public final class AtmosphereClient {
             event.enqueueWork(() -> {
                 AtmosphereNetwork.setClientReceiver(AtmosphereClient::receive);
                 AtmosphereNetwork.setSmokeClientReceiver(AtmosphereClient::receiveSmoke);
+                AtmosphereNetwork.setMaterialClientReceiver(AtmosphereClient::receiveMaterial);
             });
         }
+    }
+
+    public static void receiveMaterial(MaterialGridPayload payload, Connection connection) {
+        var listener = Minecraft.getInstance().getConnection();
+        if (connection == disconnectedConnection.get() || listener == null
+            || listener.getConnection() != connection || !connection.isConnected()) return;
+        syncWorld();
+        if (observedLevel != null && !observedLevel.dimension().location().equals(payload.dimension())) return;
+        MaterialClientSession session = MATERIALS.get(AtmosphereRenderMaterial.valueOf(payload.material().name()));
+        session.receive(payload.worldId(), payload.dimension().toString(), payload.reset(), payload.snapshotEnd(),
+            payload.authoritativeChunks().stream().map(chunk -> new AtmosphereClientCache.Chunk(chunk.x(), chunk.z())).toList(),
+            payload.cells().stream().map(cell -> new AtmosphereClientCache.Update(
+                new AtmosphereClientCache.Cell(cell.x(), cell.y(), cell.z()), cell.amount(), cell.capacity())).toList());
     }
 
     public static void receiveSmoke(SmokeGridPayload payload, Connection connection) {
@@ -55,7 +79,7 @@ public final class AtmosphereClient {
             || listener.getConnection() != connection || !connection.isConnected()) return;
         syncWorld();
         if (observedLevel != null && !observedLevel.dimension().location().equals(payload.dimension())) return;
-        SMOKE.receive(payload.worldId(), payload.dimension().toString(), payload.reset(), payload.snapshotEnd(),
+        MATERIALS.get(AtmosphereRenderMaterial.SMOKE).receive(payload.worldId(), payload.dimension().toString(), payload.reset(), payload.snapshotEnd(),
             payload.authoritativeChunks().stream().map(chunk -> new AtmosphereClientCache.Chunk(chunk.x(), chunk.z())).toList(),
             payload.cells().stream().map(cell -> new AtmosphereClientCache.Update(
                 new AtmosphereClientCache.Cell(cell.x(), cell.y(), cell.z()), cell.amount(), cell.capacity())).toList());
@@ -96,7 +120,7 @@ public final class AtmosphereClient {
         syncWorld();
         if (observedLevel != null && !Minecraft.getInstance().isPaused()) {
             SESSION.cache().advance();
-            SMOKE.cache().advance();
+            MATERIALS.values().forEach(session -> session.cache().advance());
             if (++saveTicks >= 200) {
                 saveTicks = 0;
                 checkpoint();
@@ -112,7 +136,7 @@ public final class AtmosphereClient {
         }
         syncWorld();
         if (observedLevel != null) {
-            AtmosphereVolumeRenderer.render(event, observedLevel, SESSION.cache(), SMOKE.cache());
+            AtmosphereVolumeRenderer.render(event, observedLevel, SESSION.cache(), MATERIALS);
         }
     }
 
@@ -146,12 +170,13 @@ public final class AtmosphereClient {
             }
             if (observedLevel != null && current != null) {
                 SESSION.clear();
-                SMOKE.clear();
+                MATERIALS.values().forEach(MaterialClientSession::clear);
             }
             AtmosphereVolumeRenderer.close();
             observedLevel = current;
             SESSION.world(current == null ? null : current.dimension().location().toString());
-            SMOKE.world(current == null ? null : current.dimension().location().toString());
+            String dimension = current == null ? null : current.dimension().location().toString();
+            MATERIALS.values().forEach(session -> session.world(dimension));
         }
     }
 
@@ -162,7 +187,7 @@ public final class AtmosphereClient {
         observedLevel = null;
         unloadedLevel = null;
         SESSION.clear();
-        SMOKE.clear();
+        MATERIALS.values().forEach(MaterialClientSession::clear);
         AtmosphereVolumeRenderer.close();
     }
 

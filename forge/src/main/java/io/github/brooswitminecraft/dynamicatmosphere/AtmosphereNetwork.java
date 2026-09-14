@@ -12,16 +12,20 @@ public final class AtmosphereNetwork {
     };
     private static volatile BiConsumer<SmokeGridPayload, Connection> smokeClientReceiver = (payload, connection) -> {
     };
+    private static volatile BiConsumer<MaterialGridPayload, Connection> materialClientReceiver = (payload, connection) -> {
+    };
 
     private AtmosphereNetwork() {
     }
 
     static void register(RegisterPayloadHandlersEvent event) {
-        var registrar = event.registrar("6");
+        var registrar = event.registrar("8");
         registrar.playToClient(AtmosphereGridPayload.TYPE, AtmosphereGridPayload.STREAM_CODEC,
             (payload, context) -> clientReceiver.accept(payload, context.connection()));
         registrar.playToClient(SmokeGridPayload.TYPE, SmokeGridPayload.STREAM_CODEC,
             (payload, context) -> smokeClientReceiver.accept(payload, context.connection()));
+        registrar.playToClient(MaterialGridPayload.TYPE, MaterialGridPayload.STREAM_CODEC,
+            (payload, context) -> materialClientReceiver.accept(payload, context.connection()));
     }
 
     public static void setClientReceiver(BiConsumer<AtmosphereGridPayload, Connection> receiver) {
@@ -30,5 +34,9 @@ public final class AtmosphereNetwork {
 
     public static void setSmokeClientReceiver(BiConsumer<SmokeGridPayload, Connection> receiver) {
         smokeClientReceiver = Objects.requireNonNull(receiver, "receiver");
+    }
+
+    public static void setMaterialClientReceiver(BiConsumer<MaterialGridPayload, Connection> receiver) {
+        materialClientReceiver = Objects.requireNonNull(receiver, "receiver");
     }
 }

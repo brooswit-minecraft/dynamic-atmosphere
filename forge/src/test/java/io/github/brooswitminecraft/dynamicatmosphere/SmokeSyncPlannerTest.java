@@ -9,6 +9,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SmokeSyncPlannerTest {
     @Test
+    void materialSpecificChunkMappingScopesOneBlockCellsCorrectly() {
+        var planner = new SmokeSyncPlanner<String, String>(2,
+            AtmosphereMaterial.ENDER_GAS::chunkCoordinate);
+
+        planner.plan("player", "overworld", List.of(new SmokeSyncPlanner.Chunk(-1, 0)),
+            List.of(new SmokeSyncPlanner.Cell(-1, 64, 0, 40, 1000)));
+        var update = planner.plan("player", "overworld", List.of(new SmokeSyncPlanner.Chunk(-1, 0)),
+            List.of());
+
+        assertEquals(1, update.size());
+        assertEquals(0, update.getFirst().cells().getFirst().amount());
+    }
+    @Test
     void snapshotsEmptyTrackedChunksAndEmitsScopedRemoval() {
         var planner = new SmokeSyncPlanner<String, String>(512);
         var chunk = new SmokeSyncPlanner.Chunk(0, 0);

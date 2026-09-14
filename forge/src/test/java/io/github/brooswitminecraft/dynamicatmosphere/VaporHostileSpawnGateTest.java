@@ -11,41 +11,41 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class VaporHostileSpawnGateTest {
 
     @Test
-    void exposedNaturalAndChunkGenerationMonstersRequireDenseVapor() {
-        assertEquals(DENY, decide(MobSpawnType.NATURAL, true, false));
-        assertEquals(PASS_THROUGH, decide(MobSpawnType.NATURAL, true, true));
-        assertEquals(DENY, decide(MobSpawnType.CHUNK_GENERATION, true, false));
-        assertEquals(PASS_THROUGH, decide(MobSpawnType.CHUNK_GENERATION, true, true));
+    void monstersWithoutQualifyingOverheadTerrainRequireDenseVapor() {
+        assertEquals(DENY, decide(MobSpawnType.NATURAL, false, false));
+        assertEquals(PASS_THROUGH, decide(MobSpawnType.NATURAL, false, true));
+        assertEquals(DENY, decide(MobSpawnType.CHUNK_GENERATION, false, false));
+        assertEquals(PASS_THROUGH, decide(MobSpawnType.CHUNK_GENERATION, false, true));
     }
 
     @Test
-    void undergroundMonstersRemainUnderVanillaControl() {
-        assertEquals(PASS_THROUGH, decide(MobSpawnType.NATURAL, false, false));
+    void qualifyingOverheadTerrainLeavesMonstersUnderVanillaControl() {
+        assertEquals(PASS_THROUGH, decide(MobSpawnType.NATURAL, true, false));
     }
 
     @Test
     void nonHostileAndExplicitSpawnSourcesRemainUnderVanillaControl() {
         assertEquals(PASS_THROUGH,
-            VaporHostileSpawnGate.evaluate(MobSpawnType.NATURAL, MobCategory.CREATURE, true, false));
-        assertEquals(PASS_THROUGH, decide(MobSpawnType.COMMAND, true, false));
-        assertEquals(PASS_THROUGH, decide(MobSpawnType.SPAWN_EGG, true, false));
-        assertEquals(PASS_THROUGH, decide(MobSpawnType.SPAWNER, true, false));
-        assertEquals(PASS_THROUGH, decide(MobSpawnType.TRIAL_SPAWNER, true, false));
+            VaporHostileSpawnGate.evaluate(MobSpawnType.NATURAL, MobCategory.CREATURE, false, false));
+        assertEquals(PASS_THROUGH, decide(MobSpawnType.COMMAND, false, false));
+        assertEquals(PASS_THROUGH, decide(MobSpawnType.SPAWN_EGG, false, false));
+        assertEquals(PASS_THROUGH, decide(MobSpawnType.SPAWNER, false, false));
+        assertEquals(PASS_THROUGH, decide(MobSpawnType.TRIAL_SPAWNER, false, false));
     }
 
     @Test
     void densityDecisionIsReadOnlyAndRepeatable() {
         boolean vaporMoreThanHalfFull = true;
-        assertEquals(PASS_THROUGH, decide(MobSpawnType.NATURAL, true, vaporMoreThanHalfFull));
-        assertEquals(PASS_THROUGH, decide(MobSpawnType.NATURAL, true, vaporMoreThanHalfFull));
+        assertEquals(PASS_THROUGH, decide(MobSpawnType.NATURAL, false, vaporMoreThanHalfFull));
+        assertEquals(PASS_THROUGH, decide(MobSpawnType.NATURAL, false, vaporMoreThanHalfFull));
     }
 
     private static VaporHostileSpawnGate.Decision decide(
         MobSpawnType spawnType,
-        boolean canSeeSky,
+        boolean qualifyingTerrainAbove,
         boolean vaporMoreThanHalfFull
     ) {
         return VaporHostileSpawnGate.evaluate(
-            spawnType, MobCategory.MONSTER, canSeeSky, vaporMoreThanHalfFull);
+            spawnType, MobCategory.MONSTER, qualifyingTerrainAbove, vaporMoreThanHalfFull);
     }
 }
