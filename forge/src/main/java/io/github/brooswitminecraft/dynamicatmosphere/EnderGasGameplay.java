@@ -4,6 +4,8 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
@@ -12,7 +14,6 @@ import net.minecraft.world.entity.monster.Endermite;
 import net.minecraft.world.entity.monster.Shulker;
 import net.minecraft.world.entity.monster.Witch;
 import net.minecraft.world.entity.projectile.ThrownEnderpearl;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.levelgen.Heightmap;
@@ -31,6 +32,14 @@ import net.neoforged.neoforge.event.tick.EntityTickEvent;
  * burst 8,000 after an independent 1/256 roll per scheduled chunk check.</p>
  */
 public final class EnderGasGameplay {
+    private static final Set<ResourceLocation> PASSIVE_SOURCE_IDS = Set.of(
+        ResourceLocation.withDefaultNamespace("nether_portal"),
+        ResourceLocation.withDefaultNamespace("ender_chest"),
+        ResourceLocation.withDefaultNamespace("soul_torch"),
+        ResourceLocation.withDefaultNamespace("soul_wall_torch"),
+        ResourceLocation.withDefaultNamespace("soul_fire"),
+        ResourceLocation.withDefaultNamespace("soul_sand")
+    );
     static final int MOB_AMOUNT = 1;
     static final int PORTAL_OCCUPANT_AMOUNT = 2;
     static final int PASSIVE_BLOCK_AMOUNT = 1;
@@ -49,9 +58,11 @@ public final class EnderGasGameplay {
     }
 
     static boolean isPassiveSource(BlockState state) {
-        return state.is(Blocks.NETHER_PORTAL) || state.is(Blocks.ENDER_CHEST)
-            || state.is(Blocks.SOUL_TORCH) || state.is(Blocks.SOUL_WALL_TORCH)
-            || state.is(Blocks.SOUL_FIRE) || state.is(Blocks.SOUL_SAND);
+        return isPassiveSourceId(BuiltInRegistries.BLOCK.getKey(state.getBlock()));
+    }
+
+    static boolean isPassiveSourceId(ResourceLocation id) {
+        return PASSIVE_SOURCE_IDS.contains(id);
     }
 
     static boolean fullMoonBurst(boolean night, int moonPhase, int roll) {

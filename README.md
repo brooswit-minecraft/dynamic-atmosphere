@@ -181,7 +181,8 @@ client visual disk cache; the other six keep independent session-only visual cac
   A processed cell can turn plain water into mud: chance rises linearly from zero
   at 50% fullness to 100% at full capacity, costing half the current amount rounded
   up on success. Waterlogged hosts are not replaced. Above capacity, a 1/16 roll
-  can place gravel in air; this MVP gravel effect consumes no Dust.
+  can place gravel in air, consuming 25% of current Dust on successful placement,
+  rounded down with a minimum of 1 unit.
   Independently, a 1/64 processed-turn roll dissipates up to 40 Dust units.
 - **Ender Gas:** Endermen, endermites, the Ender Dragon, witches, shulkers, ender
   chests, portals/portal occupants, soul torches/fire/sand, and ender-pearl use and

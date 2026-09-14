@@ -45,10 +45,12 @@ class MaterialClientTest {
 
     @Test
     void geometryIntegratesMultiplierBeforeAlphaAtEverySmokeLod() {
-        for (int x : new int[] {0, 10, 20}) {
+        int[] positions = {0, 10, 20};
+        for (int level = 0; level < positions.length; level++) {
             var lod = new AtmosphereLodHierarchy(8, 2, 2);
-            lod.put(new AtmosphereClientCache.Cell(x, 0, 0), 1000, 1000, 0, 0);
+            lod.put(new AtmosphereClientCache.Cell(positions[level], 0, 0), 1000, 1000, 0, 0);
             var volume = lod.select(0, 0, 0, 8, 0).volumes().getFirst();
+            assertEquals(level, volume.level);
             var camera = new AtmosphereVolumeGeometry.Point(volume.blockX() + volume.size() / 2.0,
                 volume.size() / 2.0, -2);
             var look = new AtmosphereVolumeGeometry.Point(0, 0, 1);
@@ -57,8 +59,10 @@ class MaterialClientTest {
             assertEquals(normal.size(), strong.size());
             double normalDepth = normal.stream().mapToDouble(s -> -Math.log1p(-s.alpha())).sum();
             double strongDepth = strong.stream().mapToDouble(s -> -Math.log1p(-s.alpha())).sum();
+            assertEquals(0.06 * (1 << level), normalDepth, 1e-6);
             assertEquals(normalDepth * 4, strongDepth, 1e-6);
-            assertEquals(1000, volume.amount(0));
+            // A single occupied base cell is averaged with empty children at coarse LODs.
+            assertEquals(1000f / (1 << (3 * level)), volume.amount(0));
         }
     }
 

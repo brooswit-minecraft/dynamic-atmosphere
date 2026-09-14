@@ -10,13 +10,13 @@ import net.neoforged.neoforge.event.entity.living.MobSpawnEvent;
  */
 public final class EnderGasSpawnGate {
 
-    static boolean denies(EntityType<?> type, MobSpawnType spawnType, boolean enderGasMoreThanHalfFull) {
-        return type == EntityType.ENDERMAN && spawnType == MobSpawnType.NATURAL && !enderGasMoreThanHalfFull;
+    static boolean denies(boolean enderman, boolean naturalSpawn, boolean enderGasMoreThanHalfFull) {
+        return enderman && naturalSpawn && !enderGasMoreThanHalfFull;
     }
 
     public static void onSpawnPlacementCheck(MobSpawnEvent.SpawnPlacementCheck event) {
         if (event.getEntityType() != EntityType.ENDERMAN || event.getSpawnType() != MobSpawnType.NATURAL) return;
-        if (denies(event.getEntityType(), event.getSpawnType(),
+        if (denies(event.getEntityType() == EntityType.ENDERMAN, event.getSpawnType() == MobSpawnType.NATURAL,
             DynamicAtmosphereMod.isEnderGasMoreThanHalfFull(event.getLevel().getLevel(), event.getPos()))) {
             event.setResult(MobSpawnEvent.SpawnPlacementCheck.Result.FAIL);
         }

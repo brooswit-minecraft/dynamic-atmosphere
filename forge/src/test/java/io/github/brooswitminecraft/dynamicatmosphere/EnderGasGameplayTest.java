@@ -1,8 +1,6 @@
 package io.github.brooswitminecraft.dynamicatmosphere;
 
-import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.MobSpawnType;
-import net.minecraft.world.level.block.Blocks;
+import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -11,13 +9,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class EnderGasGameplayTest {
     @Test
     void passiveSourceListIncludesEverySpecifiedBlockFamily() {
-        assertTrue(EnderGasGameplay.isPassiveSource(Blocks.NETHER_PORTAL.defaultBlockState()));
-        assertTrue(EnderGasGameplay.isPassiveSource(Blocks.ENDER_CHEST.defaultBlockState()));
-        assertTrue(EnderGasGameplay.isPassiveSource(Blocks.SOUL_TORCH.defaultBlockState()));
-        assertTrue(EnderGasGameplay.isPassiveSource(Blocks.SOUL_WALL_TORCH.defaultBlockState()));
-        assertTrue(EnderGasGameplay.isPassiveSource(Blocks.SOUL_FIRE.defaultBlockState()));
-        assertTrue(EnderGasGameplay.isPassiveSource(Blocks.SOUL_SAND.defaultBlockState()));
-        assertFalse(EnderGasGameplay.isPassiveSource(Blocks.CHEST.defaultBlockState()));
+        for (String path : new String[]{
+            "nether_portal", "ender_chest", "soul_torch", "soul_wall_torch", "soul_fire", "soul_sand"
+        }) {
+            assertTrue(EnderGasGameplay.isPassiveSourceId(ResourceLocation.withDefaultNamespace(path)));
+        }
+        assertFalse(EnderGasGameplay.isPassiveSourceId(ResourceLocation.withDefaultNamespace("chest")));
     }
 
     @Test
@@ -30,9 +27,9 @@ class EnderGasGameplayTest {
 
     @Test
     void futureNaturalEndermanGateUsesOnlyStrictPurpleDecision() {
-        assertTrue(EnderGasSpawnGate.denies(EntityType.ENDERMAN, MobSpawnType.NATURAL, false));
-        assertFalse(EnderGasSpawnGate.denies(EntityType.ENDERMAN, MobSpawnType.NATURAL, true));
-        assertFalse(EnderGasSpawnGate.denies(EntityType.ENDERMAN, MobSpawnType.COMMAND, false));
-        assertFalse(EnderGasSpawnGate.denies(EntityType.ZOMBIE, MobSpawnType.NATURAL, false));
+        assertTrue(EnderGasSpawnGate.denies(true, true, false));
+        assertFalse(EnderGasSpawnGate.denies(true, true, true));
+        assertFalse(EnderGasSpawnGate.denies(true, false, false));
+        assertFalse(EnderGasSpawnGate.denies(false, true, false));
     }
 }
