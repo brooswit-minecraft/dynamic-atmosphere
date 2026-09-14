@@ -1,6 +1,6 @@
 # Dynamic Atmosphere
 
-**0.18.0-alpha.1** for Minecraft **1.21.1 / NeoForge**, with seven server-owned,
+**0.18.1-alpha.1** for Minecraft **1.21.1 / NeoForge**, with seven server-owned,
 chunk-persisted atmospheric materials and translucent client volumes.
 
 **Destructive pressure is enabled by default and can damage terrain and builds,
@@ -10,7 +10,7 @@ downgrading does not undo these changes. No world reset is required.**
 
 ## Seven Materials
 
-`0.18.0-alpha.1` enables all seven independent materials, each with chunk-persisted
+`0.18.1-alpha.1` enables all seven independent materials, each with chunk-persisted
 server amounts and separate client state. These are active MVP systems, not
 placeholders for future runtime support. Numeric defaults are initial tuning,
 not a claim of balance or measured performance.
@@ -190,6 +190,9 @@ and frustum. Delta sync is every 20 ticks and full snapshots every 200.
 
 ## Create Fans and Configuration
 
+Fans affect only cells up to 4x4x4: Vapor, Smoke, Dust, Exhaust, and Ender Gas.
+Violence and Slime are unaffected.
+
 With Create installed, rotating Encased Fans move atmosphere one cell in their
 facing direction. Requested movement is
 `floor(abs(RPM) * createFanTransportPerRpm)`, with a default coefficient of 1.0.
@@ -222,7 +225,7 @@ client and server.
 
 ## Installation
 
-Install **0.18.0-alpha.1 on both server and client**, or in a NeoForge 1.21.1
+Install **0.18.1-alpha.1 on both server and client**, or in a NeoForge 1.21.1
 single-player instance. **Protocol 10 requires both sides to update together;
 earlier protocols are incompatible.** No extra graphics dependency is required.
 World identity, scoped snapshots, and chunk freshness distinguish live state from

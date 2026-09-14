@@ -4,6 +4,10 @@ package io.github.brooswitminecraft.dynamicatmosphere;
 public final class AtmosphereFanTransport {
     private AtmosphereFanTransport() { }
 
+    public static boolean supportsCellSize(int size) {
+        return size > 0 && size <= 4;
+    }
+
     public static int movableAmount(int requested, int source, int destination, int capacity, boolean allowed) {
         if (!allowed || requested <= 0 || source <= 0 || destination < 0 || capacity <= 0) return 0;
         // Physical capacity may be exceeded; only the storage ceiling prevents loss by saturation.

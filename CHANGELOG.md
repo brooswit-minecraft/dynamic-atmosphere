@@ -1,3 +1,7 @@
+# 0.18.1-alpha.1
+
+- Restrict Create fan transport to grids with cell edges of four blocks or less. Vapor, Smoke, Dust, Exhaust, and Ender Gas can move; Violence and Slime are unaffected.
+
 # 0.18.0-alpha.1
 
 - Give Create fans an independent five-second loaded-chunk pass with no random skip. `integrations.createFanIntervalTicks` defaults to 100 and `maxFanChunksPerTick` to 32; queued work is bounded and never force-loads chunks.

@@ -5,6 +5,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class AtmosphereFanTransportTest {
     @Test
+    void onlyMovesMaterialsWithCellsNoLargerThanFourBlocks() {
+        for (int size : new int[] {1, 2, 4}) assertEquals(true, AtmosphereFanTransport.supportsCellSize(size));
+        for (int size : new int[] {-1, 0, 5, 8, 16}) assertEquals(false, AtmosphereFanTransport.supportsCellSize(size));
+        for (var material : AtmosphereMaterial.values()) {
+            assertEquals(material != AtmosphereMaterial.VIOLENCE && material != AtmosphereMaterial.SLIME,
+                AtmosphereFanTransport.supportsCellSize(material.cellSize()));
+        }
+    }
+
+    @Test
     void transferOverfillsCellsWithEmptySpaceButRespectsSourceStorageCeilingAndBarriers() {
         assertEquals(128, AtmosphereFanTransport.movableAmount(128, 600, 200, 1000, true));
         assertEquals(128, AtmosphereFanTransport.movableAmount(128, 600, 950, 1000, true));

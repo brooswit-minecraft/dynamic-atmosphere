@@ -805,6 +805,7 @@ final class ForgeAtmospherePrototype {
         AtmosphereGrid<ResourceKey<Level>> target, int size,
         ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacity,
         BiPredicate<AtmosphereGrid.CellKey<ResourceKey<Level>>, AtmosphereGrid.CellKey<ResourceKey<Level>>> canTransfer) {
+        if (!AtmosphereFanTransport.supportsCellSize(size)) return;
         var seen = new HashSet<AtmosphereGrid.CellKey<ResourceKey<Level>>>();
         for (var pos : positions) {
             var key = new AtmosphereGrid.CellKey<>(level.dimension(), Math.floorDiv(pos.getX(), size),

@@ -3,7 +3,7 @@
 Minecraft 1.21.1, NeoForge 21.1.250, Java 21. Mod ID: `dynamicatmosphere`.
 MIT licensed.
 
-This documentation describes the combined `0.18.0-alpha.1` release behavior.
+This documentation describes the combined `0.18.1-alpha.1` release behavior.
 
 ## Atmospheric Grid Alpha
 
@@ -11,7 +11,7 @@ This documentation describes the combined `0.18.0-alpha.1` release behavior.
 and can damage terrain and builds. Back up the world before upgrading. There is
 no claim/protected-area integration.**
 
-The server maintains seven independent atmospheric grids. In `0.18.0-alpha.1`,
+The server maintains seven independent atmospheric grids. In `0.18.1-alpha.1`,
 all seven use a shared 200-tick simulation cadence and 300-tick scheduled producer
 cadence. Event producers remain event-driven. Vapor uses world-aligned 4x4x4-block
 cells; the following overview describes Vapor unless stated otherwise.
@@ -32,7 +32,7 @@ boundaries and exhausted work/search budgets leave work pending, never authorize
 pressure destruction, and do not discard material.
 Excess that still cannot escape remains blocked and reported, not discarded;
 displacement is not unlimited.
-In `0.18.0-alpha.1`, all materials use a fixed **200-tick** simulation interval,
+In `0.18.1-alpha.1`, all materials use a fixed **200-tick** simulation interval,
 or **10 seconds** at 20 TPS. Scheduled producers are independent:
 passes are scheduled every **300 ticks** (15 seconds at 20 TPS) across all loaded
 chunks, not just player-offset samples. Each chunk has a random **10% default
@@ -152,7 +152,7 @@ required.
 
 ## Seven Materials
 
-`0.18.0-alpha.1` enables all seven independent materials, each with chunk-persisted
+`0.18.1-alpha.1` enables all seven independent materials, each with chunk-persisted
 server amounts and separate client state. These are active MVP systems, not
 placeholders for future runtime support. Numeric defaults are initial tuning,
 not a claim of balance or measured performance.
@@ -345,6 +345,9 @@ broken blocks; restore the backup to roll back terrain damage. This alpha's
 pressure implementation still requires build and server/client verification.
 
 ## Fans and Configuration
+
+Fans affect only cells up to 4x4x4: Vapor, Smoke, Dust, Exhaust, and Ender Gas.
+The larger Violence and Slime grids are unaffected.
 
 When Create is installed, a rotating Encased Fan can move atmospheric material
 one cell in its facing direction on a separate five-second pass.
