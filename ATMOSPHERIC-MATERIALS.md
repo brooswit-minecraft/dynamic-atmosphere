@@ -3,6 +3,17 @@
 Status: approved for parallel development with performance work. Performance
 fixes remain independently shippable; this document does not indicate deployment.
 
+## Next Release Scope
+
+After the currently deploying fire-only Smoke release, the user requests all
+remaining Smoke sources and behaviors, plus playable Dust and Ender Gas.
+Include their independent grids, colors, LOD limits, production, and previously
+specified effects below: Smoke bursts and fire/lava transitions; Dust gravel
+and water-to-mud conversion; Ender Gas sources, pearl/full-moon bursts, and the
+Enderman-only gas spawn gate. Unknown numeric defaults still need explicit
+implementation choices. Violence, Exhaust, and Slime are not added to this
+release scope by this request. Do not delay or modify the current deployment.
+
 Each material has an independent cell grid, cell size, rendering LOD distances,
 simulation schedule, producer schedule, and rules. Speed multipliers are relative
 to the base schedule. LOD multipliers aggregate that material's base cells;
