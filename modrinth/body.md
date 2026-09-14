@@ -1,6 +1,6 @@
 # Dynamic Atmosphere
 
-**0.15.0-alpha.1** for Minecraft **1.21.1 / NeoForge**, with seven server-owned,
+**0.15.1-alpha.1** for Minecraft **1.21.1 / NeoForge**, with seven server-owned,
 chunk-persisted atmospheric materials and translucent client volumes.
 
 **Destructive pressure is enabled by default and can damage terrain and builds,
@@ -178,7 +178,7 @@ and frustum. Delta sync is every 20 ticks and full snapshots every 200.
 
 ## Installation
 
-Install **0.15.0-alpha.1 on both server and client**, or in a NeoForge 1.21.1
+Install **0.15.1-alpha.1 on both server and client**, or in a NeoForge 1.21.1
 single-player instance. **Protocol 8 requires both sides to update together;
 earlier protocols are incompatible.** No extra graphics dependency is required.
 World identity, scoped snapshots, and chunk freshness distinguish live state from
