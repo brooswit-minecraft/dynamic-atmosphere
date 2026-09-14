@@ -1,6 +1,6 @@
 # Dynamic Atmosphere
 
-**0.16.2-alpha.1** for Minecraft **1.21.1 / NeoForge**, with seven server-owned,
+**0.17.0-alpha.1** for Minecraft **1.21.1 / NeoForge**, with seven server-owned,
 chunk-persisted atmospheric materials and translucent client volumes.
 
 **Destructive pressure is enabled by default and can damage terrain and builds,
@@ -10,7 +10,7 @@ downgrading does not undo these changes. No world reset is required.**
 
 ## Seven Materials
 
-`0.16.2-alpha.1` enables all seven independent materials, each with chunk-persisted
+`0.17.0-alpha.1` enables all seven independent materials, each with chunk-persisted
 server amounts and separate client state. These are active MVP systems, not
 placeholders for future runtime support. Numeric defaults are initial tuning,
 not a claim of balance or measured performance.
@@ -20,7 +20,7 @@ not a claim of balance or measured performance.
 | Vapor | 4 blocks | 200 ticks | Minecraft fog/horizon | 1x |
 | Smoke | 4 blocks | 200 ticks | Black | 4x |
 | Dust | 2 blocks | 200 ticks | Brown | 1x |
-| Ender Gas | 1 block | 200 ticks | Purple | 40x |
+| Ender Gas | 2 blocks | 200 ticks | Purple | 40x |
 | Violence | 8 blocks | 200 ticks | Red | 4x |
 | Exhaust | 2 blocks | 200 ticks | Yellow | 1x |
 | Slime | 16 blocks | 200 ticks | Green | 4x |
@@ -56,8 +56,8 @@ the exact total stored Smoke mass; migrated chunks are saved in the new format.
   Independently, a 1/64 processed-turn roll dissipates up to 40 Dust units.
 - **Ender Gas:** Endermen, endermites, the Ender Dragon, witches, shulkers, ender
   chests, portals/portal occupants, soul torches/fire/sand, Crying Obsidian, and ender-pearl use and
-  impact are sources. Pearl use adds 24 and impact 48. A full-moon loaded-chunk
-  check has a 1/256 chance of an 8,000-unit burst, independent of the Vapor gate.
+  impact are sources. Pearl use adds 24 and impact 48. Random full-moon bursts
+  have been removed; only source-driven emissions remain.
   Natural Endermen require strictly more than 50% local Ender Gas fullness,
   including underground, without consuming it; other normal spawn restrictions
   still apply. Other natural surface hostiles retain the Vapor fullness gate.
@@ -217,8 +217,8 @@ client and server.
 
 ## Installation
 
-Install **0.16.2-alpha.1 on both server and client**, or in a NeoForge 1.21.1
-single-player instance. **Protocol 8 requires both sides to update together;
+Install **0.17.0-alpha.1 on both server and client**, or in a NeoForge 1.21.1
+single-player instance. **Protocol 10 requires both sides to update together;
 earlier protocols are incompatible.** No extra graphics dependency is required.
 World identity, scoped snapshots, and chunk freshness distinguish live state from
 visual history. Existing world/material data and Vapor cache are retained;

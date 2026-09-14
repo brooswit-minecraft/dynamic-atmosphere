@@ -37,7 +37,7 @@ public final class AtmosphericMaterials {
         new MaterialSettings(16, VIOLENCE_LOD, 1, OptionalDouble.of(1), 4),
         Set.of(UNDERGROUND_SLIME_CHUNKS_RANDOMLY), Set.of(MaterialDefinition.Transformation.SLIME));
     public static final MaterialDefinition ENDER_GAS = new MaterialDefinition("ender_gas", PURPLE,
-        new MaterialSettings(1, DUST_LOD, 1, OptionalDouble.of(1), 40),
+        new MaterialSettings(2, DUST_LOD, 1, OptionalDouble.of(1), 40),
         Set.of(NETHER_PORTAL_BLOCKS_SLOWLY, ENDERMEN, ENDERMITES, ENDER_DRAGON,
             ENDER_PEARL_USE, STANDING_IN_NETHER_PORTAL, SOUL_TORCHES, SOUL_FIRES, SOUL_SAND), Set.of());
 

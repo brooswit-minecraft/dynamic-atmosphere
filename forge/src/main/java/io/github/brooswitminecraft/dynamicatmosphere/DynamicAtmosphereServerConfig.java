@@ -91,10 +91,8 @@ public final class DynamicAtmosphereServerConfig {
     private static final IntOption ENDER_PASSIVE;
     private static final IntOption ENDER_PEARL_USE;
     private static final IntOption ENDER_PEARL_IMPACT;
-    private static final IntOption ENDER_FULL_MOON;
     private static final IntOption ENDER_MOB_INTERVAL;
     private static final IntOption ENDER_PORTAL_INTERVAL;
-    private static final IntOption ENDER_MOON_DENOMINATOR;
 
     private static final DoubleOption PLANT_CHANCE;
     private static final IntOption PLANT_COST;
@@ -202,10 +200,8 @@ public final class DynamicAtmosphereServerConfig {
         ENDER_PASSIVE = integer(builder, "passiveBlockEmission", 1, 0, 1_000_000);
         ENDER_PEARL_USE = integer(builder, "pearlUseEmission", 24, 0, 1_000_000);
         ENDER_PEARL_IMPACT = integer(builder, "pearlImpactEmission", 48, 0, 1_000_000);
-        ENDER_FULL_MOON = integer(builder, "fullMoonEmission", 8000, 0, 1_000_000);
         ENDER_MOB_INTERVAL = integer(builder, "mobIntervalTicks", 40, 1, 72000);
         ENDER_PORTAL_INTERVAL = integer(builder, "portalIntervalTicks", 20, 1, 72000);
-        ENDER_MOON_DENOMINATOR = integer(builder, "fullMoonChanceDenominator", 256, 1, 1_000_000);
         builder.pop();
 
         builder.push("plantGrowth");
@@ -258,8 +254,8 @@ public final class DynamicAtmosphereServerConfig {
             new Slime(SLIME_UNDERGROUND.get(), SLIME_UNDERGROUND_DENOMINATOR.get(),
                 SLIME_SPAWN_DENOMINATOR.get(), SLIME_SPAWN_ATTEMPTS.get()),
             new EnderGas(ENDER_MOB.get(), ENDER_PORTAL.get(), ENDER_PASSIVE.get(), ENDER_PEARL_USE.get(),
-                ENDER_PEARL_IMPACT.get(), ENDER_FULL_MOON.get(), ENDER_MOB_INTERVAL.get(),
-                ENDER_PORTAL_INTERVAL.get(), ENDER_MOON_DENOMINATOR.get(), ENDER_PORTAL_BLOCK.get()),
+                ENDER_PEARL_IMPACT.get(), ENDER_MOB_INTERVAL.get(),
+                ENDER_PORTAL_INTERVAL.get(), ENDER_PORTAL_BLOCK.get()),
             new PlantGrowth(PLANT_CHANCE.get(), PLANT_COST.get()),
             new Integrations(CREATE_FAN_RPM_COEFFICIENT.get())
         );
@@ -343,8 +339,8 @@ public final class DynamicAtmosphereServerConfig {
     public record Slime(int undergroundEmission, int undergroundChanceDenominator,
                         int spawnChanceDenominator, int spawnAttempts) { }
     public record EnderGas(int mobEmission, int portalOccupantEmission, int passiveBlockEmission,
-                           int pearlUseEmission, int pearlImpactEmission, int fullMoonEmission,
-                           int mobIntervalTicks, int portalIntervalTicks, int fullMoonChanceDenominator,
+                           int pearlUseEmission, int pearlImpactEmission,
+                           int mobIntervalTicks, int portalIntervalTicks,
                            int portalBlockEmission) { }
     public record PlantGrowth(double chance, int cost) { }
     public record Integrations(double createFanTransportPerRpm) { }

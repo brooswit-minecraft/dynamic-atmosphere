@@ -9,6 +9,7 @@ class MaterialClientTest {
     @Test
     void enderGasIsTenTimesItsPreviousOpticalDensity() {
         assertEquals(40, AtmosphereRenderMaterial.ENDER_GAS.opticalDensityMultiplier);
+        assertEquals(2, AtmosphereRenderMaterial.ENDER_GAS.cellSize);
         assertEquals(4, AtmosphereRenderMaterial.SMOKE.cellSize);
         double oldDepth = -Math.log1p(-AtmosphereVolumeGeometry.sliceAlpha(100, 1, 1, 4));
         double newDepth = -Math.log1p(-AtmosphereVolumeGeometry.sliceAlpha(100, 1, 1, 40));
@@ -90,13 +91,14 @@ class MaterialClientTest {
         var scope = List.of(new AtmosphereClientCache.Chunk(0, 0), new AtmosphereClientCache.Chunk(1, 0));
         dust.receive(WORLD, DIMENSION, true, true, scope, List.of(update(8, 200)));
         ender.receive(WORLD, DIMENSION, true, true, scope, List.of(update(8, 700)));
-        // x=8 is chunk 1 for Dust, but chunk 0 for Ender Gas.
+        // x=8 is chunk 1 for both two-block grids, but their scopes remain independent.
         dust.receive(WORLD, DIMENSION, true, false, List.of(new AtmosphereClientCache.Chunk(1, 0)), List.of());
         assertEquals(200, dust.cache().storedAmount(update(8, 0).cell()));
         dust.receive(WORLD, DIMENSION, false, true, List.of(), List.of());
-        ender.receive(WORLD, DIMENSION, true, true, List.of(new AtmosphereClientCache.Chunk(1, 0)), List.of());
         assertEquals(0, dust.cache().storedAmount(update(8, 0).cell()));
         assertEquals(700, ender.cache().storedAmount(update(8, 0).cell()));
+        ender.receive(WORLD, DIMENSION, true, true, List.of(new AtmosphereClientCache.Chunk(1, 0)), List.of());
+        assertEquals(0, ender.cache().storedAmount(update(8, 0).cell()));
     }
 
     @Test

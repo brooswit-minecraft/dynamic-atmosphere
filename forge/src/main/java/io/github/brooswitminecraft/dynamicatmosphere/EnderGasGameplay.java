@@ -20,20 +20,18 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.NetherPortalBlock;
 import net.minecraft.world.level.chunk.LevelChunk;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 import net.neoforged.neoforge.event.entity.ProjectileImpactEvent;
 import net.neoforged.neoforge.event.tick.EntityTickEvent;
 
 /**
- * Bounded Ender Gas producers. Passive block and full-moon methods are called
- * only from an existing loaded-chunk producer schedule; this class never scans
- * the loaded world or requests a chunk.
+ * Bounded Ender Gas producers. Passive blocks and palette-filtered portal sections
+ * are checked only from the loaded-chunk producer schedule; no chunks are requested.
  *
  * <p>Conservative MVP amounts: listed mobs 1/40 ticks, portal occupancy 2/20
- * ticks, passive source sample 1, pearl use 24, pearl impact 48, and full-moon
- * burst 8,000 after an independent 1/256 roll per scheduled chunk check.</p>
+ * ticks, passive source sample 1, pearl use 24, pearl impact 48, and 100 per portal
+ * block per scheduled producer pass. Random sky bursts are not produced.</p>
  */
 public final class EnderGasGameplay {
     private static final Set<ResourceLocation> PASSIVE_SOURCE_IDS = Set.of(
@@ -50,10 +48,8 @@ public final class EnderGasGameplay {
     static final int PASSIVE_BLOCK_AMOUNT = 1;
     static final int PEARL_USE_AMOUNT = 24;
     static final int PEARL_IMPACT_AMOUNT = 48;
-    static final int FULL_MOON_BURST_AMOUNT = 8_000;
     static final int MOB_INTERVAL_TICKS = 40;
     static final int PORTAL_INTERVAL_TICKS = 20;
-    static final int FULL_MOON_CHANCE_DENOMINATOR = 256;
 
     private final Set<UUID> impactedPearls = new HashSet<>();
 
@@ -68,10 +64,6 @@ public final class EnderGasGameplay {
 
     static boolean isPassiveSourceId(ResourceLocation id) {
         return PASSIVE_SOURCE_IDS.contains(id);
-    }
-
-    static boolean fullMoonBurst(boolean night, int moonPhase, int roll) {
-        return night && moonPhase == 0 && roll == 0;
     }
 
     public void onEntityTick(EntityTickEvent.Post event) {
@@ -104,14 +96,6 @@ public final class EnderGasGameplay {
     public void onLoadedChunkProducerCheck(ServerLevel level, LevelChunk chunk) {
         DynamicAtmosphereServerConfig.EnderGas config = DynamicAtmosphereServerConfig.snapshot().enderGas();
         emitPortals(level, chunk, config.portalBlockEmission());
-        int roll = level.random.nextInt(config.fullMoonChanceDenominator());
-        if (!fullMoonBurst(level.isNight(), level.dimensionType().moonPhase(level.getDayTime()), roll)) return;
-        int x = chunk.getPos().getMinBlockX() + level.random.nextInt(16);
-        int z = chunk.getPos().getMinBlockZ() + level.random.nextInt(16);
-        int y = chunk.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x & 15, z & 15) + 1;
-        DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.ENDER_GAS,
-            new BlockPos(x, Math.clamp(y, level.getMinBuildHeight(), level.getMaxBuildHeight() - 1), z),
-            config.fullMoonEmission());
     }
 
     public void onEntityJoin(EntityJoinLevelEvent event) {
@@ -154,7 +138,7 @@ public final class EnderGasGameplay {
                 if (!state.is(Blocks.NETHER_PORTAL)) continue;
                 var pos = new BlockPos(chunk.getPos().getMinBlockX() + x, baseY + y, chunk.getPos().getMinBlockZ() + z);
                 Direction normal = portalNormal(state.getValue(NetherPortalBlock.AXIS));
-                // Portal blocks themselves are not vacant one-block cells; emit on their open faces.
+                // Emit on portal faces, where neighboring air provides capacity.
                 DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.ENDER_GAS,
                     pos.relative(normal), amount / 2);
                 DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.ENDER_GAS,

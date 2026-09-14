@@ -6,7 +6,7 @@ import net.minecraft.network.codec.StreamCodec;
 /** Additional atmospheric materials introduced after the dedicated Vapor and Smoke formats. */
 public enum AtmosphereMaterial {
     DUST("dust", 2),
-    ENDER_GAS("ender_gas", 1),
+    ENDER_GAS("ender_gas", 2),
     VIOLENCE("violence", 8),
     EXHAUST("exhaust", 2),
     SLIME("slime", 16);

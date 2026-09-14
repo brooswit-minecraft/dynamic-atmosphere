@@ -1,3 +1,10 @@
+# 0.17.0-alpha.1
+
+- Increase Ender Gas cells from 1x1x1 to 2x2x2 on the server and client. No other material used one-block cells.
+- Merge existing one-block Ender Gas cells into aligned two-block cells when chunks load, preserving amounts. Corrupt or unrepresentably large merges retain their original data instead of truncating it.
+- Remove random full-moon Ender Gas bursts and their configuration fields. Portal, mob, block-source, and pearl emissions remain.
+- Protocol 10 requires matching updated client and server; no world reset is needed.
+
 # 0.16.2-alpha.1
 
 - Find portal blocks in loaded sections using palette-gated scans, emitting Ender Gas on both faces instead of into occupied portal cells. `enderGas.portalBlockEmission` defaults to 100 per portal block per producer pass; zero disables this source.

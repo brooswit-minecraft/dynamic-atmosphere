@@ -3,7 +3,7 @@
 Minecraft 1.21.1, NeoForge 21.1.250, Java 21. Mod ID: `dynamicatmosphere`.
 MIT licensed.
 
-This documentation describes the combined `0.16.2-alpha.1` release behavior.
+This documentation describes the combined `0.17.0-alpha.1` release behavior.
 
 ## Atmospheric Grid Alpha
 
@@ -11,7 +11,7 @@ This documentation describes the combined `0.16.2-alpha.1` release behavior.
 and can damage terrain and builds. Back up the world before upgrading. There is
 no claim/protected-area integration.**
 
-The server maintains seven independent atmospheric grids. In `0.16.2-alpha.1`,
+The server maintains seven independent atmospheric grids. In `0.17.0-alpha.1`,
 all seven use a shared 200-tick simulation cadence and 300-tick scheduled producer
 cadence. Event producers remain event-driven. Vapor uses world-aligned 4x4x4-block
 cells; the following overview describes Vapor unless stated otherwise.
@@ -32,7 +32,7 @@ boundaries and exhausted work/search budgets leave work pending, never authorize
 pressure destruction, and do not discard material.
 Excess that still cannot escape remains blocked and reported, not discarded;
 displacement is not unlimited.
-In `0.16.2-alpha.1`, all materials use a fixed **200-tick** simulation interval,
+In `0.17.0-alpha.1`, all materials use a fixed **200-tick** simulation interval,
 or **10 seconds** at 20 TPS. Scheduled producers are independent:
 passes are scheduled every **300 ticks** (15 seconds at 20 TPS) across all loaded
 chunks, not just player-offset samples. Each chunk has a random **10% default
@@ -111,7 +111,7 @@ units; capacity remains 0..1000.
 
 Install this version on **both server and client**, or in a single-player NeoForge
 instance. Earlier particle-only releases did not require a client installation;
-the new grid renderer and sync protocol do. **Protocol 8 requires updating both
+the new grid renderer and sync protocol do. **Protocol 10 requires updating both
 sides together; earlier-protocol clients cannot connect.** Large snapshots use
 512-cell packets and a completion marker. Snapshot scope and chunk freshness
 distinguish current observations from retained visual history. There is no
@@ -152,7 +152,7 @@ required.
 
 ## Seven Materials
 
-`0.16.2-alpha.1` enables all seven independent materials, each with chunk-persisted
+`0.17.0-alpha.1` enables all seven independent materials, each with chunk-persisted
 server amounts and separate client state. These are active MVP systems, not
 placeholders for future runtime support. Numeric defaults are initial tuning,
 not a claim of balance or measured performance.
@@ -162,7 +162,7 @@ not a claim of balance or measured performance.
 | Vapor | 4 blocks | 200 ticks | Minecraft fog/horizon | 1x |
 | Smoke | 4 blocks | 200 ticks | Black | 4x |
 | Dust | 2 blocks | 200 ticks | Brown | 1x |
-| Ender Gas | 1 block | 200 ticks | Purple | 40x |
+| Ender Gas | 2 blocks | 200 ticks | Purple | 40x |
 | Violence | 8 blocks | 200 ticks | Red | 4x |
 | Exhaust | 2 blocks | 200 ticks | Yellow | 1x |
 | Slime | 16 blocks | 200 ticks | Green | 4x |
@@ -170,7 +170,10 @@ not a claim of balance or measured performance.
 Intervals are scheduled game ticks, subject to bounded work queues, not guaranteed
 wall-clock completion. Scheduled producer passes share a 300-tick cadence. All
 materials have a configurable 75% due-check skip; Vapor retains condensation.
-Material amounts do not combine across identities. Only Vapor uses the persistent
+Material amounts do not combine across identities. Ender Gas legacy one-block cells merge into aligned
+two-block cells on chunk load, preserving material. Invalid or oversized merges
+retain the original data and skip that chunk rather than silently truncating it.
+Only Vapor uses the persistent
 client visual disk cache; the other six keep independent session-only visual caches.
 Legacy 8-block Smoke cells are split into aligned 4-block children on load. Integer
 remainders are distributed among children so total stored Smoke mass is preserved,
@@ -198,8 +201,8 @@ and migrated chunks are saved in the new format.
   Independently, a 1/64 processed-turn roll dissipates up to 40 Dust units.
 - **Ender Gas:** Endermen, endermites, the Ender Dragon, witches, shulkers, ender
   chests, portals/portal occupants, soul torches/fire/sand, Crying Obsidian, and ender-pearl use and
-  impact are sources. Pearl use adds 24 and impact 48. A full-moon loaded-chunk
-  check has a 1/256 chance of an 8,000-unit burst, independent of the Vapor gate.
+  impact are sources. Pearl use adds 24 and impact 48. Random full-moon bursts
+  have been removed; only source-driven emissions remain.
   Natural Endermen require strictly more than 50% local Ender Gas fullness,
   including underground, without consuming it; other normal spawn restrictions
   still apply. Other natural surface hostiles retain the Vapor fullness gate.

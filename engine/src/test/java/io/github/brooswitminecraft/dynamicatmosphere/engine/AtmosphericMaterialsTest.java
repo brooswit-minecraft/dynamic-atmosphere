@@ -27,7 +27,7 @@ class AtmosphericMaterialsTest {
     void catalogMatchesIndependentSizesColorsAndSimulationSpeeds() {
         assertEquals(List.of("vapor", "dust", "smoke", "violence", "exhaust", "slime", "ender_gas"),
             AtmosphericMaterials.ALL.stream().map(MaterialDefinition::id).toList());
-        assertEquals(List.of(4, 2, 4, 8, 2, 16, 1),
+        assertEquals(List.of(4, 2, 4, 8, 2, 16, 2),
             AtmosphericMaterials.ALL.stream().map(m -> m.settings().cellSize()).toList());
         assertEquals(java.util.Collections.nCopies(7, 1.0),
             AtmosphericMaterials.ALL.stream().map(m -> m.settings().simulationSpeed()).toList());

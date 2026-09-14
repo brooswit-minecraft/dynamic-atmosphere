@@ -27,14 +27,6 @@ class EnderGasGameplayTest {
     }
 
     @Test
-    void fullMoonBurstRequiresNightFullPhaseAndExactIndependentRoll() {
-        assertTrue(EnderGasGameplay.fullMoonBurst(true, 0, 0));
-        assertFalse(EnderGasGameplay.fullMoonBurst(false, 0, 0));
-        assertFalse(EnderGasGameplay.fullMoonBurst(true, 1, 0));
-        assertFalse(EnderGasGameplay.fullMoonBurst(true, 0, 1));
-    }
-
-    @Test
     void futureNaturalEndermanGateUsesOnlyStrictPurpleDecision() {
         assertTrue(EnderGasSpawnGate.denies(true, true, false));
         assertFalse(EnderGasSpawnGate.denies(true, true, true));

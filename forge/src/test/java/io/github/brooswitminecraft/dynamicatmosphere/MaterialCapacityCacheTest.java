@@ -56,13 +56,13 @@ class MaterialCapacityCacheTest {
         var dust = new MaterialCapacityCache(AtmosphereMaterial.DUST, -64, 320);
         var ender = new MaterialCapacityCache(AtmosphereMaterial.ENDER_GAS, -64, 320);
         dust.put(7, 32, 7, 500, false);
-        ender.put(15, 64, 15, 1000, false);
+        ender.put(7, 32, 7, 1000, false);
 
         dust.blockChanged(15, 64, 15, true, false, false, false);
         ender.blockChanged(15, 64, 15, true, false, false, false);
 
         assertEquals(-1, dust.get(7, 32, 7));
-        assertEquals(-1, ender.get(15, 64, 15));
+        assertEquals(-1, ender.get(7, 32, 7));
     }
 
     @Test

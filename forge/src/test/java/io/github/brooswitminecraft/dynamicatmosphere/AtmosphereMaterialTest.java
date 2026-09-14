@@ -11,7 +11,7 @@ class AtmosphereMaterialTest {
     @Test
     void layoutsUseIndependentCellSizesAndNegativeCoordinates() {
         assertEquals(2, AtmosphereMaterial.DUST.cellSize());
-        assertEquals(1, AtmosphereMaterial.ENDER_GAS.cellSize());
+        assertEquals(2, AtmosphereMaterial.ENDER_GAS.cellSize());
         assertEquals(8, AtmosphereMaterial.VIOLENCE.cellSize());
         assertEquals(2, AtmosphereMaterial.EXHAUST.cellSize());
         assertEquals(16, AtmosphereMaterial.SLIME.cellSize());
@@ -19,7 +19,7 @@ class AtmosphereMaterialTest {
         assertEquals(-1, AtmosphereMaterial.DUST.chunkCoordinate(-1));
         assertEquals(-2, AtmosphereMaterial.DUST.chunkCoordinate(-9));
         assertEquals(-1, AtmosphereMaterial.ENDER_GAS.chunkCoordinate(-1));
-        assertEquals(-2, AtmosphereMaterial.ENDER_GAS.chunkCoordinate(-17));
+        assertEquals(-2, AtmosphereMaterial.ENDER_GAS.chunkCoordinate(-9));
     }
 
     @Test
@@ -47,7 +47,8 @@ class AtmosphereMaterialTest {
     @Test
     void capacityScalesToEachCellVolume() {
         assertEquals(500, AtmosphereMaterial.DUST.capacityForAirBlocks(4));
-        assertEquals(1000, AtmosphereMaterial.ENDER_GAS.capacityForAirBlocks(1));
+        assertEquals(125, AtmosphereMaterial.ENDER_GAS.capacityForAirBlocks(1));
+        assertEquals(1000, AtmosphereMaterial.ENDER_GAS.capacityForAirBlocks(8));
         assertEquals(0, AtmosphereMaterial.ENDER_GAS.capacityForAirBlocks(0));
         assertEquals(500, AtmosphereMaterial.VIOLENCE.capacityForAirBlocks(256));
         assertEquals(500, AtmosphereMaterial.EXHAUST.capacityForAirBlocks(4));
