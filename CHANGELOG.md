@@ -1,3 +1,9 @@
+# 0.12.2-alpha.1
+
+- Fix phantom atmospheric emissions from moving water: wrap the vanilla fluid tick, including Flowing Fluids 1.0.6's injected transport, in an exception-safe nested scope. No stack inspection or per-mutation allocation. No Flowing Fluids dependency is required.
+- Suppress removal emissions only inside that transport scope. Direct buckets/removals, block replacements, and scheduled evaporation outside transport retain humidity-scaled emissions. Preserve 300-tick/10% producers, 200-tick simulation, uniform fog color, and side/down-only tiny-cell cleanup.
+- Existing accumulated atmosphere and work backlog are retained, not cleared; no world reset or migration is performed. Add focused guard regressions and pre-publication CI production-jar boots without and with pinned Flowing Fluids.
+
 # 0.12.1-alpha.1
 
 - Restrict tiny-cell cleanup to the four horizontal neighbors and the neighbor below; never consolidate upward. Ordinary six-face spreading is unchanged. Keep the <=10 threshold, strictly larger occupied destination, full free-capacity requirement, and conservative persisted/synchronized transfer.

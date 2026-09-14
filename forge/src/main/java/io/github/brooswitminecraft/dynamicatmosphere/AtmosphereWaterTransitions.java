@@ -21,6 +21,7 @@ public final class AtmosphereWaterTransitions {
     }
 
     public static void observe(LevelChunk chunk, BlockPos pos, BlockState previous, BlockState next) {
+        if (AtmosphereFluidTransport.active()) return;
         if (!(chunk.getLevel() instanceof ServerLevel level) || !level.getServer().isSameThread()) return;
         if (previous == null || !previous.getFluidState().is(FluidTags.WATER)
             || next.getFluidState().is(FluidTags.WATER)) return;
@@ -55,7 +56,8 @@ public final class AtmosphereWaterTransitions {
 
     static int materialForTransition(boolean mutationSucceeded, boolean previousWater, boolean nextWater,
                                      double downfall) {
-        return mutationSucceeded && previousWater && !nextWater ? materialForHumidity(downfall) : 0;
+        return !AtmosphereFluidTransport.active() && mutationSucceeded && previousWater && !nextWater
+            ? materialForHumidity(downfall) : 0;
     }
 
     static <K> void coalesce(Map<K, Pending> pending, K key, int material) {

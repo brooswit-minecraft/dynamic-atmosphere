@@ -4,7 +4,8 @@
   "package": "io.github.brooswitminecraft.dynamicatmosphere.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "LevelChunkWaterTransitionMixin"
+    "LevelChunkWaterTransitionMixin",
+    "FlowingFluidTransportMixin"
   ],
   "injectors": {
     "defaultRequire": 1

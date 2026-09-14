@@ -24,7 +24,7 @@ boundaries and exhausted work/search budgets leave work pending, never authorize
 pressure destruction, and do not discard material.
 Excess that still cannot escape remains blocked and reported, not discarded;
 displacement is not unlimited.
-In 0.12.1-alpha.1, simulation retains a fixed **200-tick** interval, or **10 seconds**
+In 0.12.2-alpha.1, simulation retains a fixed **200-tick** interval, or **10 seconds**
 at 20 TPS, replacing the size-based 250-tick cadence. Producers are independent:
 passes are scheduled every **300 ticks** (15 seconds at 20 TPS) across all loaded
 chunks, not just player-offset samples. Each chunk has a random **10% default
@@ -56,12 +56,19 @@ The mod does not create rain or change the world's weather.
 After the outer 10% chunk gate, scheduled water evaporation gets a second chance
 of `clamp(biome temperature / 2, 0, 1)`: temperature 0.8 gives 40%, 2 gives 100%,
 and 0 or below never evaporates. Only the scheduled producer uses this roll.
-Every successful water-to-nonwater mutation, including manual removals, emits
+Every successful non-transport water-to-nonwater mutation, including manual removals, emits
 `round(10 + 70 * clamp(biome downfall, 0, 1))` material units (10 dry to 80 wet).
 Downfall is a biome humidity proxy, not instantaneous rain or weather; climate
 comes from the loaded chunk's biome. Humidity is captured at removal and queued
 amounts are added without a second producer emission. Ordinary water-level
 changes, failed mutations, and chunk unloads do not trigger this source.
+
+Fluid transport during vanilla/Flowing Fluids fluid ticks does not emit removal
+material. The fluid-tick scope includes Flowing Fluids 1.0.6's injected movement
+and always clears on return or exception. Direct bucket/removal, block replacement,
+and scheduled atmospheric evaporation outside transport still emit by humidity.
+This fix does not delete accumulated atmosphere or reset worlds; existing material
+and simulation backlog remain.
 
 Exposed non-fluid ground also emits according to effective light: zero at light
 15, rising to 40 units per pass at light 0. This uses the day/night-adjusted sky
@@ -142,7 +149,7 @@ rebuild it. While a new view is being refined, aligned 32-block cached volumes
 provide temporary coverage; unloaded near chunks use 16-block cached fallback.
 Neither fallback overlaps its detailed descendants.
 
-In 0.12.1-alpha.1, every near, far, and fallback volume uses Minecraft's current
+In 0.12.2-alpha.1, every near, far, and fallback volume uses Minecraft's current
 fog/horizon color, sampled once per render frame. There is no local light-based
 grayscale, distance color blend, or client terrain-light sampling cache.
 Constant RGB with no depth writes makes atmospheric alpha order-independent;
