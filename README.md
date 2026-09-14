@@ -3,20 +3,27 @@
 Minecraft 1.21.1, NeoForge 21.1.250, Java 21. Mod ID: `dynamicatmosphere`.
 MIT licensed.
 
+This documentation describes the combined `0.16.0-alpha.1` release behavior.
+
 ## Atmospheric Grid Alpha
 
 **BREAKING behavior in 0.6.0-alpha.1: pressure destruction is enabled by default
 and can damage terrain and builds. Back up the world before upgrading. There is
 no claim/protected-area integration.**
 
-The server maintains seven independent atmospheric grids. Vapor uses world-aligned
-4x4x4-block cells; the following overview describes Vapor unless stated otherwise.
+The server maintains seven independent atmospheric grids. In `0.16.0-alpha.1`,
+all seven use a shared 200-tick simulation cadence and 300-tick scheduled producer
+cadence. Event producers remain event-driven. Vapor uses world-aligned 4x4x4-block
+cells; the following overview describes Vapor unless stated otherwise.
 Water fog, high-terrain clouds, rain-driven cloud-height emissions, and dark exposed
 ground add material to their cells. There is no natural decay: material spreads
 by equalizing fullness across the six face-adjacent cells, not diagonally.
-Capacity is proportional to the number of air blocks in each cell (0..64).
+Capacity is proportional to vacant volume. Air and liquid blocks count as vacant;
+waterlogged hosts remain occupied.
 Fullness is material amount divided by capacity: fewer vacant blocks need less
-material to fill. Transfer uses positive-capacity neighbors; zero-air cells block it.
+material to fill. Transfer uses positive-capacity neighbors; zero-capacity cells
+block it. Any fluid, including flowing fluid or waterlogging, blocks downward
+transfer from its source cell, as does bedrock; sideways and upward transfer remain.
 If terrain reduces capacity below the stored amount, excess is pushed farther
 outward toward the nearest available capacity through neighboring air-capacity
 cells. This search is bounded to the loaded active region. Confirmed blockage
@@ -25,8 +32,8 @@ boundaries and exhausted work/search budgets leave work pending, never authorize
 pressure destruction, and do not discard material.
 Excess that still cannot escape remains blocked and reported, not discarded;
 displacement is not unlimited.
-In 0.15.0-alpha.1, Vapor simulation retains a fixed **200-tick** interval, or **10 seconds**
-at 20 TPS, replacing the size-based 250-tick cadence. Producers are independent:
+In `0.16.0-alpha.1`, all materials use a fixed **200-tick** simulation interval,
+or **10 seconds** at 20 TPS. Scheduled producers are independent:
 passes are scheduled every **300 ticks** (15 seconds at 20 TPS) across all loaded
 chunks, not just player-offset samples. Each chunk has a random **10% default
 gate**, with one random X/Z column per pass. A bounded fair queue permits backlog,
@@ -145,7 +152,7 @@ required.
 
 ## Seven Materials
 
-0.15.0-alpha.1 enables all seven independent materials, each with chunk-persisted
+`0.16.0-alpha.1` enables all seven independent materials, each with chunk-persisted
 server amounts and separate client state. These are active MVP systems, not
 placeholders for future runtime support. Numeric defaults are initial tuning,
 not a claim of balance or measured performance.
@@ -153,17 +160,21 @@ not a claim of balance or measured performance.
 | Material | Base cell edge | Scheduled simulation interval | Color | Optical density |
 | --- | --- | --- | --- | --- |
 | Vapor | 4 blocks | 200 ticks | Minecraft fog/horizon | 1x |
-| Smoke | 8 blocks | 200 ticks | Black | 4x |
-| Dust | 2 blocks | 50 ticks | Brown | 1x |
-| Ender Gas | 1 block | 25 ticks | Purple | 4x |
+| Smoke | 4 blocks | 200 ticks | Black | 4x |
+| Dust | 2 blocks | 200 ticks | Brown | 1x |
+| Ender Gas | 1 block | 200 ticks | Purple | 40x |
 | Violence | 8 blocks | 200 ticks | Red | 4x |
-| Exhaust | 2 blocks | 50 ticks | Yellow | 1x |
-| Slime | 16 blocks | 400 ticks | Green | 4x |
+| Exhaust | 2 blocks | 200 ticks | Yellow | 1x |
+| Slime | 16 blocks | 200 ticks | Green | 4x |
 
 Intervals are scheduled game ticks, subject to bounded work queues, not guaranteed
-wall-clock completion. Vapor retains its 50% due-check skip and condensation.
+wall-clock completion. Scheduled producer passes share a 300-tick cadence. Vapor
+retains its 50% due-check skip and condensation.
 Material amounts do not combine across identities. Only Vapor uses the persistent
 client visual disk cache; the other six keep independent session-only visual caches.
+Legacy 8-block Smoke cells are split into aligned 4-block children on load. Integer
+remainders are distributed among children so total stored Smoke mass is preserved,
+and migrated chunks are saved in the new format.
 
 ### Producers and Effects
 
@@ -171,10 +182,11 @@ client visual disk cache; the other six keep independent session-only visual cac
   torches 2 per producer check. Explosions add an 80-unit burst plus 10 for each
   successfully destroyed block. Fire/lava presence transitions also emit; ordinary
   fire-age/fluid-level changes and scoped fluid transport do not duplicate them.
-  Per processed Smoke turn, independent rolls can remove one leaf (10%), turn
-  farmland into dirt (1/128), or change an eligible villager to a nitwit (1/256).
+  Per processed Smoke turn, independent rolls can remove one leaf (100%), turn
+  farmland into dirt (10/128), or change an eligible villager to a nitwit (10/256).
   Each successful effect costs 40 units. The profession change invalidates trades;
-  farmland conversion can affect crops.
+  farmland conversion can affect crops. An independent 10/64 roll dissipates up to
+  40 Smoke. These chances are 10x their earlier defaults and capped at 100%.
 - **Dust:** movement, running, jumping, landing, fall damage, block breaking,
   placement, and falling-block landing produce Dust. Initial amounts include
   walking 1, running 3, jumping 8, landing 6, breaking 16, and placement 12.
@@ -185,7 +197,7 @@ client visual disk cache; the other six keep independent session-only visual cac
   rounded down with a minimum of 1 unit.
   Independently, a 1/64 processed-turn roll dissipates up to 40 Dust units.
 - **Ender Gas:** Endermen, endermites, the Ender Dragon, witches, shulkers, ender
-  chests, portals/portal occupants, soul torches/fire/sand, and ender-pearl use and
+  chests, portals/portal occupants, soul torches/fire/sand, Crying Obsidian, and ender-pearl use and
   impact are sources. Pearl use adds 24 and impact 48. A full-moon loaded-chunk
   check has a 1/256 chance of an 8,000-unit burst, independent of the Vapor gate.
   Natural Endermen require strictly more than 50% local Ender Gas fullness,
@@ -226,9 +238,9 @@ render distance from the viewer:
 
 | Distance band | Vapor volume | Smoke volume |
 | --- | --- | --- |
-| `d <= V/2` | 4x4x4 blocks | 8x8x8 blocks |
-| `V/2 < d <= V` | 8x8x8 blocks | 16x16x16 blocks |
-| `V < d <= 2V` | 16x16x16 blocks | 32x32x32 blocks |
+| `d <= V/2` | 4x4x4 blocks | 4x4x4 blocks |
+| `V/2 < d <= V` | 8x8x8 blocks | 8x8x8 blocks |
+| `V < d <= 2V` | 16x16x16 blocks | 16x16x16 blocks |
 | `d > 2V` | Not rendered | Not rendered |
 
 Violence and Slime use base cells through V and 2x cells through 2V, with nothing
@@ -238,8 +250,15 @@ beyond. These cutoffs include cached fallback geometry and preserve stored cache
 Each coarser volume recursively averages eight children, counting empty volumes
 in that average rather than averaging only occupied children. Coverage does not
 overlap: a coarse parent is not drawn over its finer children. The coarser bands
-reduce the number of rendered volumes and slices at distance; actual performance
+reduce the number of independently selected volumes at distance; actual performance
 requires user verification, and no measured FPS improvement is claimed here.
+
+Every rendered LOD uses camera-facing slices spaced at
+`baseCellSize / slicesPerBaseCell`, including aggregated distant volumes. A 2x or
+4x volume therefore receives proportionally more slices across its larger depth;
+there is no distant one-slice optimization. Aggregation, hard distance cutoffs,
+non-overlapping parent selection, and thickness-integrated optical density remain
+unchanged, preserving visual detail and total density through the far bands.
 
 Bands use aligned parent decisions, so boundary-crossing volumes can remain finer.
 Selection is cached in 16-block camera regions and queries only nearby cached
@@ -255,15 +274,14 @@ grayscale, distance color blend, or client terrain-light sampling cache.
 The other six materials use the colors in the table above. Vapor-only frames retain
 the constant-color unsorted path; mixed-material slices are merged back-to-front
 through shared bounded GPU batches. Mixed colors are not order-independent.
-Smoke, Ender Gas, Violence, and Slime multiply optical density by four before
-thickness-integrated alpha, not per-triangle alpha. This changes rendering only,
-not material amounts, capacity, or simulation fullness.
+Smoke, Violence, and Slime multiply optical density by four before
+thickness-integrated alpha; Ender Gas uses 40x. This changes rendering only, not
+material amounts, capacity, or simulation fullness.
 
-In 0.13.1-alpha.1, detailed 4-block volumes use four 1-block camera-facing
-slices instead of eight 0.5-block slices. Alpha remains integrated over each
-slice's thickness, preserving total optical density while reducing translucent
-geometry and blend layers. Zero-density volumes exit before geometry allocation.
-Detailed Smoke uses the same geometry helper with its eight-block base size.
+With the default four slices per base cell, 4-block Vapor and Smoke cells use
+1-block slice spacing at every LOD. Alpha remains integrated over each slice's
+thickness, preserving total optical density. Zero-density volumes exit before
+geometry allocation.
 Actual performance and in-game appearance remain for user verification.
 
 LOD changes rendering only. Vapor simulation uses 4x4x4-block cells and
@@ -322,6 +340,27 @@ blocked and reported rather than deleting it.
 Back up existing worlds before upgrading. Downgrading the mod does not restore
 broken blocks; restore the backup to roll back terrain damage. This alpha's
 pressure implementation still requires build and server/client verification.
+
+## Fans and Configuration
+
+When Create is installed, a rotating Encased Fan can move atmospheric material
+one cell in its facing direction during that source cell's simulation turn.
+Requested movement is `floor(abs(RPM) * createFanTransportPerRpm)`, defaulting to
+0.10 units per RPM. Reverse RPM does not reverse direction. Actual movement is
+bounded by source material, destination spare capacity, loaded/readable terrain,
+and the same liquid and bedrock downward barriers as ordinary transport.
+
+Server gameplay, cadence, work-budget, and fan settings live in the world's
+`serverconfig/dynamicatmosphere-server.toml`. On a dedicated server this is
+normally `<world>/serverconfig/dynamicatmosphere-server.toml`. Client rendering,
+reach, optical density, and allocation settings live in
+`config/dynamicatmosphere-client.toml` under the game directory. Runtime code
+reads immutable configuration snapshots; NeoForge config reloads replace those
+snapshots, so exposed server settings and client presentation settings apply
+without restarting. The client `allocation.cellBudget` setting is the exception
+and requires a game restart. Structural cell sizes, storage formats, and network
+protocol are intentionally not configurable and change only with a matching mod
+update on both sides.
 
 ## Development
 

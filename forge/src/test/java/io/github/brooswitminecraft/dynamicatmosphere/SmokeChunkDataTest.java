@@ -24,10 +24,23 @@ class SmokeChunkDataTest {
     @Test
     void rejectsCellsOutsideOwningChunkAndDuplicatePositions() {
         assertThrows(IllegalArgumentException.class, () -> SmokeChunkData.validate(
-            0, 0, -64, 320, List.of(new SmokeChunkData.Cell(2, 8, 0, 40))));
+            0, 0, -64, 320, List.of(new SmokeChunkData.Cell(4, 8, 0, 40))));
         assertThrows(IllegalArgumentException.class, () -> SmokeChunkData.validate(
             0, 0, -64, 320, List.of(
                 new SmokeChunkData.Cell(0, 8, 0, 40),
                 new SmokeChunkData.Cell(0, 8, 0, 80))));
+    }
+
+    @Test
+    void legacyMigrationPreservesAmountsAndNegativeWorldCoordinates() {
+        var cells = SmokeChunkData.migrateLegacy(-1, -1, -64, 320,
+            new int[] {-1, -8, -1, 83});
+        assertEquals(8, cells.size());
+        assertEquals(83, cells.stream().mapToInt(SmokeChunkData.Cell::amount).sum());
+        assertEquals(cells, SmokeChunkData.validate(-1, -1, -64, 320, cells));
+        assertEquals(1, SmokeChunkData.migrateLegacy(0, 0, -64, 320,
+            new int[] {0, 0, 0, 1}).size());
+        assertThrows(IllegalArgumentException.class, () -> SmokeChunkData.migrateLegacy(0, 0, -64, 320,
+            new int[] {2, 0, 0, 1}));
     }
 }

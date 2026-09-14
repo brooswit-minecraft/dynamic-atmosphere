@@ -13,11 +13,20 @@ class SmokeDissipationTest {
     }
 
     @Test
-    void chanceHasExactOneIn64Boundary() {
-        assertEquals(40, SmokeDissipation.amount(40, () -> Math.nextDown(1.0 / 64)));
-        for (double roll : new double[]{1.0 / 64, 0.5, 1, Double.NaN, -1}) {
+    void chanceHasExactBoostedBoundary() {
+        assertEquals(40, SmokeDissipation.amount(40, () -> Math.nextDown(10.0 / 64)));
+        for (double roll : new double[]{10.0 / 64, 0.5, 1, Double.NaN, -1}) {
             assertEquals(0, SmokeDissipation.amount(40, () -> roll));
         }
+    }
+
+    @Test
+    void defaultIsTenTimesOriginalAndOverloadAcceptsConfiguredChance() {
+        assertEquals(10.0 / 64, SmokeDissipation.CHANCE);
+        assertEquals(40, SmokeDissipation.amount(40, 0.25, () -> Math.nextDown(0.25)));
+        assertEquals(0, SmokeDissipation.amount(40, 0.25, () -> 0.25));
+        assertEquals(7, SmokeDissipation.amount(40, 1.0, 7, () -> 0));
+        assertThrows(IllegalArgumentException.class, () -> SmokeDissipation.amount(40, Double.NaN, () -> 0));
     }
 
     @Test

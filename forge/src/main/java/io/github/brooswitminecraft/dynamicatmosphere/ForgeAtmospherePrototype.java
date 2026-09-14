@@ -55,19 +55,11 @@ final class ForgeAtmospherePrototype {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
-    private static final int SYNC_INTERVAL = 20;
-    private static final int FULL_SNAPSHOT_INTERVAL = 200;
-    private static final int HIGH_TERRAIN_ABOVE_SEA = 24;
+    private static DynamicAtmosphereServerConfig.Snapshot tuning() {
+        return DynamicAtmosphereServerConfig.snapshot();
+    }
+
     private static final int DEMO_PARTICLE_CAP = 24;
-    private static final int MAX_CHUNK_IMPORTS_PER_TICK = 8;
-    private static final int MAX_PRODUCER_CHUNKS_PER_TICK = 32;
-    private static final double PRODUCER_CHANCE = 0.10;
-    private static final int HIGH_TERRAIN_EMISSION = 40;
-    private static final int RAIN_CLOUD_EMISSION = 320;
-    private static final int SNOW_ICE_EMISSION = 40;
-    private static final int FIRE_SMOKE_EMISSION = 40;
-    private static final int MAX_SMOKE_PRODUCER_CHUNKS_PER_TICK = 4;
-    private static final int RAIN_CLOUD_HEIGHT = 192;
     private static final int[][] DEMO_CELL_OFFSETS = {
         {0, 0, 0}, {1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}
     };
@@ -93,7 +85,7 @@ final class ForgeAtmospherePrototype {
     private long pressureBreaks;
     private long pressureSearchLimits;
     private int pressureAttempts;
-    private int importsRemaining = MAX_CHUNK_IMPORTS_PER_TICK;
+    private int importsRemaining;
     private long payloadsSent;
     private long smokeEmissions;
     private long smokeProducerChecks;
@@ -185,17 +177,17 @@ final class ForgeAtmospherePrototype {
 
     void onServerTick(ServerTickEvent.Post event) {
         serverTicks++;
-        importsRemaining = MAX_CHUNK_IMPORTS_PER_TICK;
+        importsRemaining = tuning().runtime().maxChunkImportsPerTick();
         importPendingChunks(event.getServer());
         drainWaterTransitions(event.getServer());
         for (ServerLevel level : event.getServer().getAllLevels()) {
             ForgeSmokeGameplay.drain(level, (pos, amount) -> emitSmoke(level, pos, amount),
                 (pos, amount) -> emitVapor(level, pos, amount));
         }
-        if (serverTicks % AtmosphereGridLayout.PRODUCER_INTERVAL_TICKS == 0) {
+        if (serverTicks % tuning().vapor().producerIntervalTicks() == 0) {
             beginProducerCycle();
         }
-        if (serverTicks % SmokeGridLayout.PRODUCER_INTERVAL_TICKS == 0) {
+        if (serverTicks % tuning().smoke().producerIntervalTicks() == 0) {
             beginSmokeProducerCycle();
         }
         beginMaterialProducerCyclesIfDue();
@@ -213,10 +205,10 @@ final class ForgeAtmospherePrototype {
         flushDirtyChunks();
         flushSmokeDirtyChunks();
         flushMaterialDirtyChunks();
-        if (serverTicks % SYNC_INTERVAL == 0) {
-            syncPlayers(event.getServer(), serverTicks % FULL_SNAPSHOT_INTERVAL == 0);
-            syncSmokePlayers(event.getServer(), serverTicks % FULL_SNAPSHOT_INTERVAL == 0);
-            syncMaterialPlayers(event.getServer(), serverTicks % FULL_SNAPSHOT_INTERVAL == 0);
+        if (serverTicks % tuning().runtime().syncIntervalTicks() == 0) {
+            syncPlayers(event.getServer(), serverTicks % tuning().runtime().fullSnapshotIntervalTicks() == 0);
+            syncSmokePlayers(event.getServer(), serverTicks % tuning().runtime().fullSnapshotIntervalTicks() == 0);
+            syncMaterialPlayers(event.getServer(), serverTicks % tuning().runtime().fullSnapshotIntervalTicks() == 0);
         }
         flushDirtyChunks();
         flushSmokeDirtyChunks();
@@ -351,15 +343,15 @@ final class ForgeAtmospherePrototype {
                 + ", loadedChunks=" + chunks.size()
                 + ", pendingImports=" + pendingLoads.size()
                 + ", simulationInterval=" + AtmosphereGridLayout.simulationIntervalTicks()
-                + ", producerInterval=" + AtmosphereGridLayout.PRODUCER_INTERVAL_TICKS
-                + ", producerChance=" + PRODUCER_CHANCE
+                + ", producerInterval=" + tuning().runtime().producerIntervalTicks()
+                + ", producerChance=" + tuning().vapor().producerChance()
                 + ", producerCycles=" + producerCycles
                 + ", producerChecks=" + producerChecks
                 + ", producerSamples=" + producerSamples
                 + ", producerBacklog=" + producerSchedule.pending()
                 + ", producerLastCycleChunks=" + producerLastCycleChunks
-                + ", syncInterval=" + SYNC_INTERVAL
-                + ", fullSnapshotInterval=" + FULL_SNAPSHOT_INTERVAL
+                + ", syncInterval=" + tuning().runtime().syncIntervalTicks()
+                + ", fullSnapshotInterval=" + tuning().runtime().fullSnapshotIntervalTicks()
                 + ", emissions=" + gridEmissions
                 + ", rainEmissions=" + rainEmissions
                 + ", darkGroundEmissions=" + darkGroundEmissions
@@ -457,7 +449,7 @@ final class ForgeAtmospherePrototype {
     }
 
     private void processSmokeProducerChunks(MinecraftServer server) {
-        for (ChunkKey key : smokeProducerSchedule.poll(MAX_SMOKE_PRODUCER_CHUNKS_PER_TICK,
+        for (ChunkKey key : smokeProducerSchedule.poll(tuning().runtime().maxSmokeProducerChunksPerTick(),
             candidate -> isSmokeProducerChunkActive(server, candidate))) {
             sampleFireSmoke(server, key);
         }
@@ -488,7 +480,7 @@ final class ForgeAtmospherePrototype {
     private void processMaterialProducerChunks(MinecraftServer server) {
         long activeMaterials = materialProducerHooks.values().stream().filter(hooks -> !hooks.isEmpty()).count();
         if (activeMaterials == 0) return;
-        int perMaterialBudget = Math.max(1, MAX_PRODUCER_CHUNKS_PER_TICK / (int) activeMaterials);
+        int perMaterialBudget = Math.max(1, tuning().runtime().maxProducerChunksPerTick() / (int) activeMaterials);
         for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
             List<AtmosphereMaterialProducer> hooks = List.copyOf(materialProducerHooks.get(material));
             if (hooks.isEmpty()) continue;
@@ -580,7 +572,7 @@ final class ForgeAtmospherePrototype {
     /** A cycle is never replaced while backlogged; bounded work continues on following ticks. */
     private void processProducerChunks(MinecraftServer server) {
         Set<SourceKey> emittedSources = new HashSet<>();
-        for (ChunkKey key : producerSchedule.poll(MAX_PRODUCER_CHUNKS_PER_TICK,
+        for (ChunkKey key : producerSchedule.poll(tuning().runtime().maxProducerChunksPerTick(),
             candidate -> isProducerChunkActive(server, candidate))) {
             sampleAutomaticChunk(server, key, emittedSources);
         }
@@ -601,12 +593,13 @@ final class ForgeAtmospherePrototype {
             AtmosphereGrid.CellKey<ResourceKey<Level>>> canTransfer =
                 (source, destination) -> canTransferDown(server, source, destination, false);
         var spread = grid.spread(serverTicks, capacityAt, key -> {
+            applyFans(server.getLevel(key.dimension()), grid, key, AtmosphereGrid.CELL_SIZE, capacityAt, canTransfer);
             growPlants(server.getLevel(key.dimension()), grid, key, AtmosphereGrid.CELL_SIZE, capacityAt);
             capacities.clear();
             if (condense(server.getLevel(key.dimension()), key, capacityAt.applyAsInt(key))) capacities.clear();
         }, key -> {
             ServerLevel level = server.getLevel(key.dimension());
-            return level != null && level.random.nextBoolean();
+            return level != null && level.random.nextDouble() < tuning().vapor().skipChance();
         }, canTransfer);
         materialMoved += spread.moved();
         blockedOverflow += spread.blockedOverflow();
@@ -689,6 +682,7 @@ final class ForgeAtmospherePrototype {
                 (source, destination) -> canTransferDown(server, source, destination, true);
         var spread = smokeGrid.spread(serverTicks, capacityAt, key -> {
             ServerLevel level = server.getLevel(key.dimension());
+            applyFans(level, smokeGrid, key, SmokeGridLayout.CELL_SIZE, capacityAt, canTransfer);
             var cell = smokeGrid.get(key);
             if (level == null || cell == null) return;
             int size = SmokeGridLayout.CELL_SIZE;
@@ -721,6 +715,7 @@ final class ForgeAtmospherePrototype {
             var spread = materialGrid.spread(serverTicks, capacityAt, key -> {
                 ServerLevel cellLevel = server.getLevel(key.dimension());
                 if (cellLevel == null) return;
+                applyFans(cellLevel, materialGrid, key, material.cellSize(), capacityAt, canTransfer);
                 BlockPos origin = materialCellOrigin(material, key);
                 if (material == AtmosphereMaterial.VIOLENCE) violenceGameplay.onProcessedCell(cellLevel, origin);
                 if (material == AtmosphereMaterial.SLIME) slimeGameplay.onProcessedCell(cellLevel, origin);
@@ -771,11 +766,37 @@ final class ForgeAtmospherePrototype {
     ViolenceGameplay violenceGameplay() { return violenceGameplay; }
     ExhaustGameplay exhaustGameplay() { return exhaustGameplay; }
 
+    private void applyFans(ServerLevel level, AtmosphereGrid<ResourceKey<Level>> target,
+        AtmosphereGrid.CellKey<ResourceKey<Level>> source, int size,
+        ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacity,
+        BiPredicate<AtmosphereGrid.CellKey<ResourceKey<Level>>, AtmosphereGrid.CellKey<ResourceKey<Level>>> canTransfer) {
+        if (level == null || target.get(source) == null) return;
+        BlockPos origin = new BlockPos(source.x() * size, source.y() * size, source.z() * size);
+        for (var request : ForgeFanTransport.collect(level, origin, size,
+            tuning().integrations().createFanTransportPerRpm())) {
+            var current = target.get(source);
+            if (current == null) break;
+            var direction = request.direction();
+            var destination = new AtmosphereGrid.CellKey<>(source.dimension(), source.x() + direction.getStepX(),
+                source.y() + direction.getStepY(), source.z() + direction.getStepZ());
+            int spareCapacity = capacity.applyAsInt(destination);
+            if (spareCapacity <= 0 || !canTransfer.test(source, destination)) continue;
+            var existing = target.get(destination);
+            int existingAmount = existing == null ? 0 : existing.amount();
+            int moved = Math.min(request.amount(), Math.min(current.amount(), spareCapacity - existingAmount));
+            if (moved <= 0) continue;
+            if (target.set(destination, existingAmount + moved, serverTicks, spareCapacity)) {
+                target.set(source, current.amount() - moved, serverTicks, capacity.applyAsInt(source));
+                materialMoved += moved;
+            }
+        }
+    }
+
     private void growPlants(ServerLevel level, AtmosphereGrid<ResourceKey<Level>> target,
         AtmosphereGrid.CellKey<ResourceKey<Level>> key, int size,
         ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacity) {
         var cell = target.get(key);
-        if (level == null || cell == null || cell.amount() < AtmospherePlantGrowth.COST) return;
+        if (level == null || cell == null || cell.amount() < AtmospherePlantGrowth.minimumCost()) return;
         BlockPos origin = new BlockPos(key.x() * size, key.y() * size, key.z() * size);
         java.util.function.IntFunction<BlockPos> position = index ->
             origin.offset(index % size, index / (size * size), index / size % size);
@@ -914,7 +935,7 @@ final class ForgeAtmospherePrototype {
         ChunkState state = chunks.get(key);
         if (level == null || state == null || !state.readable) return;
         producerChecks++;
-        if (!AtmosphereProducerSchedule.passesChance(PRODUCER_CHANCE, level.random.nextDouble())) return;
+        if (!AtmosphereProducerSchedule.passesChance(tuning().vapor().producerChance(), level.random.nextDouble())) return;
         producerSamples++;
 
         int localX = level.random.nextInt(16);
@@ -939,10 +960,10 @@ final class ForgeAtmospherePrototype {
                 column.magma(), temperature, level.random::nextDouble)) return;
             evaporateWater(level, bottom);
             if (column.removesSurface(surface.getY())) evaporateWater(level, surface);
-        } else if (surfaceY >= level.getSeaLevel() + HIGH_TERRAIN_ABOVE_SEA) {
+        } else if (surfaceY >= level.getSeaLevel() + tuning().vapor().highTerrainBlocksAboveSeaLevel()) {
             AtmosphereGrid.CellKey<ResourceKey<Level>> cell = cellKey(level, new BlockPos(x, surfaceY + 5, z));
             SourceKey source = new SourceKey(SourceKind.HIGH_TERRAIN, level.dimension(), surface.immutable());
-            emitSource(level, emittedSources, source, cell, HIGH_TERRAIN_EMISSION);
+            emitSource(level, emittedSources, source, cell, tuning().vapor().highTerrainEmission());
         }
     }
 
@@ -985,18 +1006,18 @@ final class ForgeAtmospherePrototype {
             && (surfaceState.is(BlockTags.ICE) || surfaceState.is(Blocks.SNOW)
             || surfaceState.is(Blocks.SNOW_BLOCK) || surfaceState.is(Blocks.POWDER_SNOW))) {
             SourceKey frozenSource = new SourceKey(SourceKind.SNOW_ICE, level.dimension(), frozenSurface);
-            emitSource(level, emittedSources, frozenSource, cellKey(level, frozenSurface.above()), SNOW_ICE_EMISSION);
+            emitSource(level, emittedSources, frozenSource, cellKey(level, frozenSurface.above()), tuning().vapor().snowIceEmission());
         }
 
-        BlockPos cloud = new BlockPos(x, RAIN_CLOUD_HEIGHT, z);
+        BlockPos cloud = new BlockPos(x, tuning().vapor().rainCloudHeight(), z);
         if (!level.dimensionType().ultraWarm()
             && !level.dimensionType().hasCeiling()
             && level.isInWorldBounds(cloud)
             && chunk.getBlockState(cloud).isAir()
             && level.isRainingAt(cloud)) {
             var rain = AtmosphereSourceStrength.splitRain(
-                RAIN_CLOUD_EMISSION, level.random.nextInt(RAIN_CLOUD_EMISSION + 1));
-            int upperY = Math.max(landing.getY(), RAIN_CLOUD_HEIGHT);
+                tuning().vapor().rainCloudEmission(), level.random.nextInt(tuning().vapor().rainCloudEmission() + 1));
+            int upperY = Math.max(landing.getY(), tuning().vapor().rainCloudHeight());
             BlockPos airborne = new BlockPos(x,
                 landing.getY() + level.random.nextInt(upperY - landing.getY() + 1), z);
             SourceKey rainSource = new SourceKey(SourceKind.RAIN_CLOUD, level.dimension(), airborne);
@@ -1223,8 +1244,8 @@ final class ForgeAtmospherePrototype {
                     pos.set(key.x() * size + x, key.y() * size + y, key.z() * size + z);
                     if (level.isInWorldBounds(pos)) {
                         var block = state.chunk.getBlockState(pos);
-                        if (block.isAir()) air++;
-                        if (block.is(Blocks.BEDROCK)) bedrock = true;
+                        if (ForgeCapacityBlockClassifier.isEmptySpace(block)) air++;
+                        if (ForgeCapacityBlockClassifier.blocksDownwardTransfer(block)) bedrock = true;
                     }
                 }
             }
@@ -1256,8 +1277,8 @@ final class ForgeAtmospherePrototype {
                         key.z() * SmokeGridLayout.CELL_SIZE + z);
                     if (level.isInWorldBounds(pos)) {
                         var block = state.chunk.getBlockState(pos);
-                        if (block.isAir()) air++;
-                        if (block.is(Blocks.BEDROCK)) bedrock = true;
+                        if (ForgeCapacityBlockClassifier.isEmptySpace(block)) air++;
+                        if (ForgeCapacityBlockClassifier.blocksDownwardTransfer(block)) bedrock = true;
                     }
                 }
             }
@@ -1290,8 +1311,8 @@ final class ForgeAtmospherePrototype {
                     pos.set(key.x() * size + x, key.y() * size + y, key.z() * size + z);
                     if (!level.isInWorldBounds(pos)) continue;
                     var block = state.chunk.getBlockState(pos);
-                    if (block.isAir()) air++;
-                    if (block.is(Blocks.BEDROCK)) bedrock = true;
+                    if (ForgeCapacityBlockClassifier.isEmptySpace(block)) air++;
+                    if (ForgeCapacityBlockClassifier.blocksDownwardTransfer(block)) bedrock = true;
                 }
             }
         }
@@ -1316,8 +1337,8 @@ final class ForgeAtmospherePrototype {
             (smoke ? SmokeGridLayout.chunkCoordinate(source.z()) : AtmosphereGridLayout.chunkCoordinate(source.z()))));
         if (state == null) return false;
         int bedrock = smoke
-            ? ForgeSmokeCapacity.get(state.chunk).bedrock(source.x(), source.y(), source.z())
-            : ForgeAtmosphereCapacity.get(state.chunk).bedrock(source.x(), source.y(), source.z());
+            ? ForgeSmokeCapacity.get(state.chunk).downwardBarrier(source.x(), source.y(), source.z())
+            : ForgeAtmosphereCapacity.get(state.chunk).downwardBarrier(source.x(), source.y(), source.z());
         return bedrock == 0;
     }
 
@@ -1334,14 +1355,14 @@ final class ForgeAtmospherePrototype {
         ChunkState state = chunks.get(new ChunkKey(source.dimension(), material.chunkCoordinate(source.x()),
             material.chunkCoordinate(source.z())));
         return state != null
-            && ForgeMaterialCapacity.get(state.chunk, material).bedrock(source.x(), source.y(), source.z()) == 0;
+            && ForgeMaterialCapacity.get(state.chunk, material).downwardBarrier(source.x(), source.y(), source.z()) == 0;
     }
 
     private void importPendingChunks(MinecraftServer server) {
         var deferred = new LinkedHashMap<ChunkKey, LevelChunk>();
         var iterator = pendingLoads.entrySet().iterator();
         int examined = 0;
-        while (iterator.hasNext() && examined++ < MAX_CHUNK_IMPORTS_PER_TICK && importsRemaining > 0) {
+        while (iterator.hasNext() && examined++ < tuning().runtime().maxChunkImportsPerTick() && importsRemaining > 0) {
             var entry = iterator.next();
             ChunkKey key = entry.getKey();
             LevelChunk expected = entry.getValue();

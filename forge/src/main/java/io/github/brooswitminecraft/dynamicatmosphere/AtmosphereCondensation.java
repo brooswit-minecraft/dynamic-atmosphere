@@ -9,6 +9,10 @@ final class AtmosphereCondensation {
     }
 
     static double probability(int amount, int capacity) {
+        return probability(amount, capacity, MAX_PROBABILITY);
+    }
+
+    static double probability(int amount, int capacity, double maximumProbability) {
         if (capacity <= 0 || amount <= 0) {
             return 0.0;
         }
@@ -16,14 +20,19 @@ final class AtmosphereCondensation {
         if (fullness <= 0.5) {
             return 0.0;
         }
-        return Math.min(MAX_PROBABILITY, (fullness - 0.5) * 0.2);
+        return Math.min(maximumProbability, (fullness - 0.5) * 0.2);
     }
 
     static boolean shouldCondense(int amount, int capacity, double roll) {
+        return shouldCondense(amount, capacity, roll,
+            DynamicAtmosphereServerConfig.snapshot().vapor().maxCondensationChance());
+    }
+
+    static boolean shouldCondense(int amount, int capacity, double roll, double maximumProbability) {
         if (!(roll >= 0.0 && roll < 1.0)) {
             throw new IllegalArgumentException("roll must be in [0, 1)");
         }
-        return roll < probability(amount, capacity);
+        return roll < probability(amount, capacity, maximumProbability);
     }
 
     /** Rounds one quarter down to whole material units, with one consumed for any positive amount. */

@@ -2,7 +2,6 @@ package io.github.brooswitminecraft.dynamicatmosphere;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.attachment.AttachmentType;
@@ -28,7 +27,9 @@ public final class ForgeAtmosphereCapacity {
         if (previous == null || chunk.getLevel().isClientSide) return;
         var cache = chunk.getExistingDataOrNull(CACHE.get());
         if (cache != null) cache.blockChanged(pos.getX(), pos.getY(), pos.getZ(),
-            previous.isAir(), next.isAir(), previous.is(Blocks.BEDROCK), next.is(Blocks.BEDROCK));
+            ForgeCapacityBlockClassifier.isEmptySpace(previous), ForgeCapacityBlockClassifier.isEmptySpace(next),
+            ForgeCapacityBlockClassifier.blocksDownwardTransfer(previous),
+            ForgeCapacityBlockClassifier.blocksDownwardTransfer(next));
     }
 
     static void clear(LevelChunk chunk) {

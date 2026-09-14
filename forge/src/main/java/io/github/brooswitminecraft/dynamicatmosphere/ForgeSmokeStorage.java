@@ -17,12 +17,12 @@ import java.util.function.Supplier;
 
 /** Independent chunk-owned smoke persistence. */
 public final class ForgeSmokeStorage {
-    private record Snapshot(List<SmokeChunkData.Cell> cells, CompoundTag unreadable) { }
+    private record Snapshot(List<SmokeChunkData.Cell> cells, CompoundTag unreadable, boolean migrated) { }
 
     private static final DeferredRegister<AttachmentType<?>> TYPES =
         DeferredRegister.create(NeoForgeRegistries.ATTACHMENT_TYPES, DynamicAtmosphereMod.MODID);
     private static final Supplier<AttachmentType<Snapshot>> DATA = TYPES.register("smoke", () ->
-        AttachmentType.builder(() -> new Snapshot(List.of(), null))
+        AttachmentType.builder(() -> new Snapshot(List.of(), null, false))
             .serialize(new IAttachmentSerializer<CompoundTag, Snapshot>() {
                 @Override
                 public Snapshot read(IAttachmentHolder holder, CompoundTag tag, HolderLookup.Provider provider) {
@@ -30,6 +30,11 @@ public final class ForgeSmokeStorage {
                         throw new IllegalArgumentException("smoke storage requires a chunk");
                     }
                     try {
+                        if (tag.getInt("version") == 1 && tag.getInt("cell_size") == 8
+                            && tag.contains("cells", Tag.TAG_INT_ARRAY)) {
+                            return new Snapshot(SmokeChunkData.migrateLegacy(chunk.getPos().x, chunk.getPos().z,
+                                chunk.getMinBuildHeight(), chunk.getMaxBuildHeight(), tag.getIntArray("cells")), null, true);
+                        }
                         if (!tag.contains("version", Tag.TAG_INT) || tag.getInt("version") != SmokeChunkData.VERSION
                             || !tag.contains("cell_size", Tag.TAG_INT)
                             || tag.getInt("cell_size") != SmokeGridLayout.CELL_SIZE
@@ -37,9 +42,9 @@ public final class ForgeSmokeStorage {
                             throw new IllegalArgumentException("unsupported smoke chunk format");
                         }
                         return new Snapshot(SmokeChunkData.decode(chunk.getPos().x, chunk.getPos().z,
-                            chunk.getMinBuildHeight(), chunk.getMaxBuildHeight(), tag.getIntArray("cells")), null);
+                            chunk.getMinBuildHeight(), chunk.getMaxBuildHeight(), tag.getIntArray("cells")), null, false);
                     } catch (IllegalArgumentException exception) {
-                        return new Snapshot(List.of(), tag.copy());
+                        return new Snapshot(List.of(), tag.copy(), false);
                     }
                 }
 
@@ -59,6 +64,7 @@ public final class ForgeSmokeStorage {
     public static List<SmokeChunkData.Cell> read(LevelChunk chunk) {
         Snapshot snapshot = chunk.getExistingDataOrNull(DATA.get());
         requireReadable(snapshot);
+        if (snapshot != null && snapshot.migrated()) chunk.setUnsaved(true);
         return snapshot == null ? List.of() : snapshot.cells();
     }
 
@@ -68,7 +74,7 @@ public final class ForgeSmokeStorage {
         List<SmokeChunkData.Cell> snapshot = SmokeChunkData.validate(chunk.getPos().x, chunk.getPos().z,
             chunk.getMinBuildHeight(), chunk.getMaxBuildHeight(), cells);
         if ((previous == null && snapshot.isEmpty()) || (previous != null && previous.cells().equals(snapshot))) return;
-        chunk.setData(DATA.get(), new Snapshot(snapshot, null));
+        chunk.setData(DATA.get(), new Snapshot(snapshot, null, false));
         chunk.setUnsaved(true);
     }
 

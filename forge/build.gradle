@@ -44,8 +44,21 @@ neoForge {
     }
 }
 
+repositories {
+    maven {
+        url = "https://maven.createmod.net"
+        content {
+            includeGroup "com.simibubi.create"
+            includeGroup "net.createmod.ponder"
+        }
+    }
+}
+
 dependencies {
     implementation project(":engine")
+    // Only the isolated fan adapter links Create; never bundle it or require it at runtime.
+    compileOnly("com.simibubi.create:create-1.21.1:6.0.10-217:slim") { transitive = false }
+    compileOnly("net.createmod.ponder:ponder-neoforge:1.0.81+mc1.21.1") { transitive = false }
     testImplementation platform("org.junit:junit-bom:5.11.4")
     testImplementation "org.junit.jupiter:junit-jupiter"
     testRuntimeOnly "org.junit.platform:junit-platform-launcher"

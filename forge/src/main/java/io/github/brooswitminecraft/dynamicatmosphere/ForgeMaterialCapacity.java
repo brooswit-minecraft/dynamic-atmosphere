@@ -1,7 +1,6 @@
 package io.github.brooswitminecraft.dynamicatmosphere;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.neoforged.bus.api.IEventBus;
@@ -33,9 +32,13 @@ public final class ForgeMaterialCapacity {
         if (previous == null || chunk.getLevel().isClientSide) return;
         Map<AtmosphereMaterial, MaterialCapacityCache> caches = chunk.getExistingDataOrNull(CACHE.get());
         if (caches == null) return;
+        boolean previousEmptySpace = ForgeCapacityBlockClassifier.isEmptySpace(previous);
+        boolean nextEmptySpace = ForgeCapacityBlockClassifier.isEmptySpace(next);
+        boolean previousDownwardBarrier = ForgeCapacityBlockClassifier.blocksDownwardTransfer(previous);
+        boolean nextDownwardBarrier = ForgeCapacityBlockClassifier.blocksDownwardTransfer(next);
         for (MaterialCapacityCache cache : caches.values()) {
-            cache.blockChanged(pos.getX(), pos.getY(), pos.getZ(), previous.isAir(), next.isAir(),
-                previous.is(Blocks.BEDROCK), next.is(Blocks.BEDROCK));
+            cache.blockChanged(pos.getX(), pos.getY(), pos.getZ(),
+                previousEmptySpace, nextEmptySpace, previousDownwardBarrier, nextDownwardBarrier);
         }
     }
 

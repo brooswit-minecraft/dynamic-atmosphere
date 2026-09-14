@@ -1,3 +1,14 @@
+# 0.16.0-alpha.1
+
+- Use detailed volumetric slice spacing at every rendering LOD, retaining cell aggregation and distance cutoffs. Integrated optical density stays unchanged.
+- Share configurable simulation (200 ticks) and scheduled production (300 ticks) intervals across all materials. Event-driven emissions remain event-driven.
+- Add server gameplay and client rendering configuration. Structural cell sizes remain release-defined.
+- Powered Create fans move material into the neighboring cell in their facing direction, proportional to absolute RPM and limited by available capacity and downward barriers.
+- Liquids provide capacity but prevent downward transfer; waterlogged solid hosts remain occupied.
+- Smoke now uses 4-block cells. Existing 8-block Smoke storage migrates with total material preserved. Protocol 9 requires matching client and server versions.
+- Ender Gas optical density increases from 4 to 40; Crying Obsidian produces Ender Gas.
+- Smoke interaction probabilities increase tenfold, capped at 100%, without changing costs. Lava remains at one tenth of its original emission.
+
 # 0.15.1-alpha.1
 
 - Reduce lava Smoke production from 40 to 4 units, including lava presence transitions. Fire and all other producers are unchanged; existing Smoke is preserved.

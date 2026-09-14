@@ -2,7 +2,7 @@ package io.github.brooswitminecraft.dynamicatmosphere;
 
 /** World-aligned layout for the independent sparse smoke grid. */
 public final class SmokeGridLayout {
-    public static final int CELL_SIZE = 8;
+    public static final int CELL_SIZE = 4;
     public static final int SIMULATION_INTERVAL_TICKS = 200;
     public static final int PRODUCER_INTERVAL_TICKS = 300;
     private static final int CELLS_PER_CHUNK = 16 / CELL_SIZE;
@@ -23,7 +23,7 @@ public final class SmokeGridLayout {
     }
 
     public static long nextSimulationTick(long tick) {
-        return Math.multiplyExact(Math.floorDiv(tick, SIMULATION_INTERVAL_TICKS) + 1,
-            (long) SIMULATION_INTERVAL_TICKS);
+        int interval = DynamicAtmosphereServerConfig.snapshot().smoke().simulationIntervalTicks();
+        return Math.multiplyExact(Math.floorDiv(tick, interval) + 1, (long) interval);
     }
 }

@@ -6,6 +6,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.EventPriority;
+import net.neoforged.fml.ModContainer;
+import net.neoforged.fml.config.ModConfig;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.fml.common.Mod;
 import org.slf4j.Logger;
@@ -25,7 +27,17 @@ public class DynamicAtmosphereMod {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static volatile ForgeAtmospherePrototype prototype;
 
-    public DynamicAtmosphereMod(IEventBus modEventBus) {
+    public DynamicAtmosphereMod(IEventBus modEventBus, ModContainer modContainer) {
+        modContainer.registerConfig(ModConfig.Type.SERVER, DynamicAtmosphereServerConfig.SPEC,
+            DynamicAtmosphereServerConfig.FILE_NAME);
+        modContainer.registerConfig(ModConfig.Type.CLIENT, DynamicAtmosphereClientConfig.SPEC,
+            DynamicAtmosphereClientConfig.FILE_NAME);
+        modEventBus.addListener(DynamicAtmosphereServerConfig::onLoading);
+        modEventBus.addListener(DynamicAtmosphereServerConfig::onReloading);
+        modEventBus.addListener(DynamicAtmosphereServerConfig::onUnloading);
+        modEventBus.addListener(DynamicAtmosphereClientConfig::onLoading);
+        modEventBus.addListener(DynamicAtmosphereClientConfig::onReloading);
+        modEventBus.addListener(DynamicAtmosphereClientConfig::onUnloading);
         LOGGER.info("[{}] engine module reachable: {}", MODID, EngineInfo.DESCRIPTION);
         modEventBus.addListener(AtmosphereNetwork::register);
         ForgeAtmosphereStorage.register(modEventBus);

@@ -12,7 +12,7 @@ class SmokeVillagerEffectTest {
         assertEquals(0, SmokeVillagerEffect.<String>attempt(39,
             () -> { fail("Insufficient Smoke must not roll"); return 0; },
             () -> { fail("Must not query"); return List.<String>of().iterator(); }, v -> true, v -> true));
-        for (double roll : new double[]{1.0 / 256, 0.5, Double.NaN, -1}) {
+        for (double roll : new double[]{10.0 / 256, 0.5, Double.NaN, -1}) {
             assertEquals(0, SmokeVillagerEffect.<String>attempt(40, () -> roll,
                 () -> { fail("Failed gate must not query"); return List.<String>of().iterator(); },
                 v -> true, v -> true));
@@ -22,7 +22,7 @@ class SmokeVillagerEffectTest {
     @Test
     void skipsNitwitsAndConvertsOnlyOneCandidate() {
         var calls = new AtomicInteger();
-        assertEquals(40, SmokeVillagerEffect.attempt(80, () -> Math.nextDown(1.0 / 256),
+        assertEquals(40, SmokeVillagerEffect.attempt(80, () -> Math.nextDown(10.0 / 256),
             () -> List.of("nitwit", "farmer", "librarian").iterator(),
             v -> !v.equals("nitwit"), v -> {
                 assertEquals("farmer", v);
@@ -30,6 +30,17 @@ class SmokeVillagerEffectTest {
                 return true;
             }));
         assertEquals(1, calls.get());
+    }
+
+    @Test
+    void defaultIsTenTimesOriginalAndOverloadAcceptsConfiguredChance() {
+        assertEquals(10.0 / 256, SmokeVillagerEffect.CHANCE);
+        assertEquals(40, SmokeVillagerEffect.attempt(40, 0.25, () -> Math.nextDown(0.25),
+            () -> List.of("farmer").iterator(), v -> true, v -> true));
+        assertEquals(0, SmokeVillagerEffect.attempt(40, 0.25, () -> 0.25,
+            () -> List.of("farmer").iterator(), v -> true, v -> true));
+        assertEquals(7, SmokeVillagerEffect.attempt(7, 1.0, 7, () -> 0,
+            () -> List.of("farmer").iterator(), v -> true, v -> true));
     }
 
     @Test

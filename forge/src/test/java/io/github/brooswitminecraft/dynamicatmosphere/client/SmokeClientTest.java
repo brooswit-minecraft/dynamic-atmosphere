@@ -14,16 +14,16 @@ class SmokeClientTest {
     }
 
     @Test
-    void scopedSnapshotsAreAtomicAndUseEightBlockChunkCoordinates() {
+    void scopedSnapshotsAreAtomicAndUseFourBlockChunkCoordinates() {
         var smoke = new SmokeClientSession();
         smoke.world(DIMENSION);
         smoke.receive(WORLD, DIMENSION, true, false, List.of(new AtmosphereClientCache.Chunk(0, 0)), List.of(update(0, 100)));
         assertEquals(0, smoke.cache().size());
-        smoke.receive(WORLD, DIMENSION, false, true, List.of(new AtmosphereClientCache.Chunk(1, 0)), List.of(update(2, 200)));
+        smoke.receive(WORLD, DIMENSION, false, true, List.of(new AtmosphereClientCache.Chunk(1, 0)), List.of(update(4, 200)));
         assertEquals(2, smoke.cache().size());
         smoke.receive(WORLD, DIMENSION, true, true, List.of(new AtmosphereClientCache.Chunk(1, 0)), List.of());
         assertEquals(100, smoke.cache().storedAmount(update(0, 0).cell()));
-        assertEquals(0, smoke.cache().storedAmount(update(2, 0).cell()));
+        assertEquals(0, smoke.cache().storedAmount(update(4, 0).cell()));
     }
 
     @Test
@@ -67,16 +67,16 @@ class SmokeClientTest {
         smoke.receive(WORLD, "minecraft:the_nether", true, true,
             List.of(new AtmosphereClientCache.Chunk(0, 0)), List.of(update(0, 1000)));
         var selection = smoke.cache().lodSelection(0, 0, 0, 8);
-        assertEquals(8, selection.volumes().getFirst().size());
+        assertEquals(4, selection.volumes().getFirst().size());
     }
 
     @Test
-    void smokeLodAveragesEmptyChildrenAndUsesEightSixteenThirtyTwoBands() {
-        int[] positions = {0, 10, 20};
-        int[] sizes = {8, 16, 32};
+    void smokeLodAveragesEmptyChildrenAndUsesFourEightSixteenBands() {
+        int[] positions = {0, 20, 40};
+        int[] sizes = {4, 8, 16};
         float[] expected = {1000, 125, 15.625f};
         for (int i = 0; i < positions.length; i++) {
-            var lod = new AtmosphereLodHierarchy(8, 2, 2);
+            var lod = new AtmosphereLodHierarchy(4, 2, 2);
             lod.put(new AtmosphereClientCache.Cell(positions[i], 0, 0), 1000, 1000, 0, 0);
             var selection = lod.select(0, 0, 0, 8, 0);
             assertEquals(1, selection.volumes().size());
@@ -84,7 +84,7 @@ class SmokeClientTest {
             assertEquals(sizes[i], volume.size());
             assertEquals(expected[i], volume.amount(10));
         }
-        var far = new AtmosphereLodHierarchy(8, 2, 2);
+        var far = new AtmosphereLodHierarchy(4, 2, 2);
         far.put(new AtmosphereClientCache.Cell(1000, 0, 0), 1000, 1000, 0, 0);
         assertTrue(far.select(0, 0, 0, 8, 0).volumes().isEmpty());
     }

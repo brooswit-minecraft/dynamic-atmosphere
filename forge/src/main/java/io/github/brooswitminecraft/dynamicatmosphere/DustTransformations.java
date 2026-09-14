@@ -27,7 +27,11 @@ public final class DustTransformations {
     }
 
     static boolean createsGravel(int amount, int capacity, double roll) {
-        return capacity > 0 && amount > capacity && roll >= 0 && roll < GRAVEL_CHANCE;
+        return createsGravel(amount, capacity, roll, GRAVEL_CHANCE);
+    }
+
+    static boolean createsGravel(int amount, int capacity, double roll, double chance) {
+        return capacity > 0 && amount > capacity && roll >= 0 && roll < chance;
     }
 
     static int gravelCost(int currentAmount) {
@@ -36,6 +40,7 @@ public final class DustTransformations {
 
     /** At most one conversion and eight block reads per invocation. */
     public static Result process(ServerLevel level, BlockPos source, DoubleSupplier rolls) {
+        double gravelChance = DynamicAtmosphereServerConfig.snapshot().dust().gravelChance();
         Optional<AtmosphereMaterialState> stateResult =
             DynamicAtmosphereMod.materialState(level, AtmosphereMaterial.DUST, source);
         if (stateResult.isEmpty()) return Result.NONE;
@@ -57,7 +62,7 @@ public final class DustTransformations {
             }
         }
 
-        if (createsGravel(state.amount(), state.capacity(), rolls.getAsDouble())) {
+        if (createsGravel(state.amount(), state.capacity(), rolls.getAsDouble(), gravelChance)) {
             BlockPos air = find(origin, level, false);
             if (air != null) {
                 var previous = level.getBlockState(air);

@@ -10,8 +10,10 @@ public final class ForgeSnowSources {
     /** Pass the successful setBlockState return value as previous; null denotes failure/no change. */
     public static int transition(BlockState previous, BlockState next) {
         if (previous == null) return 0;
-        return SnowRemovalRules.material(true, layers(previous), layers(next))
-            + SnowRemovalRules.iceMaterial(true, previous.is(BlockTags.ICE), next.is(BlockTags.ICE));
+        DynamicAtmosphereServerConfig.Vapor config = DynamicAtmosphereServerConfig.snapshot().vapor();
+        return SnowRemovalRules.material(true, layers(previous), layers(next), config.snowRemovalPerLayer())
+            + SnowRemovalRules.iceMaterial(true, previous.is(BlockTags.ICE), next.is(BlockTags.ICE),
+                config.iceRemovalEmission());
     }
 
     private static int layers(BlockState state) {

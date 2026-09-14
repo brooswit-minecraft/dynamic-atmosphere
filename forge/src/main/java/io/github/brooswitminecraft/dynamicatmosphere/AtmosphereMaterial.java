@@ -5,11 +5,11 @@ import net.minecraft.network.codec.StreamCodec;
 
 /** Additional atmospheric materials introduced after the dedicated Vapor and Smoke formats. */
 public enum AtmosphereMaterial {
-    DUST("dust", 2, 50),
-    ENDER_GAS("ender_gas", 1, 25),
-    VIOLENCE("violence", 8, 200),
-    EXHAUST("exhaust", 2, 50),
-    SLIME("slime", 16, 400);
+    DUST("dust", 2),
+    ENDER_GAS("ender_gas", 1),
+    VIOLENCE("violence", 8),
+    EXHAUST("exhaust", 2),
+    SLIME("slime", 16);
 
     public static final StreamCodec<RegistryFriendlyByteBuf, AtmosphereMaterial> STREAM_CODEC =
         new StreamCodec<>() {
@@ -31,17 +31,15 @@ public enum AtmosphereMaterial {
 
     private final String id;
     private final int cellSize;
-    private final int simulationIntervalTicks;
 
-    AtmosphereMaterial(String id, int cellSize, int simulationIntervalTicks) {
+    AtmosphereMaterial(String id, int cellSize) {
         this.id = id;
         this.cellSize = cellSize;
-        this.simulationIntervalTicks = simulationIntervalTicks;
     }
 
     public String id() { return id; }
     public int cellSize() { return cellSize; }
-    public int simulationIntervalTicks() { return simulationIntervalTicks; }
+    public int simulationIntervalTicks() { return DynamicAtmosphereServerConfig.snapshot().runtime().simulationIntervalTicks(); }
 
     public int cellCoordinate(int blockCoordinate) {
         return Math.floorDiv(blockCoordinate, cellSize);
@@ -57,18 +55,13 @@ public enum AtmosphereMaterial {
     }
 
     public long nextSimulationTick(long tick) {
-        return Math.multiplyExact(Math.floorDiv(tick, simulationIntervalTicks) + 1,
-            (long) simulationIntervalTicks);
+        int interval = simulationIntervalTicks();
+        return Math.multiplyExact(Math.floorDiv(tick, interval) + 1, (long) interval);
     }
 
     public long nextProducerTick(long tick) {
         if (tick < 0) throw new IllegalArgumentException("tick must be non-negative");
-        long intervalNumerator = Math.multiplyExact(
-            (long) AtmosphereGridLayout.PRODUCER_INTERVAL_TICKS, simulationIntervalTicks);
-        long intervalDenominator = AtmosphereGridLayout.SIMULATION_INTERVAL_TICKS;
-        long elapsedIntervals = Math.floorDiv(
-            Math.multiplyExact(tick, intervalDenominator), intervalNumerator);
-        long nextNumerator = Math.multiplyExact(elapsedIntervals + 1, intervalNumerator);
-        return Math.floorDiv(Math.addExact(nextNumerator, intervalDenominator - 1), intervalDenominator);
+        int interval = DynamicAtmosphereServerConfig.snapshot().runtime().producerIntervalTicks();
+        return Math.multiplyExact(Math.floorDiv(tick, interval) + 1, (long) interval);
     }
 }

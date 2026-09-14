@@ -69,77 +69,86 @@ public final class ViolenceGameplay {
             return;
         }
         DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.VIOLENCE,
-            event.getEntity().blockPosition(), HOSTILE_DEATH_AMOUNT);
+            event.getEntity().blockPosition(),
+            DynamicAtmosphereServerConfig.snapshot().violence().hostileDeathEmission());
     }
 
     /** Called for a position already selected inside a loaded chunk. */
     public void onPassiveBlockSample(ServerLevel level, BlockPos pos, BlockState state) {
         if (state.is(Blocks.NETHERRACK)) {
-            DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.VIOLENCE, pos, NETHERRACK_AMOUNT);
+            DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.VIOLENCE, pos,
+                DynamicAtmosphereServerConfig.snapshot().violence().netherrackEmission());
         }
     }
 
     /** Called once per loaded chunk selected by the bounded producer schedule. */
     public void onLoadedChunkProducerCheck(ServerLevel level, LevelChunk chunk) {
+        DynamicAtmosphereServerConfig.Violence config = DynamicAtmosphereServerConfig.snapshot().violence();
         if (level.getChunkSource().getChunkNow(chunk.getPos().x, chunk.getPos().z) != chunk
-            || !bottomEmission(level.random.nextInt(BOTTOM_CHANCE_DENOMINATOR))) {
+            || !bottomEmission(level.random.nextInt(config.bottomChanceDenominator()))) {
             return;
         }
         int x = chunk.getPos().getMinBlockX() + level.random.nextInt(16);
         int z = chunk.getPos().getMinBlockZ() + level.random.nextInt(16);
         DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.VIOLENCE,
-            new BlockPos(x, level.getMinBuildHeight(), z), BOTTOM_AMOUNT);
+            new BlockPos(x, level.getMinBuildHeight(), z), config.bottomEmission());
     }
 
     /** Called once for a processed Violence cell whose origin is already loaded. */
     public void onProcessedCell(ServerLevel level, BlockPos cellOrigin) {
+        DynamicAtmosphereServerConfig.Violence config = DynamicAtmosphereServerConfig.snapshot().violence();
         DynamicAtmosphereMod.materialState(level, AtmosphereMaterial.VIOLENCE, cellOrigin).ifPresent(state -> {
             CellEffect effect = effectFor(state.amount(), state.capacity(),
-                level.random.nextInt(HIGH_SPAWN_CHANCE_DENOMINATOR));
+                level.random.nextInt(config.spawnChanceDenominator()));
             if (effect.villagerBand()) {
-                readyOneVillager(level, cellOrigin, effect.cost());
+                readyOneVillager(level, cellOrigin, effect.cost(), config.breedingBread());
             } else if (effect.spawnZombie()) {
-                spawnOne(level, cellOrigin, effect.cost());
+                spawnOne(level, cellOrigin, effect.cost(), config.spawnAttempts());
             }
         });
     }
 
-    private static void readyOneVillager(ServerLevel level, BlockPos cellOrigin, int cost) {
+    private static void readyOneVillager(ServerLevel level, BlockPos cellOrigin, int cost, int breedingBread) {
         AABB bounds = cellBounds(cellOrigin, AtmosphereMaterial.VIOLENCE.cellSize());
         List<Villager> villagers = level.getEntitiesOfClass(Villager.class, bounds,
-            candidate -> bounds.contains(candidate.position()) && eligibleVillager(candidate));
+            candidate -> bounds.contains(candidate.position()) && eligibleVillager(candidate, breedingBread));
         int checked = 0;
         for (Villager villager : villagers) {
             if (checked++ >= MAX_VILLAGER_CANDIDATES) break;
             if (!DynamicAtmosphereMod.consumeMaterial(level, AtmosphereMaterial.VIOLENCE, cellOrigin, cost)) return;
-            villager.getInventory().addItem(new ItemStack(Items.BREAD, BREEDING_BREAD));
+            villager.getInventory().addItem(new ItemStack(Items.BREAD, breedingBread));
             return;
         }
     }
 
     static boolean eligibleVillager(Villager villager) {
+        return eligibleVillager(villager, BREEDING_BREAD);
+    }
+
+    static boolean eligibleVillager(Villager villager, int breedingBread) {
         if (!villager.isAlive() || villager.getAge() != 0 || villager.isSleeping() || villager.canBreed()) return false;
         int room = 0;
         for (int slot = 0; slot < villager.getInventory().getContainerSize(); slot++) {
             ItemStack stack = villager.getInventory().getItem(slot);
             if (stack.isEmpty()) return true;
             if (stack.is(Items.BREAD)) room += stack.getMaxStackSize() - stack.getCount();
-            if (room >= BREEDING_BREAD) return true;
+            if (room >= breedingBread) return true;
         }
         return false;
     }
 
-    private static void spawnOne(ServerLevel level, BlockPos cellOrigin, int cost) {
-        BlockPos pos = findSpawnPosition(level, cellOrigin, AtmosphereMaterial.VIOLENCE.cellSize(), EntityType.ZOMBIE);
+    private static void spawnOne(ServerLevel level, BlockPos cellOrigin, int cost, int attempts) {
+        BlockPos pos = findSpawnPosition(
+            level, cellOrigin, AtmosphereMaterial.VIOLENCE.cellSize(), EntityType.ZOMBIE, attempts);
         if (pos == null || !DynamicAtmosphereMod.consumeMaterial(
             level, AtmosphereMaterial.VIOLENCE, cellOrigin, cost)) return;
         EntityType.ZOMBIE.spawn(level, pos, MobSpawnType.NATURAL);
     }
 
     private static BlockPos findSpawnPosition(
-        ServerLevel level, BlockPos origin, int size, EntityType<?> type
+        ServerLevel level, BlockPos origin, int size, EntityType<?> type, int attempts
     ) {
-        for (int attempt = 0; attempt < SPAWN_ATTEMPTS; attempt++) {
+        for (int attempt = 0; attempt < attempts; attempt++) {
             BlockPos pos = origin.offset(level.random.nextInt(size), level.random.nextInt(size), level.random.nextInt(size));
             if (level.isOutsideBuildHeight(pos)
                 || level.getChunkSource().getChunkNow(pos.getX() >> 4, pos.getZ() >> 4) == null

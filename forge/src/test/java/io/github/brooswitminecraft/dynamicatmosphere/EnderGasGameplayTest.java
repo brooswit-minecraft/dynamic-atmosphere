@@ -10,7 +10,8 @@ class EnderGasGameplayTest {
     @Test
     void passiveSourceListIncludesEverySpecifiedBlockFamily() {
         for (String path : new String[]{
-            "nether_portal", "ender_chest", "soul_torch", "soul_wall_torch", "soul_fire", "soul_sand"
+            "nether_portal", "ender_chest", "soul_torch", "soul_wall_torch", "soul_fire", "soul_sand",
+            "crying_obsidian"
         }) {
             assertTrue(EnderGasGameplay.isPassiveSourceId(ResourceLocation.withDefaultNamespace(path)));
         }

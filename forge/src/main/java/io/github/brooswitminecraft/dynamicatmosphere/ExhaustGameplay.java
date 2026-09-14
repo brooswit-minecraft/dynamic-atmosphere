@@ -40,20 +40,39 @@ public final class ExhaustGameplay {
     }
 
     static int passiveEmission(boolean creeper, double roll) {
-        int denominator = creeper ? CREEPER_CHANCE_DENOMINATOR : LIVING_CHANCE_DENOMINATOR;
-        return roll >= 0 && roll < 1.0 / denominator ? PASSIVE_AMOUNT : 0;
+        return passiveEmission(creeper, roll, PASSIVE_AMOUNT, LIVING_CHANCE_DENOMINATOR,
+            CREEPER_CHANCE_DENOMINATOR);
+    }
+
+    static int passiveEmission(boolean creeper, double roll, int amount,
+                               int livingDenominator, int creeperDenominator) {
+        int denominator = creeper ? creeperDenominator : livingDenominator;
+        return roll >= 0 && roll < 1.0 / denominator ? amount : 0;
     }
 
     static int damageEmission(float finalDamage, boolean causedByExhaust) {
+        return damageEmission(finalDamage, causedByExhaust, DAMAGE_UNITS_PER_POINT, MAX_DAMAGE_EMISSION);
+    }
+
+    static int damageEmission(float finalDamage, boolean causedByExhaust, int amountPerPoint, int maximum) {
         if (causedByExhaust || !(finalDamage > 0) || !Float.isFinite(finalDamage)) return 0;
-        return Math.min(MAX_DAMAGE_EMISSION, (int) Math.ceil(finalDamage * DAMAGE_UNITS_PER_POINT));
+        return Math.min(maximum, (int) Math.ceil(finalDamage * amountPerPoint));
     }
 
     static Suffocation suffocation(int amount, int capacity) {
-        if (amount <= 0 || capacity <= 0 || (long) amount * 2 < capacity) return Suffocation.NONE;
-        double progress = Math.clamp((amount / (double) capacity - 0.5) * 2.0, 0.0, 1.0);
-        float damage = (float) (1.0 + 3.0 * progress);
-        double fraction = 0.25 + 0.25 * progress;
+        return suffocation(amount, capacity, 0.5, 1.0, 1.0, 4.0, 0.25, 0.5);
+    }
+
+    static Suffocation suffocation(int amount, int capacity, double minimumFullness, double maximumFullness,
+                                   double minimumDamage, double maximumDamage,
+                                   double minimumCostFraction, double maximumCostFraction) {
+        if (amount <= 0 || capacity <= 0 || amount / (double) capacity < minimumFullness) return Suffocation.NONE;
+        double range = maximumFullness - minimumFullness;
+        double progress = range > 0
+            ? Math.clamp((amount / (double) capacity - minimumFullness) / range, 0.0, 1.0)
+            : 1.0;
+        float damage = (float) (minimumDamage + (maximumDamage - minimumDamage) * progress);
+        double fraction = minimumCostFraction + (maximumCostFraction - minimumCostFraction) * progress;
         int cost = Math.clamp((int) Math.ceil(amount * fraction), 1, amount);
         return new Suffocation(damage, cost);
     }
@@ -69,7 +88,9 @@ public final class ExhaustGameplay {
 
     public void onEntityTick(EntityTickEvent.Post event) {
         if (!(event.getEntity() instanceof Mob mob) || !(mob.level() instanceof ServerLevel level)) return;
-        int amount = passiveEmission(mob instanceof Creeper, level.random.nextDouble());
+        DynamicAtmosphereServerConfig.Exhaust config = DynamicAtmosphereServerConfig.snapshot().exhaust();
+        int amount = passiveEmission(mob instanceof Creeper, level.random.nextDouble(), config.passiveEmission(),
+            config.livingChanceDenominator(), config.creeperChanceDenominator());
         if (amount > 0) {
             DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.EXHAUST,
                 mob.blockPosition(), amount);
@@ -79,7 +100,9 @@ public final class ExhaustGameplay {
     public void onLivingDamage(LivingDamageEvent.Post event) {
         LivingEntity entity = event.getEntity();
         if (!(entity.level() instanceof ServerLevel level)) return;
-        int amount = damageEmission(event.getNewDamage(), EXHAUST_DAMAGE.get().contains(entity.getUUID()));
+        DynamicAtmosphereServerConfig.Exhaust config = DynamicAtmosphereServerConfig.snapshot().exhaust();
+        int amount = damageEmission(event.getNewDamage(), EXHAUST_DAMAGE.get().contains(entity.getUUID()),
+            config.damageEmissionPerPoint(), config.maxDamageEmission());
         if (amount > 0) {
             DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.EXHAUST,
                 entity.blockPosition(), amount);
@@ -92,7 +115,10 @@ public final class ExhaustGameplay {
             DynamicAtmosphereMod.materialState(level, AtmosphereMaterial.EXHAUST, source);
         if (state.isEmpty()) return 0;
         AtmosphereMaterialState current = state.orElseThrow();
-        Suffocation effect = suffocation(current.amount(), current.capacity());
+        DynamicAtmosphereServerConfig.Exhaust config = DynamicAtmosphereServerConfig.snapshot().exhaust();
+        Suffocation effect = suffocation(current.amount(), current.capacity(), config.suffocationMinFullness(),
+            config.suffocationMaxFullness(), config.suffocationMinDamage(), config.suffocationMaxDamage(),
+            config.suffocationMinCostFraction(), config.suffocationMaxCostFraction());
         if (!effect.active()) return 0;
 
         int damaged = 0;

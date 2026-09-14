@@ -8,9 +8,14 @@ public final class DustDissipation {
     public static final double CHANCE = 1.0 / 64;
 
     public static int amount(int remaining, DoubleSupplier roll) {
+        DynamicAtmosphereServerConfig.Dust config = DynamicAtmosphereServerConfig.snapshot().dust();
+        return amount(remaining, roll, config.dissipationChance(), config.dissipationAmount());
+    }
+
+    public static int amount(int remaining, DoubleSupplier roll, double chance, int maximumLoss) {
         if (remaining <= 0) return 0;
-        double chance = roll.getAsDouble();
-        return chance >= 0 && chance < CHANCE ? Math.min(remaining, MAX_LOSS) : 0;
+        double sample = roll.getAsDouble();
+        return sample >= 0 && sample < chance ? Math.min(remaining, maximumLoss) : 0;
     }
 
     private DustDissipation() { }

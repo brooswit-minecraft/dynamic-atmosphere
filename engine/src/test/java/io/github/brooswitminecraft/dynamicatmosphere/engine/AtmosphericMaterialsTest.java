@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 class AtmosphericMaterialsTest {
     @Test
     void opticalDensityIsRenderingOnlyAndUnspecifiedSettingsDefaultToOne() {
-        assertEquals(List.of(1.0, 1.0, 4.0, 4.0, 1.0, 4.0, 4.0),
+        assertEquals(List.of(1.0, 1.0, 4.0, 4.0, 1.0, 4.0, 40.0),
             AtmosphericMaterials.ALL.stream().map(m -> m.settings().opticalDensityMultiplier()).toList());
         var vapor = AtmosphericMaterials.VAPOR.settings();
         assertEquals(1, new MaterialSettings(vapor.cellSize(), vapor.lod(), vapor.simulationSpeed(),
@@ -27,18 +27,17 @@ class AtmosphericMaterialsTest {
     void catalogMatchesIndependentSizesColorsAndSimulationSpeeds() {
         assertEquals(List.of("vapor", "dust", "smoke", "violence", "exhaust", "slime", "ender_gas"),
             AtmosphericMaterials.ALL.stream().map(MaterialDefinition::id).toList());
-        assertEquals(List.of(4, 2, 8, 8, 2, 16, 1),
+        assertEquals(List.of(4, 2, 4, 8, 2, 16, 1),
             AtmosphericMaterials.ALL.stream().map(m -> m.settings().cellSize()).toList());
-        assertEquals(List.of(1.0, 4.0, 1.0, 1.0, 4.0, 0.5, 8.0),
+        assertEquals(java.util.Collections.nCopies(7, 1.0),
             AtmosphericMaterials.ALL.stream().map(m -> m.settings().simulationSpeed()).toList());
         assertEquals(List.of(MaterialDefinition.Color.values()),
             AtmosphericMaterials.ALL.stream().map(MaterialDefinition::color).toList());
     }
 
     @Test
-    void unspecifiedProducerSpeedsStayUnspecified() {
-        assertEquals(List.of(OptionalDouble.of(1), OptionalDouble.empty(), OptionalDouble.of(1),
-            OptionalDouble.empty(), OptionalDouble.of(4), OptionalDouble.of(0.5), OptionalDouble.of(8)),
+    void allProducerSpeedsUseTheSameBaseline() {
+        assertEquals(java.util.Collections.nCopies(7, OptionalDouble.of(1)),
             AtmosphericMaterials.ALL.stream().map(m -> m.settings().producerSpeed()).toList());
     }
 

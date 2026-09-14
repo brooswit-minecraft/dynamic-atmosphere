@@ -11,15 +11,19 @@ final class AtmosphereLodHierarchy {
     static final int SELECTION_WORK_PER_TICK = 4096;
     private final int baseCellSize;
     private final int rootLevel;
-    private final double reachMultiplier;
+    private double reachMultiplier;
     private static final int TRANSITION_TICKS = 10;
     private static final int VIEW_REGION_SIZE = 16;
 
     private record Key(int x, int y, int z) { }
 
-    private record Signal(float from, float target, long since) {
-        long end() { return since + TRANSITION_TICKS; }
-        double correction() { return (from - target) / (double) TRANSITION_TICKS; }
+    private record Signal(float from, float target, long since, int duration) {
+        Signal(float from, float target, long since) {
+            this(from, target, since,
+                io.github.brooswitminecraft.dynamicatmosphere.DynamicAtmosphereClientConfig.snapshot().transitionTicks());
+        }
+        long end() { return since + duration; }
+        double correction() { return duration == 0 ? 0 : (from - target) / (double) duration; }
     }
 
     static final class Volume {
@@ -100,6 +104,17 @@ final class AtmosphereLodHierarchy {
         this.baseCellSize = baseCellSize;
         this.rootLevel = rootLevel;
         this.reachMultiplier = reachMultiplier;
+    }
+
+    void setReachMultiplier(double reach) {
+        if (!Double.isFinite(reach) || reach < 0.25 || reach > 4) throw new IllegalArgumentException("Invalid reach");
+        if (reachMultiplier == reach) return;
+        reachMultiplier = reach;
+        revision++;
+        build = null;
+        selectedView = null;
+        selection = Selection.EMPTY;
+        workedTick = Long.MIN_VALUE;
     }
 
     void put(AtmosphereClientCache.Cell cell, float from, float target, long since, long tick) {
@@ -192,7 +207,7 @@ final class AtmosphereLodHierarchy {
         workedTick = tick;
         lastWork = 0;
         if (build == null) return selection;
-        while (lastWork < SELECTION_WORK_PER_TICK) {
+        while (lastWork < io.github.brooswitminecraft.dynamicatmosphere.DynamicAtmosphereClientConfig.snapshot().selectionWorkPerTick()) {
             lastWork++;
             if (build.pending.isEmpty()) {
                 Volume next = nextRoot(build);

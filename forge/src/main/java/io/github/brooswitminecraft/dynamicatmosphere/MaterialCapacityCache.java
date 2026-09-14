@@ -8,7 +8,7 @@ final class MaterialCapacityCache {
     private final int side;
     private final int minCellY;
     private final short[] capacities;
-    private final byte[] bedrock;
+    private final byte[] downwardBarrier;
 
     MaterialCapacityCache(AtmosphereMaterial material, int minBlockY, int maxBlockY) {
         if (maxBlockY <= minBlockY) throw new IllegalArgumentException("Empty chunk height");
@@ -17,7 +17,7 @@ final class MaterialCapacityCache {
         minCellY = material.cellCoordinate(minBlockY);
         int maxCellY = material.cellCoordinate(maxBlockY - 1);
         capacities = new short[Math.multiplyExact(maxCellY - minCellY + 1, side * side)];
-        bedrock = new byte[capacities.length];
+        downwardBarrier = new byte[capacities.length];
         clear();
     }
 
@@ -26,25 +26,25 @@ final class MaterialCapacityCache {
         return index < 0 ? -1 : capacities[index];
     }
 
-    int bedrock(int x, int y, int z) {
+    int downwardBarrier(int x, int y, int z) {
         int index = index(x, y, z);
-        return index < 0 || capacities[index] < 0 ? -1 : bedrock[index];
+        return index < 0 || capacities[index] < 0 ? -1 : downwardBarrier[index];
     }
 
-    void put(int x, int y, int z, int capacity, boolean containsBedrock) {
+    void put(int x, int y, int z, int capacity, boolean containsDownwardBarrier) {
         if (capacity < 0 || capacity > AtmosphereGrid.MAX_AMOUNT) {
             throw new IllegalArgumentException("Invalid material capacity");
         }
         int index = index(x, y, z);
         if (index >= 0) {
             capacities[index] = (short) capacity;
-            bedrock[index] = (byte) (containsBedrock ? 1 : 0);
+            downwardBarrier[index] = (byte) (containsDownwardBarrier ? 1 : 0);
         }
     }
 
-    void blockChanged(int blockX, int blockY, int blockZ, boolean previousAir, boolean nextAir,
-                      boolean previousBedrock, boolean nextBedrock) {
-        if (previousAir == nextAir && previousBedrock == nextBedrock) return;
+    void blockChanged(int blockX, int blockY, int blockZ, boolean previousEmptySpace, boolean nextEmptySpace,
+                      boolean previousDownwardBarrier, boolean nextDownwardBarrier) {
+        if (previousEmptySpace == nextEmptySpace && previousDownwardBarrier == nextDownwardBarrier) return;
         int index = index(material.cellCoordinate(blockX), material.cellCoordinate(blockY),
             material.cellCoordinate(blockZ));
         if (index >= 0) capacities[index] = -1;
@@ -52,7 +52,7 @@ final class MaterialCapacityCache {
 
     void clear() {
         Arrays.fill(capacities, (short) -1);
-        Arrays.fill(bedrock, (byte) 0);
+        Arrays.fill(downwardBarrier, (byte) 0);
     }
 
     private int index(int x, int y, int z) {

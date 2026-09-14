@@ -21,23 +21,23 @@ public final class AtmosphericMaterials {
         settings(4, VAPOR_LOD, 1, OptionalDouble.of(1)), Set.of(EXISTING_VAPOR_RULES, SNOW_ICE_SURFACE),
         Set.of(MaterialDefinition.Transformation.WATER));
     public static final MaterialDefinition DUST = new MaterialDefinition("dust", BROWN,
-        settings(2, DUST_LOD, 4, OptionalDouble.empty()),
+        settings(2, DUST_LOD, 1, OptionalDouble.of(1)),
         Set.of(PLAYER_WALKING, MOB_WALKING, BLOCK_BREAKING, BLOCK_PLACEMENT,
             PLAYER_FALL_DAMAGE, MOB_FALL_DAMAGE), Set.of(MaterialDefinition.Transformation.GRAVEL));
     public static final MaterialDefinition SMOKE = new MaterialDefinition("smoke", BLACK,
-        new MaterialSettings(8, VAPOR_LOD, 1, OptionalDouble.of(1), 4),
+        new MaterialSettings(4, VAPOR_LOD, 1, OptionalDouble.of(1), 4),
         Set.of(LAVA, FIRE, EXPLOSIONS, EXPLOSION_DESTROYED_BLOCKS, FURNACES, TORCHES, CAMPFIRES), Set.of());
     public static final MaterialDefinition VIOLENCE = new MaterialDefinition("violence", RED,
-        new MaterialSettings(8, VIOLENCE_LOD, 1, OptionalDouble.empty(), 4),
+        new MaterialSettings(8, VIOLENCE_LOD, 1, OptionalDouble.of(1), 4),
         Set.of(HOSTILE_MOB_DEATHS, NETHERRACK), Set.of(MaterialDefinition.Transformation.ZOMBIE));
     public static final MaterialDefinition EXHAUST = new MaterialDefinition("exhaust", YELLOW,
-        settings(2, DUST_LOD, 4, OptionalDouble.of(4)),
+        settings(2, DUST_LOD, 1, OptionalDouble.of(1)),
         Set.of(LIVING_MOBS_RANDOMLY, CREEPERS_FREQUENTLY, PLAYER_DAMAGE, MOB_DAMAGE), Set.of());
     public static final MaterialDefinition SLIME = new MaterialDefinition("slime", GREEN,
-        new MaterialSettings(16, VIOLENCE_LOD, 0.5, OptionalDouble.of(0.5), 4),
+        new MaterialSettings(16, VIOLENCE_LOD, 1, OptionalDouble.of(1), 4),
         Set.of(UNDERGROUND_SLIME_CHUNKS_RANDOMLY), Set.of(MaterialDefinition.Transformation.SLIME));
     public static final MaterialDefinition ENDER_GAS = new MaterialDefinition("ender_gas", PURPLE,
-        new MaterialSettings(1, DUST_LOD, 8, OptionalDouble.of(8), 4),
+        new MaterialSettings(1, DUST_LOD, 1, OptionalDouble.of(1), 40),
         Set.of(NETHER_PORTAL_BLOCKS_SLOWLY, ENDERMEN, ENDERMITES, ENDER_DRAGON,
             ENDER_PEARL_USE, STANDING_IN_NETHER_PORTAL, SOUL_TORCHES, SOUL_FIRES, SOUL_SAND), Set.of());
 

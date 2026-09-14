@@ -14,13 +14,24 @@ class SmokeFarmlandEffectTest {
     }
 
     @Test
-    void oneIn128GatePrecedesScanning() {
-        for (double roll : new double[]{1.0 / 128, 0.1, 1, Double.NaN, -0.1}) {
+    void boostedGatePrecedesScanning() {
+        for (double roll : new double[]{10.0 / 128, 0.1, 1, Double.NaN, -0.1}) {
             assertEquals(0, SmokeFarmlandEffect.attempt(40, () -> roll,
                 index -> { fail("Failed roll must not scan"); return true; },
                 index -> { fail("Failed roll must not convert"); return true; }));
         }
-        assertEquals(40, SmokeFarmlandEffect.attempt(40, () -> Math.nextDown(1.0 / 128),
+        assertEquals(40, SmokeFarmlandEffect.attempt(40, () -> Math.nextDown(10.0 / 128),
+            index -> true, index -> true));
+    }
+
+    @Test
+    void defaultIsTenTimesOriginalAndOverloadAcceptsConfiguredChance() {
+        assertEquals(10.0 / 128, SmokeFarmlandEffect.CHANCE);
+        assertEquals(40, SmokeFarmlandEffect.attempt(40, 0.25, () -> Math.nextDown(0.25),
+            index -> true, index -> true));
+        assertEquals(0, SmokeFarmlandEffect.attempt(40, 0.25, () -> 0.25,
+            index -> true, index -> true));
+        assertEquals(7, SmokeFarmlandEffect.attempt(7, 1.0, 7, () -> 0,
             index -> true, index -> true));
     }
 
@@ -36,12 +47,12 @@ class SmokeFarmlandEffectTest {
     }
 
     @Test
-    void noFarmlandScansAtMost512BlocksAndConsumesNothing() {
+    void noFarmlandScansAtMostOneSmokeCellAndConsumesNothing() {
         var scans = new AtomicInteger();
         assertEquals(0, SmokeFarmlandEffect.attempt(40, () -> 0,
             index -> { assertEquals(scans.getAndIncrement(), index); return false; },
             index -> { fail("No farmland"); return true; }));
-        assertEquals(512, scans.get());
+        assertEquals(64, scans.get());
     }
 
     @Test
@@ -51,7 +62,7 @@ class SmokeFarmlandEffectTest {
         available -= SmokeFarmlandEffect.attempt(available, () -> 0, index -> true, index -> true);
         assertEquals(0, available);
 
-        int afterFailedLeaf = 40 - SmokeLeafEffect.attempt(40, () -> 0.5, index -> true, index -> true);
+        int afterFailedLeaf = 40 - SmokeLeafEffect.attempt(40, () -> 1.0, index -> true, index -> true);
         assertEquals(40, SmokeFarmlandEffect.attempt(afterFailedLeaf, () -> 0, index -> true, index -> true));
 
         int afterSuccessfulLeaf = 40 - SmokeLeafEffect.attempt(40, () -> 0, index -> true, index -> true);

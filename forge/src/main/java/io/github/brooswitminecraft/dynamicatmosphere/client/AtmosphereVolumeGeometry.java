@@ -79,7 +79,7 @@ public final class AtmosphereVolumeGeometry {
 
     public static List<Slice> slices(AtmosphereClientCache.Cell cell, float amount, Point camera, Point look) {
         return boxSlices((double) cell.x() * CELL_SIZE, (double) cell.y() * CELL_SIZE, (double) cell.z() * CELL_SIZE,
-            CELL_SIZE, SLICE_SPACING, amount, camera, look);
+            CELL_SIZE, CELL_SIZE / (double) io.github.brooswitminecraft.dynamicatmosphere.DynamicAtmosphereClientConfig.snapshot().slicesPerBaseCell(), amount, camera, look);
     }
 
     public static List<Slice> coarseSlices(int sectionX, int sectionY, int sectionZ, float amount, Point camera, Point look) {
@@ -95,7 +95,7 @@ public final class AtmosphereVolumeGeometry {
                                  double opticalDensityMultiplier) {
         int size = volume.size();
         return boxSlices(volume.blockX(), volume.blockY(), volume.blockZ(), size,
-            volume.level == 0 ? volume.baseCellSize / 4.0 : size, amount, camera, look, volume.baseCellSize,
+            volume.baseCellSize / (double) io.github.brooswitminecraft.dynamicatmosphere.DynamicAtmosphereClientConfig.snapshot().slicesPerBaseCell(), amount, camera, look, volume.baseCellSize,
             opticalDensityMultiplier);
     }
 

@@ -20,9 +20,14 @@ public final class AtmosphereClientCache {
     public record Update(Cell cell, int amount, int capacity) { }
     /** Render amount is interpolated fullness scaled to 0..1000, not stored material. */
     public record VisibleCell(Cell cell, float amount) { }
-    private record Amount(float from, float target, long since, int material, int capacity) {
+    private record Amount(float from, float target, long since, int material, int capacity, int duration) {
+        Amount(float from, float target, long since, int material, int capacity) {
+            this(from, target, since, material, capacity,
+                io.github.brooswitminecraft.dynamicatmosphere.DynamicAtmosphereClientConfig.snapshot().transitionTicks());
+        }
         float at(double tick) {
-            double progress = Math.clamp((tick - since) / TRANSITION_TICKS, 0.0, 1.0);
+            if (duration == 0) return target;
+            double progress = Math.clamp((tick - since) / duration, 0.0, 1.0);
             return (float) (from + (target - from) * progress);
         }
     }
@@ -48,7 +53,7 @@ public final class AtmosphereClientCache {
     private int viewDistance = -1;
 
     public AtmosphereClientCache() {
-        this(DEFAULT_CELL_BUDGET);
+        this(io.github.brooswitminecraft.dynamicatmosphere.DynamicAtmosphereClientConfig.snapshot().allocation().cellBudget());
     }
 
     AtmosphereClientCache(int cellBudget) {
@@ -61,6 +66,8 @@ public final class AtmosphereClientCache {
         this.baseCellSize = baseCellSize;
         this.lod = new AtmosphereLodHierarchy(baseCellSize, rootLevel, reachMultiplier);
     }
+
+    void setReachMultiplier(double reach) { lod.setReachMultiplier(reach); }
 
     public void changeDimension(String nextDimension) {
         if (!Objects.equals(dimension, nextDimension)) {
@@ -231,7 +238,7 @@ public final class AtmosphereClientCache {
         tick++;
         if (cells.entrySet().removeIf(entry -> {
             Amount amount = entry.getValue();
-            if (amount.material() != 0 || tick - amount.since() < TRANSITION_TICKS) return false;
+            if (amount.material() != 0 || tick - amount.since() < amount.duration()) return false;
             lod.remove(entry.getKey(), tick);
             return true;
         })) revision++;

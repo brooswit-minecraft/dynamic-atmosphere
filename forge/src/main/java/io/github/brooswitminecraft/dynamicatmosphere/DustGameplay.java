@@ -76,6 +76,14 @@ public final class DustGameplay {
         long gameTick,
         int cadenceOffset
     ) {
+        return movementEmission(previous, x, z, onGround, verticalVelocity, sprinting, gameTick,
+            cadenceOffset, WALK_INTERVAL_TICKS, RUN_INTERVAL_TICKS);
+    }
+
+    static MotionEmission movementEmission(
+        MotionState previous, double x, double z, boolean onGround, double verticalVelocity,
+        boolean sprinting, long gameTick, int cadenceOffset, int walkIntervalTicks, int runIntervalTicks
+    ) {
         if (previous.onGround() && !onGround && verticalVelocity > MIN_JUMP_VELOCITY) {
             return MotionEmission.JUMP;
         }
@@ -87,16 +95,20 @@ public final class DustGameplay {
         if (!onGround || dx * dx + dz * dz < MIN_HORIZONTAL_DISTANCE_SQUARED) {
             return MotionEmission.NONE;
         }
-        int interval = sprinting ? RUN_INTERVAL_TICKS : WALK_INTERVAL_TICKS;
+        int interval = sprinting ? runIntervalTicks : walkIntervalTicks;
         return Math.floorMod(gameTick + cadenceOffset, interval) == 0
             ? (sprinting ? MotionEmission.RUN : MotionEmission.WALK)
             : MotionEmission.NONE;
     }
 
     static int damagingLandingAmount(float finalDamage) {
+        return damagingLandingAmount(finalDamage, FALL_DAMAGE_BASE_AMOUNT, FALL_DAMAGE_PER_POINT,
+            MAX_FALL_DAMAGE_AMOUNT);
+    }
+
+    static int damagingLandingAmount(float finalDamage, int baseAmount, int amountPerPoint, int maximum) {
         if (!(finalDamage > 0) || !Float.isFinite(finalDamage)) return 0;
-        return Math.min(MAX_FALL_DAMAGE_AMOUNT,
-            FALL_DAMAGE_BASE_AMOUNT + (int) Math.ceil(finalDamage * FALL_DAMAGE_PER_POINT));
+        return Math.min(maximum, baseAmount + (int) Math.ceil(finalDamage * amountPerPoint));
     }
 
     public void onEntityTick(EntityTickEvent.Post event) {
@@ -106,21 +118,24 @@ public final class DustGameplay {
             return;
         }
         long tick = level.getGameTime();
+        DynamicAtmosphereServerConfig.Dust config = DynamicAtmosphereServerConfig.snapshot().dust();
         MotionState current = new MotionState(entity.getX(), entity.getZ(), entity.onGround(), Long.MIN_VALUE);
         MotionState previous = motion.putIfAbsent(entity.getUUID(), current);
         if (previous == null) return;
 
         MotionEmission emission = movementEmission(previous, entity.getX(), entity.getZ(), entity.onGround(),
-            entity.getDeltaMovement().y(), entity.isSprinting(), tick, entity.getId());
+            entity.getDeltaMovement().y(), entity.isSprinting(), tick, entity.getId(),
+            config.walkIntervalTicks(), config.runIntervalTicks());
         motion.put(entity.getUUID(), new MotionState(entity.getX(), entity.getZ(), entity.onGround(),
             previous.damagingLandingTick()));
         if (emission != MotionEmission.NONE) {
             if ((emission == MotionEmission.WALK || emission == MotionEmission.RUN)
                 && movementMaterial(entity.isInWater(), isSnowOrIce(level.getBlockState(entity.getOnPos())))
                     == MovementMaterial.VAPOR) {
-                DynamicAtmosphereMod.emitVapor(level, entity.blockPosition(), emission.amount());
+                DynamicAtmosphereMod.emitVapor(level, entity.blockPosition(), configuredAmount(emission, config));
             } else {
-                DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.DUST, entity.blockPosition(), emission.amount());
+                DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.DUST, entity.blockPosition(),
+                    configuredAmount(emission, config));
             }
         }
     }
@@ -128,7 +143,9 @@ public final class DustGameplay {
     public void onLivingDamage(LivingDamageEvent.Post event) {
         LivingEntity entity = event.getEntity();
         if (!(entity.level() instanceof ServerLevel level) || !event.getSource().is(DamageTypeTags.IS_FALL)) return;
-        int amount = damagingLandingAmount(event.getNewDamage());
+        DynamicAtmosphereServerConfig.Dust config = DynamicAtmosphereServerConfig.snapshot().dust();
+        int amount = damagingLandingAmount(event.getNewDamage(), config.fallDamageBaseEmission(),
+            config.fallDamageEmissionPerPoint(), config.maxFallDamageEmission());
         if (amount == 0) return;
 
         long tick = level.getGameTime();
@@ -140,13 +157,15 @@ public final class DustGameplay {
 
     public void onBlockBreak(BlockEvent.BreakEvent event) {
         if (!event.isCanceled() && event.getLevel() instanceof ServerLevel level) {
-            DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.DUST, event.getPos(), BLOCK_BREAK_AMOUNT);
+            DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.DUST, event.getPos(),
+                DynamicAtmosphereServerConfig.snapshot().dust().blockBreakEmission());
         }
     }
 
     public void onBlockPlace(BlockEvent.EntityPlaceEvent event) {
         if (!event.isCanceled() && event.getLevel() instanceof ServerLevel level) {
-            DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.DUST, event.getPos(), BLOCK_PLACE_AMOUNT);
+            DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.DUST, event.getPos(),
+                DynamicAtmosphereServerConfig.snapshot().dust().blockPlaceEmission());
         }
     }
 
@@ -159,6 +178,16 @@ public final class DustGameplay {
     private static boolean isSnowOrIce(BlockState state) {
         return state.is(BlockTags.ICE) || state.is(Blocks.SNOW) || state.is(Blocks.SNOW_BLOCK)
             || state.is(Blocks.POWDER_SNOW);
+    }
+
+    private static int configuredAmount(MotionEmission emission, DynamicAtmosphereServerConfig.Dust config) {
+        return switch (emission) {
+            case NONE -> 0;
+            case WALK -> config.walkEmission();
+            case RUN -> config.runEmission();
+            case JUMP -> config.jumpEmission();
+            case LAND -> config.landEmission();
+        };
     }
 
     private DustGameplay() { }

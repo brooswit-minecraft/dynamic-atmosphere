@@ -7,6 +7,14 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class MaterialClientTest {
     @Test
+    void enderGasIsTenTimesItsPreviousOpticalDensity() {
+        assertEquals(40, AtmosphereRenderMaterial.ENDER_GAS.opticalDensityMultiplier);
+        assertEquals(4, AtmosphereRenderMaterial.SMOKE.cellSize);
+        double oldDepth = -Math.log1p(-AtmosphereVolumeGeometry.sliceAlpha(100, 1, 1, 4));
+        double newDepth = -Math.log1p(-AtmosphereVolumeGeometry.sliceAlpha(100, 1, 1, 40));
+        assertEquals(oldDepth * 10, newDepth, 1e-5);
+    }
+    @Test
     void activeOpticalDensityMultipliersMatchDefinitionsWithoutScalingMaterial() {
         var definitions = List.of(
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.VAPOR,

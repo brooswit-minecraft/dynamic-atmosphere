@@ -31,7 +31,7 @@ class AtmosphereVolumeGeometryTest {
             var slices = AtmosphereVolumeGeometry.lodSlices(volume, 500, camera,
                 new AtmosphereVolumeGeometry.Point(0, 0, 1));
             assertFalse(slices.isEmpty());
-            assertTrue(slices.size() <= (volume.size() == 4 ? 9 : 3));
+            assertEquals(volume.size(), slices.size(), "All LODs retain one-block slice spacing for Vapor");
             double transmission = 1;
             for (var slice : slices) {
                 transmission *= 1 - slice.alpha();

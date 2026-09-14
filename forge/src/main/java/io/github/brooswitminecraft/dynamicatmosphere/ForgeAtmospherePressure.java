@@ -3,6 +3,7 @@ package io.github.brooswitminecraft.dynamicatmosphere;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.Level;
 
 import java.util.ArrayList;
@@ -97,6 +98,12 @@ final class ForgeAtmospherePressure {
     private static AtmospherePressure.CellScan<BlockPos> scan(
         ServerLevel level, AtmosphereGrid.CellKey<ResourceKey<Level>> cell, int size
     ) {
+        return scan(level, cell, size, level::isInWorldBounds);
+    }
+
+    static AtmospherePressure.CellScan<BlockPos> scan(
+        BlockGetter level, AtmosphereGrid.CellKey<?> cell, int size, Predicate<BlockPos> inWorldBounds
+    ) {
         long originX = (long) cell.x() * size;
         long originY = (long) cell.y() * size;
         long originZ = (long) cell.z() * size;
@@ -115,15 +122,15 @@ final class ForgeAtmospherePressure {
                         continue;
                     }
                     pos.set((int) worldX, (int) worldY, (int) worldZ);
-                    if (!level.isInWorldBounds(pos)) {
+                    if (!inWorldBounds.test(pos)) {
                         continue;
                     }
                     var state = level.getBlockState(pos);
-                    if (state.isAir()) {
+                    if (ForgeCapacityBlockClassifier.isEmptySpace(state)) {
                         emptyBlocks++;
                     } else if (state.getFluidState().isEmpty()) {
-                        // Vanilla destroyBlock replaces waterlogged blocks with water.
-                        // They cannot create air capacity and must not stall relief.
+                        // Keep fluid-bearing hosts excluded from pressure destruction.
+                        // Their occupied volume still counts against capacity above.
                         candidates.add(new AtmospherePressure.Candidate<>(
                             pos.immutable(), state.getDestroySpeed(level, pos)));
                     }

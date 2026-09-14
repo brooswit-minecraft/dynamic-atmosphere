@@ -23,34 +23,25 @@ class AtmosphereMaterialTest {
     }
 
     @Test
-    void simulationSpeedsAreFourAndEightTimesBase() {
-        assertEquals(50, AtmosphereMaterial.DUST.simulationIntervalTicks());
-        assertEquals(25, AtmosphereMaterial.ENDER_GAS.simulationIntervalTicks());
-        assertEquals(50, AtmosphereMaterial.DUST.nextSimulationTick(1));
-        assertEquals(25, AtmosphereMaterial.ENDER_GAS.nextSimulationTick(1));
-        assertEquals(100, AtmosphereMaterial.DUST.nextSimulationTick(50));
-        assertEquals(50, AtmosphereMaterial.ENDER_GAS.nextSimulationTick(25));
-        assertEquals(200, AtmosphereMaterial.VIOLENCE.simulationIntervalTicks());
-        assertEquals(50, AtmosphereMaterial.EXHAUST.simulationIntervalTicks());
-        assertEquals(400, AtmosphereMaterial.SLIME.simulationIntervalTicks());
-        assertEquals(400, AtmosphereMaterial.SLIME.nextSimulationTick(1));
-        assertEquals(800, AtmosphereMaterial.SLIME.nextSimulationTick(400));
+    void allMaterialsUseSharedSimulationCadence() {
+        for (var material : AtmosphereMaterial.values()) {
+            assertEquals(200, material.simulationIntervalTicks());
+            assertEquals(200, material.nextSimulationTick(1));
+            assertEquals(400, material.nextSimulationTick(200));
+            assertEquals(AtmosphereGridLayout.nextSimulationTick(1), material.nextSimulationTick(1));
+            assertEquals(SmokeGridLayout.nextSimulationTick(1), material.nextSimulationTick(1));
+        }
     }
 
     @Test
-    void producerCadenceScalesWithoutAccumulatingRoundingDrift() {
-        assertEquals(75, AtmosphereMaterial.DUST.nextProducerTick(0));
-        assertEquals(38, AtmosphereMaterial.ENDER_GAS.nextProducerTick(0));
-        assertEquals(75, AtmosphereMaterial.ENDER_GAS.nextProducerTick(38));
-        assertEquals(113, AtmosphereMaterial.ENDER_GAS.nextProducerTick(75));
-        assertEquals(300, AtmosphereMaterial.VIOLENCE.nextProducerTick(0));
-        assertEquals(300, AtmosphereMaterial.VIOLENCE.nextProducerTick(299));
-        assertEquals(600, AtmosphereMaterial.VIOLENCE.nextProducerTick(300));
-        assertEquals(75, AtmosphereMaterial.EXHAUST.nextProducerTick(0));
-        assertEquals(600, AtmosphereMaterial.SLIME.nextProducerTick(0));
-        assertEquals(600, AtmosphereMaterial.SLIME.nextProducerTick(599));
-        assertEquals(1_200, AtmosphereMaterial.SLIME.nextProducerTick(600));
-        assertThrows(IllegalArgumentException.class, () -> AtmosphereMaterial.SLIME.nextProducerTick(-1));
+    void allMaterialsUseSharedProductionCadence() {
+        for (var material : AtmosphereMaterial.values()) {
+            assertEquals(300, material.nextProducerTick(0));
+            assertEquals(300, material.nextProducerTick(299));
+            assertEquals(600, material.nextProducerTick(300));
+            assertEquals(900, material.nextProducerTick(600));
+            assertThrows(IllegalArgumentException.class, () -> material.nextProducerTick(-1));
+        }
     }
 
     @Test

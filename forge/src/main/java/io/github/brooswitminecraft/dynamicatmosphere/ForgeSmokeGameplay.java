@@ -52,7 +52,7 @@ public final class ForgeSmokeGameplay {
         if (chunk == null) return;
         BlockState next = chunk.getBlockState(pos);
         // Waterlogged destruction can leave water: the original block still ceased to exist.
-        if (previous.getBlock() != next.getBlock()) enqueue(server, pos, SmokeProducerRules.EXPLOSION_BLOCK, true);
+        if (previous.getBlock() != next.getBlock()) enqueue(server, pos, SmokeProducerRules.explosionBlockAmount(), true);
     }
 
     private static void enqueue(ServerLevel level, BlockPos pos, int amount, boolean smoke) {
@@ -88,7 +88,7 @@ public final class ForgeSmokeGameplay {
         return queues == null ? 0 : queues.smoke().rejectedAmount() + queues.vapor().rejectedAmount();
     }
 
-    /** Origin is an aligned eight-block Smoke cell. Parent subtracts the returned amount through its grid API. */
+    /** Origin is an aligned Smoke cell. Parent subtracts the returned amount through its grid API. */
     public static int processTurn(ServerLevel level, BlockPos cellOrigin, int currentAmount) {
         requireServerThread(level);
         if (currentAmount <= 0 || loaded(level, cellOrigin) == null) return 0;
@@ -131,7 +131,9 @@ public final class ForgeSmokeGameplay {
     }
 
     private static void position(BlockPos.MutableBlockPos target, BlockPos origin, int index) {
-        target.set(origin.getX() + index % 8, origin.getY() + index / 64, origin.getZ() + index / 8 % 8);
+        int size = SmokeGridLayout.CELL_SIZE;
+        target.set(origin.getX() + index % size, origin.getY() + index / (size * size),
+            origin.getZ() + index / size % size);
     }
 
     private static boolean neighborsLoaded(ServerLevel level, BlockPos pos) {

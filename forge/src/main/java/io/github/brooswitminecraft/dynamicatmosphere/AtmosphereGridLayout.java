@@ -26,15 +26,15 @@ public final class AtmosphereGridLayout {
     }
 
     public static int simulationIntervalTicks() {
-        return SIMULATION_INTERVAL_TICKS;
+        return DynamicAtmosphereServerConfig.snapshot().vapor().simulationIntervalTicks();
     }
 
     public static boolean isSimulationTick(long tick) {
-        return tick > 0 && tick % SIMULATION_INTERVAL_TICKS == 0;
+        return tick > 0 && tick % simulationIntervalTicks() == 0;
     }
 
     public static long nextSimulationTick(long tick) {
-        return Math.multiplyExact(Math.floorDiv(tick, SIMULATION_INTERVAL_TICKS) + 1,
-            (long) SIMULATION_INTERVAL_TICKS);
+        int interval = simulationIntervalTicks();
+        return Math.multiplyExact(Math.floorDiv(tick, interval) + 1, (long) interval);
     }
 }

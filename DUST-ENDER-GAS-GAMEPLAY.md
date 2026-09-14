@@ -1,9 +1,10 @@
 # Dust and Ender Gas Gameplay Defaults
 
-These are conservative implementation defaults for the next release, not new
-permanent design constraints. Producers are event-driven or called by the
-existing bounded loaded-chunk producer schedule. They never scan a dimension or
-load a chunk.
+These are the configurable implementation defaults for the combined
+`0.16.0-alpha.1` release. Both materials use the shared 200-tick simulation and
+300-tick scheduled-producer cadence. Event producers remain event-driven. All
+queries are bounded and loaded-only; neither system scans a dimension or forces a
+chunk to load.
 
 ## Dust
 
@@ -12,30 +13,49 @@ load a chunk.
 - Walking or running in water, or on ice, snow, snow blocks, or powder snow,
   emits the same amount as Vapor instead of Dust. Routing is mutually exclusive.
 - Jump transitions emit 8 Dust. Ordinary landing transitions emit 6 Dust.
-- A landing that actually deals fall damage emits `16 + ceil(2 * damage)` Dust,
-  capped at 64, and suppresses the ordinary landing burst for that tick.
-- Breaking a block emits 16 Dust; placing a block emits 12 Dust.
-- Each processed 2x2x2 Dust cell examines at most its eight blocks. Pure water
-  can become mud with chance 0% at 50% fullness, linear to 100% at 100%.
-  Success consumes half the then-current Dust, rounded up. Failed placement or
-  debit restores the water and consumes nothing. Waterlogged hosts are ignored.
-- Overfull Dust has a 1/16 chance per processed-cell check to place one gravel
-  block in an air position. This initial gravel rule does not consume Dust.
+- A landing that deals fall damage emits `16 + ceil(2 * damage)` Dust, capped at
+  64, and suppresses the ordinary landing burst for that tick.
+- Breaking a block emits 16 Dust; placing one emits 12; a successfully placed
+  falling block emits 24 at its landing position.
+- Each processed 2x2x2 Dust cell examines at most its eight blocks. Plain water
+  can become mud with chance 0% at 50% fullness, rising linearly to 100% at full
+  capacity. Success consumes half the current Dust, rounded up. Failed placement
+  or debit restores the water and consumes nothing. Waterlogged hosts are ignored.
+- Overfull Dust has a 1/16 chance per processed turn to place gravel in air.
+  Successful placement consumes 25% of current Dust, rounded down with a minimum
+  of one; failure consumes nothing.
+- An independent 1/64 processed-turn roll dissipates up to 40 Dust.
 
 ## Ender Gas
 
+Ender Gas uses 1x1x1 server cells and a client optical density of 40. The density
+is visual only and does not alter amounts, capacity, fullness, or gameplay gates.
+Dust and Ender Gas render only their base-cell LOD through V/4. Like all materials,
+their geometry uses `baseCellSize / slicesPerBaseCell` slice spacing rather than a
+distant one-slice shortcut, while retaining thickness-integrated optical density.
+
 - Endermen, endermites, Ender Dragons, witches, and shulkers emit 1 unit every
   40 ticks. Any entity actively occupying a Nether portal emits 2 every 20 ticks.
-- A sampled Nether portal, Ender chest, soul torch/wall torch, soul fire, or soul
-  sand emits 1 unit.
+- A sampled Nether portal, Ender chest, soul torch or wall torch, soul fire, soul
+  sand, or Crying Obsidian emits 1 unit.
 - A successfully spawned Ender pearl emits 24 units; its first impact emits 48.
-- During a full-moon night, every bounded loaded-chunk producer check makes its
-  own 1/256 roll. Success emits 8,000 units at one sampled surface position.
+- During a full-moon night, every bounded loaded-chunk producer check makes an
+  independent 1/256 roll. Success emits 8,000 units at a sampled surface position.
+- Natural Endermen require strictly more than 50% local Ender Gas fullness at the
+  spawn position, including underground. The check consumes no gas and never
+  bypasses another vanilla spawn rule. Commands, eggs, spawners, and scripted
+  creation retain their normal behavior.
 
-## Future Enderman Override
+## Configuration
 
-The purple spawn gate exists but must not be registered until Ender Gas storage,
-production, and rendering are active. At activation, natural Endermen must be
-removed from the generic Vapor hostile gate in the same change. They then require
-strictly more than 50% Ender Gas at every natural spawn position, including
-underground, without consuming gas or overriding any ordinary spawn rule.
+These producer amounts, chances, intervals, and Dust effects are exposed in the
+world's `serverconfig/dynamicatmosphere-server.toml`. The shared simulation and
+producer intervals are under `runtime`; material-specific settings are under
+`dust` and `enderGas`. Server values are read through reloadable snapshots and
+apply after NeoForge reloads the server config.
+
+Ender Gas reach and optical density are client settings in
+`<game-directory>/config/dynamicatmosphere-client.toml`. Client presentation
+settings hot-reload. Only client `allocation.cellBudget` requires a game restart.
+Cell sizes, persisted formats, and the network protocol are structural and are not
+configuration options.

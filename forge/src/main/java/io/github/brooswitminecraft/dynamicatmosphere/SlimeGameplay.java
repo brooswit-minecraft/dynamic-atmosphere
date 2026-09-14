@@ -43,36 +43,38 @@ public final class SlimeGameplay {
 
     /** Called once per loaded chunk selected by the bounded producer schedule. */
     public void onLoadedChunkProducerCheck(ServerLevel level, LevelChunk chunk) {
+        DynamicAtmosphereServerConfig.Slime config = DynamicAtmosphereServerConfig.snapshot().slime();
         ChunkPos chunkPos = chunk.getPos();
         if (level.getChunkSource().getChunkNow(chunkPos.x, chunkPos.z) != chunk) return;
         boolean slimeChunk = WorldgenRandom.seedSlimeChunk(
             chunkPos.x, chunkPos.z, level.getSeed(), SLIME_SALT).nextInt(10) == 0;
-        if (!undergroundEmission(slimeChunk, level.random.nextInt(UNDERGROUND_CHANCE_DENOMINATOR))) return;
+        if (!undergroundEmission(slimeChunk, level.random.nextInt(config.undergroundChanceDenominator()))) return;
         int topExclusive = Math.min(VANILLA_UNDERGROUND_CEILING, level.getMaxBuildHeight());
         if (topExclusive <= level.getMinBuildHeight()) return;
         int x = chunkPos.getMinBlockX() + level.random.nextInt(16);
         int y = level.getMinBuildHeight() + level.random.nextInt(topExclusive - level.getMinBuildHeight());
         int z = chunkPos.getMinBlockZ() + level.random.nextInt(16);
         DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.SLIME,
-            new BlockPos(x, y, z), UNDERGROUND_AMOUNT);
+            new BlockPos(x, y, z), config.undergroundEmission());
     }
 
     /** Called once for a processed Slime cell whose origin is already loaded. */
     public void onProcessedCell(ServerLevel level, BlockPos cellOrigin) {
+        DynamicAtmosphereServerConfig.Slime config = DynamicAtmosphereServerConfig.snapshot().slime();
         DynamicAtmosphereMod.materialState(level, AtmosphereMaterial.SLIME, cellOrigin).ifPresent(state -> {
             SpawnDecision decision = spawnDecision(state.amount(), state.capacity(),
-                level.random.nextInt(HIGH_SPAWN_CHANCE_DENOMINATOR));
+                level.random.nextInt(config.spawnChanceDenominator()));
             if (!decision.spawn()) return;
-            BlockPos pos = findSpawnPosition(level, cellOrigin);
+            BlockPos pos = findSpawnPosition(level, cellOrigin, config.spawnAttempts());
             if (pos == null || !DynamicAtmosphereMod.consumeMaterial(
                 level, AtmosphereMaterial.SLIME, cellOrigin, decision.cost())) return;
             EntityType.SLIME.spawn(level, pos, MobSpawnType.NATURAL);
         });
     }
 
-    private static BlockPos findSpawnPosition(ServerLevel level, BlockPos origin) {
+    private static BlockPos findSpawnPosition(ServerLevel level, BlockPos origin, int attempts) {
         int size = AtmosphereMaterial.SLIME.cellSize();
-        for (int attempt = 0; attempt < SPAWN_ATTEMPTS; attempt++) {
+        for (int attempt = 0; attempt < attempts; attempt++) {
             BlockPos pos = origin.offset(level.random.nextInt(size), level.random.nextInt(size), level.random.nextInt(size));
             if (level.isOutsideBuildHeight(pos)
                 || level.getChunkSource().getChunkNow(pos.getX() >> 4, pos.getZ() >> 4) == null

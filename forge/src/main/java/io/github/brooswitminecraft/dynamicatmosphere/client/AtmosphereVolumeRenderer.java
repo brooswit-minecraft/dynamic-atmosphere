@@ -40,6 +40,7 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
         renderedCellCount = 0;
         renderedSliceCount = 0;
         renderedCoarseCount = 0;
+        if (!io.github.brooswitminecraft.dynamicatmosphere.DynamicAtmosphereClientConfig.snapshot().enabled()) return;
         if (cache.size() == 0 && materials.values().stream().allMatch(session -> session.cache().size() == 0)) return;
         var position = event.getCamera().getPosition();
         var look = event.getCamera().getLookVector();
@@ -91,6 +92,8 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
                               AtmosphereRenderMaterial material,
                               Consumer<List<AtmosphereVolumeGeometry.Slice>> consume) {
         int viewChunks = Minecraft.getInstance().options.getEffectiveRenderDistance();
+        var tuning = material.tuning();
+        cache.setReachMultiplier(tuning.reachMultiplier());
         cache.setView(camera.x(), camera.z(), viewChunks);
         var selection = cache.lodSelection(camera.x(), camera.y(), camera.z(), viewChunks);
         double tick = cache.renderTick(event.getPartialTick().getGameTimeDeltaPartialTick(false));
@@ -100,14 +103,14 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
                 boolean loaded = level.getChunkSource().hasChunk(
                     Math.floorDiv(cell.x, 16 / cell.baseCellSize), Math.floorDiv(cell.z, 16 / cell.baseCellSize));
                 if (!AtmosphereLodHierarchy.visibleWhenLoaded(cell, fallback, loaded)) continue;
-                if (!AtmosphereLodHierarchy.withinReach(cell, camera.x(), camera.y(), camera.z(), viewChunks, material.reach)
+                if (!AtmosphereLodHierarchy.withinReach(cell, camera.x(), camera.y(), camera.z(), viewChunks, tuning.reachMultiplier())
                     || !event.getFrustum().isVisible(bounds(cell))) continue;
                 var slices = AtmosphereVolumeGeometry.lodSlices(cell, cell.amount(tick), camera, forward,
-                    material.opticalDensityMultiplier);
+                    tuning.opticalDensity());
                 double dx = Math.max(Math.abs(cell.blockX() - camera.x()), Math.abs(cell.blockX() + cell.size() - camera.x()));
                 double dy = Math.max(Math.abs(cell.blockY() - camera.y()), Math.abs(cell.blockY() + cell.size() - camera.y()));
                 double dz = Math.max(Math.abs(cell.blockZ() - camera.z()), Math.abs(cell.blockZ() + cell.size() - camera.z()));
-                double reach = Math.max(1, viewChunks) * 16.0 * material.reach;
+                double reach = Math.max(1, viewChunks) * 16.0 * tuning.reachMultiplier();
                 if (dx * dx + dy * dy + dz * dz > reach * reach) {
                     slices = AtmosphereVolumeGeometry.clipToReach(slices, forward, reach);
                 }
@@ -136,7 +139,7 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
                 vertex(vertices, polygon.get(i + 1), slice.alpha(), r, g, b);
             }
             renderedSliceCount++;
-            if (++slices == SLICES_PER_BATCH) flush();
+            if (++slices >= io.github.brooswitminecraft.dynamicatmosphere.DynamicAtmosphereClientConfig.snapshot().slicesPerBatch()) flush();
         }
 
         void flush() {

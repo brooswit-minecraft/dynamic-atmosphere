@@ -38,7 +38,8 @@ public final class EnderGasGameplay {
         ResourceLocation.withDefaultNamespace("soul_torch"),
         ResourceLocation.withDefaultNamespace("soul_wall_torch"),
         ResourceLocation.withDefaultNamespace("soul_fire"),
-        ResourceLocation.withDefaultNamespace("soul_sand")
+        ResourceLocation.withDefaultNamespace("soul_sand"),
+        ResourceLocation.withDefaultNamespace("crying_obsidian")
     );
     static final int MOB_AMOUNT = 1;
     static final int PORTAL_OCCUPANT_AMOUNT = 2;
@@ -72,14 +73,15 @@ public final class EnderGasGameplay {
     public void onEntityTick(EntityTickEvent.Post event) {
         Entity entity = event.getEntity();
         if (!(entity.level() instanceof ServerLevel level)) return;
+        DynamicAtmosphereServerConfig.EnderGas config = DynamicAtmosphereServerConfig.snapshot().enderGas();
         long tick = level.getGameTime();
         int amount = 0;
-        if (isEnderMob(entity) && Math.floorMod(tick + entity.getId(), MOB_INTERVAL_TICKS) == 0) {
-            amount += MOB_AMOUNT;
+        if (isEnderMob(entity) && Math.floorMod(tick + entity.getId(), config.mobIntervalTicks()) == 0) {
+            amount += config.mobEmission();
         }
         if (entity.portalProcess != null && entity.portalProcess.isInsidePortalThisTick()
-            && Math.floorMod(tick + entity.getId(), PORTAL_INTERVAL_TICKS) == 0) {
-            amount += PORTAL_OCCUPANT_AMOUNT;
+            && Math.floorMod(tick + entity.getId(), config.portalIntervalTicks()) == 0) {
+            amount += config.portalOccupantEmission();
         }
         if (amount > 0) {
             DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.ENDER_GAS, entity.blockPosition(), amount);
@@ -89,26 +91,28 @@ public final class EnderGasGameplay {
     /** Called by the bounded producer schedule for a position it already selected in a loaded chunk. */
     public void onPassiveBlockSample(ServerLevel level, BlockPos pos, BlockState state) {
         if (isPassiveSource(state)) {
-            DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.ENDER_GAS, pos, PASSIVE_BLOCK_AMOUNT);
+            DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.ENDER_GAS, pos,
+                DynamicAtmosphereServerConfig.snapshot().enderGas().passiveBlockEmission());
         }
     }
 
     /** Called once for each loaded chunk selected by the bounded producer schedule. */
     public void onLoadedChunkProducerCheck(ServerLevel level, LevelChunk chunk) {
-        int roll = level.random.nextInt(FULL_MOON_CHANCE_DENOMINATOR);
+        DynamicAtmosphereServerConfig.EnderGas config = DynamicAtmosphereServerConfig.snapshot().enderGas();
+        int roll = level.random.nextInt(config.fullMoonChanceDenominator());
         if (!fullMoonBurst(level.isNight(), level.dimensionType().moonPhase(level.getDayTime()), roll)) return;
         int x = chunk.getPos().getMinBlockX() + level.random.nextInt(16);
         int z = chunk.getPos().getMinBlockZ() + level.random.nextInt(16);
         int y = chunk.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x & 15, z & 15) + 1;
         DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.ENDER_GAS,
             new BlockPos(x, Math.clamp(y, level.getMinBuildHeight(), level.getMaxBuildHeight() - 1), z),
-            FULL_MOON_BURST_AMOUNT);
+            config.fullMoonEmission());
     }
 
     public void onEntityJoin(EntityJoinLevelEvent event) {
         if (event.getEntity() instanceof ThrownEnderpearl pearl && event.getLevel() instanceof ServerLevel level) {
             DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.ENDER_GAS,
-                pearl.blockPosition(), PEARL_USE_AMOUNT);
+                pearl.blockPosition(), DynamicAtmosphereServerConfig.snapshot().enderGas().pearlUseEmission());
         }
     }
 
@@ -118,7 +122,8 @@ public final class EnderGasGameplay {
             return;
         }
         DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.ENDER_GAS,
-            BlockPos.containing(event.getRayTraceResult().getLocation()), PEARL_IMPACT_AMOUNT);
+            BlockPos.containing(event.getRayTraceResult().getLocation()),
+            DynamicAtmosphereServerConfig.snapshot().enderGas().pearlImpactEmission());
     }
 
     public void onEntityLeave(EntityLeaveLevelEvent event) {

@@ -8,6 +8,11 @@ public final class AtmospherePlantGrowth {
     public static final int COST = 40;
     public static final double CHANCE = 0.10;
 
+    /** Runtime preflight value for callers that gate before invoking {@link #attempt}. */
+    public static int minimumCost() {
+        return DynamicAtmosphereServerConfig.snapshot().plantGrowth().cost();
+    }
+
     /**
      * Tries every crop or sapling in one processed cell independently.
      *
@@ -26,15 +31,24 @@ public final class AtmospherePlantGrowth {
         IntPredicate eligiblePlantAt,
         IntPredicate applyBonemeal
     ) {
+        DynamicAtmosphereServerConfig.PlantGrowth config =
+            DynamicAtmosphereServerConfig.snapshot().plantGrowth();
+        return attempt(available, cellSize, config.chance(), config.cost(), roll, eligiblePlantAt, applyBonemeal);
+    }
+
+    public static int attempt(
+        int available, int cellSize, double chance, int cost, DoubleSupplier roll,
+        IntPredicate eligiblePlantAt, IntPredicate applyBonemeal
+    ) {
         if (cellSize <= 0 || cellSize > 16) throw new IllegalArgumentException("invalid cell size");
-        if (available < COST) return 0;
+        if (available < cost) return 0;
         int consumed = 0;
         int checks = Math.multiplyExact(Math.multiplyExact(cellSize, cellSize), cellSize);
-        for (int index = 0; index < checks && available - consumed >= COST; index++) {
+        for (int index = 0; index < checks && available - consumed >= cost; index++) {
             if (!eligiblePlantAt.test(index)) continue;
-            double chance = roll.getAsDouble();
-            if (!(chance >= 0 && chance < CHANCE)) continue;
-            if (applyBonemeal.test(index)) consumed += COST;
+            double sample = roll.getAsDouble();
+            if (!(sample >= 0 && sample < chance)) continue;
+            if (applyBonemeal.test(index)) consumed += cost;
         }
         return consumed;
     }
