@@ -47,7 +47,7 @@ place real water sources (below), but does not generate Minecraft rain. Pollutio
 gas transport, and world generation changes are not included yet.
 
 Rain still uses Minecraft's local rain/exposure check, but its emission is moved
-from ground level to the fixed altitude **Y=300**. Each passed rain check adds **320 material
+from ground level to the previous cloud altitude **Y=192**. Each passed rain check adds **320 material
 units**, eight times the previous 40, instead of also adding ground-level rain
 fog. High-terrain clouds and dark exposed-ground sources remain.
 Sampled surface water now evaporates: plain water fluid blocks become air, while

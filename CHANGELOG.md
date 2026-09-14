@@ -1,3 +1,8 @@
+# 0.13.2-alpha.1
+
+- Restore rain emission altitude from Y=300 to Y=192, retaining 320 material per passed rain check. This does not move or clear existing atmosphere.
+- Retain the 0.13.1 detailed-volume geometry optimization and all other simulation, producer, cache, and protocol behavior. No world reset or migration is required.
+
 # 0.13.1-alpha.1
 
 - Reduce each detailed 4-block atmospheric volume from eight 0.5-block translucent slices to four 1-block slices. Opacity remains integrated over slice thickness, preserving the same total optical density while halving detailed slice submissions and blend layers.

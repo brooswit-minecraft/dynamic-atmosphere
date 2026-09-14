@@ -58,7 +58,7 @@ final class ForgeAtmospherePrototype {
     private static final int HIGH_TERRAIN_EMISSION = 40;
     private static final int RAIN_CLOUD_EMISSION = 320;
     private static final int SNOW_ICE_EMISSION = 40;
-    private static final int RAIN_CLOUD_HEIGHT = 300;
+    private static final int RAIN_CLOUD_HEIGHT = 192;
     private static final int[][] DEMO_CELL_OFFSETS = {
         {0, 0, 0}, {1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}
     };
