@@ -5,11 +5,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class AtmosphereFanTransportTest {
     @Test
-    void transferRespectsSourceSpareCapacityAndBarriers() {
+    void transferOverfillsCellsWithEmptySpaceButRespectsSourceStorageCeilingAndBarriers() {
         assertEquals(128, AtmosphereFanTransport.movableAmount(128, 600, 200, 1000, true));
-        assertEquals(50, AtmosphereFanTransport.movableAmount(128, 600, 950, 1000, true));
+        assertEquals(128, AtmosphereFanTransport.movableAmount(128, 600, 950, 1000, true));
         assertEquals(20, AtmosphereFanTransport.movableAmount(128, 20, 0, 1000, true));
-        assertEquals(0, AtmosphereFanTransport.movableAmount(128, 600, 1000, 1000, true));
+        assertEquals(128, AtmosphereFanTransport.movableAmount(128, 600, 2000, 1, true));
+        assertEquals(0, AtmosphereFanTransport.movableAmount(128, 600, 1000, 0, true));
+        assertEquals(10, AtmosphereFanTransport.movableAmount(128, 600, 999990, 1000, true));
+        assertEquals(0, AtmosphereFanTransport.movableAmount(128, 600, 1000000, 1000, true));
         assertEquals(0, AtmosphereFanTransport.movableAmount(128, 600, 0, -1, true));
         assertEquals(0, AtmosphereFanTransport.movableAmount(128, 600, 0, 1000, false));
     }

@@ -144,7 +144,7 @@ class AtmosphereGridTest {
     }
 
     @Test
-    void fanHookSharesTheOrdinarySimulationSkipDecision() {
+    void beforeSpreadHookSharesTheOrdinarySimulationSkipDecision() {
         var grid = new AtmosphereGrid<String>();
         var source = key(0, 0, 0);
         var east = key(1, 0, 0);
@@ -168,7 +168,7 @@ class AtmosphereGridTest {
     }
 
     @Test
-    void selectedFanTransferOccursBeforeNormalDistribution() {
+    void selectedPreDistributionTransferOccursBeforeNormalDistribution() {
         var grid = new AtmosphereGrid<String>();
         var source = key(0, 0, 0);
         var east = key(1, 0, 0);

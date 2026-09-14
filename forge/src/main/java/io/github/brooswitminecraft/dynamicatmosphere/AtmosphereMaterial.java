@@ -51,7 +51,8 @@ public enum AtmosphereMaterial {
 
     public int capacityForAirBlocks(int airBlocks) {
         int volume = cellSize * cellSize * cellSize;
-        return Math.clamp(airBlocks, 0, volume) * AtmosphereGrid.MAX_AMOUNT / volume;
+        int empty = Math.clamp(airBlocks, 0, volume);
+        return empty == 0 ? 0 : Math.max(1, empty * AtmosphereGrid.MAX_AMOUNT / volume);
     }
 
     public long nextSimulationTick(long tick) {

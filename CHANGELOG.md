@@ -1,3 +1,10 @@
+# 0.18.0-alpha.1
+
+- Give Create fans an independent five-second loaded-chunk pass with no random skip. `integrations.createFanIntervalTicks` defaults to 100 and `maxFanChunksPerTick` to 32; queued work is bounded and never force-loads chunks.
+- Fans transfer into any destination with empty space, including already-full cells, allowing overpressure and the existing pressure response. Fully solid/unavailable cells and downward barriers still block transfer. Preserve total material at the internal storage ceiling.
+- Count even one vacant block as positive capacity in large material cells.
+- Ordinary atmosphere simulation remains on its existing cadence and 75% skip; it no longer invokes fans.
+
 # 0.17.1-alpha.1
 
 - Apply Create fan transfers before normal distribution for every selected cell. Preserve the shared simulation step and 75% skip decision; no separate timer or skip bypass.

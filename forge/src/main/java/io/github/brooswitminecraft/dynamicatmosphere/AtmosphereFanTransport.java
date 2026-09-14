@@ -5,8 +5,9 @@ public final class AtmosphereFanTransport {
     private AtmosphereFanTransport() { }
 
     public static int movableAmount(int requested, int source, int destination, int capacity, boolean allowed) {
-        if (!allowed || requested <= 0 || source <= 0 || destination < 0 || capacity <= destination) return 0;
-        return Math.min(requested, Math.min(source, capacity - destination));
+        if (!allowed || requested <= 0 || source <= 0 || destination < 0 || capacity <= 0) return 0;
+        // Physical capacity may be exceeded; only the storage ceiling prevents loss by saturation.
+        return Math.max(0, Math.min(requested, Math.min(source, AtmosphereGrid.MAX_STORED_AMOUNT - destination)));
     }
 
     /** Fractional units are discarded; invalid inputs disable transport and overflow saturates. */

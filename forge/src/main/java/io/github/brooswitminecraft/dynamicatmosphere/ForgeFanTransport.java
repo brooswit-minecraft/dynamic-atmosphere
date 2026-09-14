@@ -15,11 +15,17 @@ import net.neoforged.fml.ModList;
 public final class ForgeFanTransport {
     private ForgeFanTransport() { }
 
+    public static List<BlockPos> activeFanPositions(LevelChunk chunk) {
+        if (ModList.get() == null || !ModList.get().isLoaded("create")) return List.of();
+        return CreateAccess.activeFanPositions(chunk);
+    }
+
     /**
-     * Call once per processed source cell, on the server thread, using its minimum block position.
+     * Call once per fan-containing source cell in an independent fan pass, using its minimum block position.
      * Returns one request per rotating fan inside the half-open cell bounds, in X/Z/Y coordinate order.
      * The caller moves material one cell in request.direction(), bounded by remaining source material,
-     * destination spare capacity, loaded/readable destination state, and its liquid/bedrock edge rules.
+     * destination empty space, loaded/readable destination state, and its liquid/bedrock edge rules.
+     * Physical capacity may be exceeded to create pressure.
      * Read the coefficient from a fresh server config snapshot at the start of the processing tick.
      * No chunks or block entities are loaded, no grid is mutated, and requests are not cached across ticks.
      */
@@ -63,6 +69,14 @@ public final class ForgeFanTransport {
 
     // JVM resolution of Create classes is deferred until the mod-presence guard above passes.
     private static final class CreateAccess {
+        private static List<BlockPos> activeFanPositions(LevelChunk chunk) {
+            return chunk.getBlockEntities().entrySet().stream()
+                .filter(entry -> entry.getValue() instanceof
+                    com.simibubi.create.content.kinetics.fan.EncasedFanBlockEntity fan
+                    && !fan.isRemoved() && Float.isFinite(fan.getSpeed()) && fan.getSpeed() != 0)
+                .map(entry -> entry.getKey().immutable()).sorted().toList();
+        }
+
         private static List<Request> collect(ServerLevel level, BlockPos min, int size, double coefficient) {
             List<LocatedRequest> requests = new ArrayList<>();
             int maxChunkX = Math.floorDiv(min.getX() + size - 1, 16);

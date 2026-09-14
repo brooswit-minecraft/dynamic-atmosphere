@@ -98,6 +98,8 @@ public final class DynamicAtmosphereServerConfig {
     private static final IntOption PLANT_COST;
 
     private static final DoubleOption CREATE_FAN_RPM_COEFFICIENT;
+    private static final IntOption CREATE_FAN_INTERVAL;
+    private static final IntOption CREATE_FAN_CHUNK_BUDGET;
     private static volatile Snapshot cached;
 
     static {
@@ -211,6 +213,8 @@ public final class DynamicAtmosphereServerConfig {
 
         builder.push("integrations");
         CREATE_FAN_RPM_COEFFICIENT = decimal(builder, "createFanTransportPerRpm", 1.0, 0, 1000);
+        CREATE_FAN_INTERVAL = integer(builder, "createFanIntervalTicks", 100, 1, 72000);
+        CREATE_FAN_CHUNK_BUDGET = integer(builder, "maxFanChunksPerTick", 32, 1, 10000);
         builder.pop();
         SPEC = builder.build();
         cached = readSnapshot();
@@ -257,7 +261,7 @@ public final class DynamicAtmosphereServerConfig {
                 ENDER_PEARL_IMPACT.get(), ENDER_MOB_INTERVAL.get(),
                 ENDER_PORTAL_INTERVAL.get(), ENDER_PORTAL_BLOCK.get()),
             new PlantGrowth(PLANT_CHANCE.get(), PLANT_COST.get()),
-            new Integrations(CREATE_FAN_RPM_COEFFICIENT.get())
+            new Integrations(CREATE_FAN_RPM_COEFFICIENT.get(), CREATE_FAN_INTERVAL.get(), CREATE_FAN_CHUNK_BUDGET.get())
         );
     }
 
@@ -343,7 +347,8 @@ public final class DynamicAtmosphereServerConfig {
                            int mobIntervalTicks, int portalIntervalTicks,
                            int portalBlockEmission) { }
     public record PlantGrowth(double chance, int cost) { }
-    public record Integrations(double createFanTransportPerRpm) { }
+    public record Integrations(double createFanTransportPerRpm, int createFanIntervalTicks,
+                               int maxFanChunksPerTick) { }
 
     private DynamicAtmosphereServerConfig() { }
 }

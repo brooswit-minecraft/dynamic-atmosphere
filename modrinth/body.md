@@ -1,6 +1,6 @@
 # Dynamic Atmosphere
 
-**0.17.1-alpha.1** for Minecraft **1.21.1 / NeoForge**, with seven server-owned,
+**0.18.0-alpha.1** for Minecraft **1.21.1 / NeoForge**, with seven server-owned,
 chunk-persisted atmospheric materials and translucent client volumes.
 
 **Destructive pressure is enabled by default and can damage terrain and builds,
@@ -10,7 +10,7 @@ downgrading does not undo these changes. No world reset is required.**
 
 ## Seven Materials
 
-`0.17.1-alpha.1` enables all seven independent materials, each with chunk-persisted
+`0.18.0-alpha.1` enables all seven independent materials, each with chunk-persisted
 server amounts and separate client state. These are active MVP systems, not
 placeholders for future runtime support. Numeric defaults are initial tuning,
 not a claim of balance or measured performance.
@@ -193,11 +193,16 @@ and frustum. Delta sync is every 20 ticks and full snapshots every 200.
 With Create installed, rotating Encased Fans move atmosphere one cell in their
 facing direction. Requested movement is
 `floor(abs(RPM) * createFanTransportPerRpm)`, with a default coefficient of 1.0.
-Fan movement runs before normal spreading, on the same selected simulation step.
+Fan movement runs independently every 100 ticks (five seconds), with no skip roll.
+`integrations.createFanIntervalTicks` and `integrations.maxFanChunksPerTick`
+(default 32) configure cadence and bounded loaded-chunk scanning.
 Normal spreading shares limited material and destination capacity proportionally,
 without preferring X over Z or whichever source is processed first.
-Reverse RPM does not reverse direction. Source amount, destination spare capacity,
-loaded terrain, and liquid/bedrock downward barriers bound the actual transfer.
+Reverse RPM does not reverse direction. Any destination with empty space can be
+overfilled, causing normal pressure handling and possible block destruction.
+Source amount, the numeric storage ceiling, loaded terrain, and liquid/bedrock
+downward barriers still bound transfer. At 256 RPM, each pass requests 256 units
+per material present in the fan's cell.
 
 Portal sections are palette-filtered and scanned for every portal block, emitting
 on both faces. `enderGas.portalBlockEmission` defaults to 100 per block per producer
@@ -217,7 +222,7 @@ client and server.
 
 ## Installation
 
-Install **0.17.1-alpha.1 on both server and client**, or in a NeoForge 1.21.1
+Install **0.18.0-alpha.1 on both server and client**, or in a NeoForge 1.21.1
 single-player instance. **Protocol 10 requires both sides to update together;
 earlier protocols are incompatible.** No extra graphics dependency is required.
 World identity, scoped snapshots, and chunk freshness distinguish live state from

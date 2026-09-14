@@ -53,6 +53,7 @@ class AtmosphereMaterialTest {
         assertEquals(500, AtmosphereMaterial.VIOLENCE.capacityForAirBlocks(256));
         assertEquals(500, AtmosphereMaterial.EXHAUST.capacityForAirBlocks(4));
         assertEquals(500, AtmosphereMaterial.SLIME.capacityForAirBlocks(2048));
+        assertEquals(1, AtmosphereMaterial.SLIME.capacityForAirBlocks(1));
     }
 
     @Test

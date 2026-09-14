@@ -98,6 +98,7 @@ final class ForgeAtmospherePrototype {
     private final Map<ChunkKey, ChunkState> chunks = new HashMap<>();
     private final Map<ChunkKey, LevelChunk> pendingLoads = new LinkedHashMap<>();
     private final AtmosphereProducerSchedule<ChunkKey> producerSchedule = new AtmosphereProducerSchedule<>();
+    private final AtmosphereFanSchedule<ChunkKey> fanSchedule = new AtmosphereFanSchedule<>();
     private final AtmosphereSyncPlanner<UUID, ResourceKey<Level>> syncPlanner =
         new AtmosphereSyncPlanner<>(AtmosphereGridPayload.MAX_CELLS_PER_PAYLOAD);
     private final AtmosphereGrid<ResourceKey<Level>> smokeGrid =
@@ -200,6 +201,7 @@ final class ForgeAtmospherePrototype {
         sourcesProcessed = 0;
         workRemaining = false;
         searchLimited = false;
+        processFans(event.getServer());
         advanceSimulation(event.getServer());
         advanceSmokeSimulation(event.getServer());
         advanceMaterialSimulations(event.getServer());
@@ -318,6 +320,7 @@ final class ForgeAtmospherePrototype {
         chunks.clear();
         pendingLoads.clear();
         producerSchedule.clear();
+        fanSchedule.clear();
         smokeProducerSchedule.clear();
         materialProducerSchedules.values().forEach(AtmosphereProducerSchedule::clear);
         for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
@@ -361,6 +364,8 @@ final class ForgeAtmospherePrototype {
                 + ", fanCellsChecked=" + fanCellsChecked + ", fanRequests=" + fanRequests
                 + ", fanBlocked=" + fanBlocked + ", fanTransfers=" + fanTransfers
                 + ", fanMaterialMoved=" + fanMaterialMoved
+                + ", fanInterval=" + tuning().integrations().createFanIntervalTicks()
+                + ", fanCycles=" + fanSchedule.cycles() + ", fanBacklog=" + fanSchedule.pending()
                 + ", condensationChecks=" + condensationChecks
                 + ", waterBlocksCreated=" + waterBlocksCreated
                 + ", materialCondensed=" + materialCondensed
@@ -601,8 +606,6 @@ final class ForgeAtmospherePrototype {
             growPlants(server.getLevel(key.dimension()), grid, key, AtmosphereGrid.CELL_SIZE, capacityAt);
             capacities.clear();
             if (condense(server.getLevel(key.dimension()), key, capacityAt.applyAsInt(key))) capacities.clear();
-            applyFans(server.getLevel(key.dimension()), grid, key,
-                AtmosphereGrid.CELL_SIZE, capacityAt, canTransfer);
         }, key -> shouldSimulate(server, key), canTransfer);
         materialMoved += spread.moved();
         blockedOverflow += spread.blockedOverflow();
@@ -694,7 +697,6 @@ final class ForgeAtmospherePrototype {
             var current = smokeGrid.get(key);
             if (used > 0 && current != null) smokeGrid.set(key,
                 Math.max(0, current.amount() - used), serverTicks, capacityAt.applyAsInt(key));
-            applyFans(level, smokeGrid, key, SmokeGridLayout.CELL_SIZE, capacityAt, canTransfer);
         }, key -> shouldSimulate(server, key), canTransfer);
         materialMoved += spread.moved();
         blockedOverflow += spread.blockedOverflow();
@@ -737,7 +739,6 @@ final class ForgeAtmospherePrototype {
                     }
                     dissipateDust(level, materialGrid, key, capacityAt);
                 }
-                applyFans(cellLevel, materialGrid, key, material.cellSize(), capacityAt, canTransfer);
             }, key -> shouldSimulate(server, key), canTransfer);
             materialMoved += spread.moved();
             blockedOverflow += spread.blockedOverflow();
@@ -774,12 +775,51 @@ final class ForgeAtmospherePrototype {
         return level != null && level.random.nextDouble() >= tuning().runtime().simulationSkipChance();
     }
 
+    private void processFans(MinecraftServer server) {
+        var config = tuning().integrations();
+        if (config.createFanTransportPerRpm() <= 0) { fanSchedule.clear(); return; }
+        for (var chunkKey : fanSchedule.poll(serverTicks, config.createFanIntervalTicks(),
+            config.maxFanChunksPerTick(), chunks.keySet(), key -> {
+                var level = server.getLevel(key.dimension());
+                var state = chunks.get(key);
+                return level != null && state != null
+                    && level.getChunkSource().getChunkNow(key.x(), key.z()) == state.chunk;
+            })) {
+            var level = server.getLevel(chunkKey.dimension());
+            var state = chunks.get(chunkKey);
+            var positions = ForgeFanTransport.activeFanPositions(state.chunk);
+            if (positions.isEmpty()) continue;
+            if (state.readable) applyFanCells(level, positions, grid, AtmosphereGrid.CELL_SIZE,
+                key -> capacityAt(level, key), (from, to) -> canTransferDown(server, from, to, false));
+            if (state.smokeReadable) applyFanCells(level, positions, smokeGrid, SmokeGridLayout.CELL_SIZE,
+                key -> smokeCapacityAt(level, key), (from, to) -> canTransferDown(server, from, to, true));
+            for (var material : AtmosphereMaterial.values()) {
+                if (state.materialReadable.contains(material)) applyFanCells(level, positions,
+                    materialGrids.get(material), material.cellSize(), key -> materialCapacityAt(level, material, key),
+                    (from, to) -> canMaterialTransferDown(server, material, from, to));
+            }
+        }
+    }
+
+    private void applyFanCells(ServerLevel level, List<BlockPos> positions,
+        AtmosphereGrid<ResourceKey<Level>> target, int size,
+        ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacity,
+        BiPredicate<AtmosphereGrid.CellKey<ResourceKey<Level>>, AtmosphereGrid.CellKey<ResourceKey<Level>>> canTransfer) {
+        var seen = new HashSet<AtmosphereGrid.CellKey<ResourceKey<Level>>>();
+        for (var pos : positions) {
+            var key = new AtmosphereGrid.CellKey<>(level.dimension(), Math.floorDiv(pos.getX(), size),
+                Math.floorDiv(pos.getY(), size), Math.floorDiv(pos.getZ(), size));
+            if (seen.add(key)) applyFans(level, target, key, size, capacity, canTransfer);
+        }
+    }
+
     private void applyFans(ServerLevel level, AtmosphereGrid<ResourceKey<Level>> target,
         AtmosphereGrid.CellKey<ResourceKey<Level>> source, int size,
         ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacity,
         BiPredicate<AtmosphereGrid.CellKey<ResourceKey<Level>>, AtmosphereGrid.CellKey<ResourceKey<Level>>> canTransfer) {
         fanCellsChecked++;
         if (level == null || target.get(source) == null) return;
+        if (capacity.applyAsInt(source) < 0) return;
         BlockPos origin = new BlockPos(source.x() * size, source.y() * size, source.z() * size);
         for (var request : ForgeFanTransport.collect(level, origin, size,
             tuning().integrations().createFanTransportPerRpm())) {
