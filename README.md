@@ -3,7 +3,7 @@
 Minecraft 1.21.1, NeoForge 21.1.250, Java 21. Mod ID: `dynamicatmosphere`.
 MIT licensed.
 
-This documentation describes the combined `0.16.1-alpha.1` release behavior.
+This documentation describes the combined `0.16.2-alpha.1` release behavior.
 
 ## Atmospheric Grid Alpha
 
@@ -11,7 +11,7 @@ This documentation describes the combined `0.16.1-alpha.1` release behavior.
 and can damage terrain and builds. Back up the world before upgrading. There is
 no claim/protected-area integration.**
 
-The server maintains seven independent atmospheric grids. In `0.16.1-alpha.1`,
+The server maintains seven independent atmospheric grids. In `0.16.2-alpha.1`,
 all seven use a shared 200-tick simulation cadence and 300-tick scheduled producer
 cadence. Event producers remain event-driven. Vapor uses world-aligned 4x4x4-block
 cells; the following overview describes Vapor unless stated otherwise.
@@ -32,7 +32,7 @@ boundaries and exhausted work/search budgets leave work pending, never authorize
 pressure destruction, and do not discard material.
 Excess that still cannot escape remains blocked and reported, not discarded;
 displacement is not unlimited.
-In `0.16.1-alpha.1`, all materials use a fixed **200-tick** simulation interval,
+In `0.16.2-alpha.1`, all materials use a fixed **200-tick** simulation interval,
 or **10 seconds** at 20 TPS. Scheduled producers are independent:
 passes are scheduled every **300 ticks** (15 seconds at 20 TPS) across all loaded
 chunks, not just player-offset samples. Each chunk has a random **10% default
@@ -152,7 +152,7 @@ required.
 
 ## Seven Materials
 
-`0.16.1-alpha.1` enables all seven independent materials, each with chunk-persisted
+`0.16.2-alpha.1` enables all seven independent materials, each with chunk-persisted
 server amounts and separate client state. These are active MVP systems, not
 placeholders for future runtime support. Numeric defaults are initial tuning,
 not a claim of balance or measured performance.
@@ -350,9 +350,18 @@ Requested movement is `floor(abs(RPM) * createFanTransportPerRpm)`, defaulting t
 bounded by source material, destination spare capacity, loaded/readable terrain,
 and the same liquid and bedrock downward barriers as ordinary transport.
 
-Server gameplay, cadence, work-budget, and fan settings live in the world's
-`serverconfig/dynamicatmosphere-server.toml`. On a dedicated server this is
-normally `<world>/serverconfig/dynamicatmosphere-server.toml`. Client rendering,
+Portal-containing loaded sections are palette-filtered, then scanned for each
+portal block. `enderGas.portalBlockEmission` controls the total emitted on its
+two faces per producer pass (default 100, zero disables). Other passive Ender Gas
+sources retain their random sampling.
+
+`runtime.simulationSkipChance` applies to all seven materials (default 0.75,
+zero processes every due cell, one skips every due cell). It replaces the old
+Vapor-only `vapor.skipChance` setting; producer cadence is independent.
+
+Server gameplay, cadence, work-budget, and fan settings live in
+`config/dynamicatmosphere-server.toml` on the current dedicated server; older
+installations may use `<world>/serverconfig/dynamicatmosphere-server.toml`. Client rendering,
 reach, optical density, and allocation settings live in
 `config/dynamicatmosphere-client.toml` under the game directory. Runtime code
 reads immutable configuration snapshots; NeoForge config reloads replace those

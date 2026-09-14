@@ -35,6 +35,7 @@ class ForgeCapacityBlockClassifierTest {
 
     @Test
     void everyWaterAndLavaLevelCountsAsEmptySpaceAndBlocksDownwardTransfer() {
+        check(Blocks.BUBBLE_COLUMN.defaultBlockState(), true, true);
         for (var liquid : new BlockState[] {Blocks.WATER.defaultBlockState(), Blocks.LAVA.defaultBlockState()}) {
             for (int level = 0; level <= 15; level++) {
                 check(liquid.setValue(LiquidBlock.LEVEL, level), true, true);

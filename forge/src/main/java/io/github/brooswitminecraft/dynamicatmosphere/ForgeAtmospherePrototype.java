@@ -596,10 +596,7 @@ final class ForgeAtmospherePrototype {
             growPlants(server.getLevel(key.dimension()), grid, key, AtmosphereGrid.CELL_SIZE, capacityAt);
             capacities.clear();
             if (condense(server.getLevel(key.dimension()), key, capacityAt.applyAsInt(key))) capacities.clear();
-        }, key -> {
-            ServerLevel level = server.getLevel(key.dimension());
-            return level != null && level.random.nextDouble() >= tuning().vapor().skipChance();
-        }, canTransfer, key -> applyFans(server.getLevel(key.dimension()), grid, key,
+        }, key -> shouldSimulate(server, key), canTransfer, key -> applyFans(server.getLevel(key.dimension()), grid, key,
             AtmosphereGrid.CELL_SIZE, capacityAt, canTransfer));
         materialMoved += spread.moved();
         blockedOverflow += spread.blockedOverflow();
@@ -691,7 +688,7 @@ final class ForgeAtmospherePrototype {
             var current = smokeGrid.get(key);
             if (used > 0 && current != null) smokeGrid.set(key,
                 Math.max(0, current.amount() - used), serverTicks, capacityAt.applyAsInt(key));
-        }, ignored -> true, canTransfer, key -> applyFans(server.getLevel(key.dimension()), smokeGrid, key,
+        }, key -> shouldSimulate(server, key), canTransfer, key -> applyFans(server.getLevel(key.dimension()), smokeGrid, key,
             SmokeGridLayout.CELL_SIZE, capacityAt, canTransfer));
         materialMoved += spread.moved();
         blockedOverflow += spread.blockedOverflow();
@@ -734,7 +731,7 @@ final class ForgeAtmospherePrototype {
                     }
                     dissipateDust(level, materialGrid, key, capacityAt);
                 }
-            }, ignored -> true, canTransfer, key -> applyFans(server.getLevel(key.dimension()), materialGrid, key,
+            }, key -> shouldSimulate(server, key), canTransfer, key -> applyFans(server.getLevel(key.dimension()), materialGrid, key,
                 material.cellSize(), capacityAt, canTransfer));
             materialMoved += spread.moved();
             blockedOverflow += spread.blockedOverflow();
@@ -765,6 +762,11 @@ final class ForgeAtmospherePrototype {
     EnderGasGameplay enderGasGameplay() { return enderGasGameplay; }
     ViolenceGameplay violenceGameplay() { return violenceGameplay; }
     ExhaustGameplay exhaustGameplay() { return exhaustGameplay; }
+
+    private boolean shouldSimulate(MinecraftServer server, AtmosphereGrid.CellKey<ResourceKey<Level>> key) {
+        ServerLevel level = server.getLevel(key.dimension());
+        return level != null && level.random.nextDouble() >= tuning().runtime().simulationSkipChance();
+    }
 
     private void applyFans(ServerLevel level, AtmosphereGrid<ResourceKey<Level>> target,
         AtmosphereGrid.CellKey<ResourceKey<Level>> source, int size,
@@ -973,7 +975,7 @@ final class ForgeAtmospherePrototype {
             water.getFluidState().is(FluidTags.WATER),
             water.hasProperty(BlockStateProperties.WATERLOGGED)
                 && water.getValue(BlockStateProperties.WATERLOGGED),
-            water.getBlock() instanceof LiquidBlock);
+            water.getBlock() instanceof LiquidBlock || water.is(Blocks.BUBBLE_COLUMN));
         // Only the successful mutation hook emits; recheck after earlier block updates.
         switch (action) {
             case DRAIN_WATERLOGGED -> level.setBlockAndUpdate(pos,

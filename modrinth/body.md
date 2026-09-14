@@ -1,6 +1,6 @@
 # Dynamic Atmosphere
 
-**0.16.1-alpha.1** for Minecraft **1.21.1 / NeoForge**, with seven server-owned,
+**0.16.2-alpha.1** for Minecraft **1.21.1 / NeoForge**, with seven server-owned,
 chunk-persisted atmospheric materials and translucent client volumes.
 
 **Destructive pressure is enabled by default and can damage terrain and builds,
@@ -10,7 +10,7 @@ downgrading does not undo these changes. No world reset is required.**
 
 ## Seven Materials
 
-`0.16.1-alpha.1` enables all seven independent materials, each with chunk-persisted
+`0.16.2-alpha.1` enables all seven independent materials, each with chunk-persisted
 server amounts and separate client state. These are active MVP systems, not
 placeholders for future runtime support. Numeric defaults are initial tuning,
 not a claim of balance or measured performance.
@@ -199,8 +199,14 @@ without preferring X over Z or whichever source is processed first.
 Reverse RPM does not reverse direction. Source amount, destination spare capacity,
 loaded terrain, and liquid/bedrock downward barriers bound the actual transfer.
 
-Server gameplay, shared cadence, work budgets, and fan settings are in the world's
-`serverconfig/dynamicatmosphere-server.toml`. Client rendering, reach, optical
+Portal sections are palette-filtered and scanned for every portal block, emitting
+on both faces. `enderGas.portalBlockEmission` defaults to 100 per block per producer
+pass; zero disables it. `runtime.simulationSkipChance` defaults to 0.75 for all
+seven materials, replacing the old Vapor-only setting.
+
+Server gameplay, shared cadence, work budgets, and fan settings are in
+`config/dynamicatmosphere-server.toml` (legacy installations may use the world's
+`serverconfig` directory). Client rendering, reach, optical
 density, and allocation settings are in
 `<game-directory>/config/dynamicatmosphere-client.toml`. Runtime systems consume
 immutable snapshots replaced on NeoForge config reload, so exposed server and
@@ -211,7 +217,7 @@ client and server.
 
 ## Installation
 
-Install **0.16.1-alpha.1 on both server and client**, or in a NeoForge 1.21.1
+Install **0.16.2-alpha.1 on both server and client**, or in a NeoForge 1.21.1
 single-player instance. **Protocol 8 requires both sides to update together;
 earlier protocols are incompatible.** No extra graphics dependency is required.
 World identity, scoped snapshots, and chunk freshness distinguish live state from

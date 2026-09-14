@@ -17,7 +17,7 @@ public final class DynamicAtmosphereServerConfig {
     private static final IntOption SMOKE_PRODUCER_CHUNKS;
 
     private static final DoubleOption VAPOR_PRODUCER_CHANCE;
-    private static final DoubleOption VAPOR_SKIP_CHANCE;
+    private static final DoubleOption SIMULATION_SKIP_CHANCE;
     private static final IntOption RAIN_CLOUD_HEIGHT;
     private static final IntOption HIGH_TERRAIN_ABOVE_SEA;
     private static final IntOption HIGH_TERRAIN;
@@ -87,6 +87,7 @@ public final class DynamicAtmosphereServerConfig {
 
     private static final IntOption ENDER_MOB;
     private static final IntOption ENDER_PORTAL;
+    private static final IntOption ENDER_PORTAL_BLOCK;
     private static final IntOption ENDER_PASSIVE;
     private static final IntOption ENDER_PEARL_USE;
     private static final IntOption ENDER_PEARL_IMPACT;
@@ -108,6 +109,7 @@ public final class DynamicAtmosphereServerConfig {
         FULL_SNAPSHOT_INTERVAL = integer(builder, "fullSnapshotIntervalTicks", 200, 1, 72000);
         SIMULATION_INTERVAL = integer(builder, "simulationIntervalTicks", 200, 1, 72000);
         PRODUCER_INTERVAL = integer(builder, "producerIntervalTicks", 300, 1, 72000);
+        SIMULATION_SKIP_CHANCE = decimal(builder, "simulationSkipChance", 0.75, 0, 1);
         CHUNK_IMPORTS = integer(builder, "maxChunkImportsPerTick", 8, 1, 1024);
         PRODUCER_CHUNKS = integer(builder, "maxProducerChunksPerTick", 32, 1, 4096);
         SMOKE_PRODUCER_CHUNKS = integer(builder, "maxSmokeProducerChunksPerTick", 4, 1, 4096);
@@ -115,7 +117,6 @@ public final class DynamicAtmosphereServerConfig {
 
         builder.push("vapor");
         VAPOR_PRODUCER_CHANCE = decimal(builder, "producerChance", 0.10, 0, 1);
-        VAPOR_SKIP_CHANCE = decimal(builder, "skipChance", 0.50, 0, 1);
         RAIN_CLOUD_HEIGHT = integer(builder, "rainCloudHeight", 192, -2048, 2048);
         HIGH_TERRAIN_ABOVE_SEA = integer(builder, "highTerrainBlocksAboveSeaLevel", 24, 0, 2048);
         HIGH_TERRAIN = integer(builder, "highTerrainEmission", 40, 0, 1_000_000);
@@ -197,6 +198,7 @@ public final class DynamicAtmosphereServerConfig {
         builder.push("enderGas");
         ENDER_MOB = integer(builder, "mobEmission", 1, 0, 1_000_000);
         ENDER_PORTAL = integer(builder, "portalOccupantEmission", 2, 0, 1_000_000);
+        ENDER_PORTAL_BLOCK = integer(builder, "portalBlockEmission", 100, 0, 1_000_000);
         ENDER_PASSIVE = integer(builder, "passiveBlockEmission", 1, 0, 1_000_000);
         ENDER_PEARL_USE = integer(builder, "pearlUseEmission", 24, 0, 1_000_000);
         ENDER_PEARL_IMPACT = integer(builder, "pearlImpactEmission", 48, 0, 1_000_000);
@@ -233,10 +235,10 @@ public final class DynamicAtmosphereServerConfig {
     private static Snapshot readSnapshot() {
         return new Snapshot(
             new RuntimeTuning(SYNC_INTERVAL.get(), FULL_SNAPSHOT_INTERVAL.get(), SIMULATION_INTERVAL.get(),
-                PRODUCER_INTERVAL.get(), CHUNK_IMPORTS.get(), PRODUCER_CHUNKS.get(), SMOKE_PRODUCER_CHUNKS.get()),
+                PRODUCER_INTERVAL.get(), CHUNK_IMPORTS.get(), PRODUCER_CHUNKS.get(), SMOKE_PRODUCER_CHUNKS.get(), SIMULATION_SKIP_CHANCE.get()),
             new Vapor(VAPOR_PRODUCER_CHANCE.get(),
                 HIGH_TERRAIN.get(), RAIN_CLOUD.get(), SNOW_ICE.get(), DARK_GROUND.get(),
-                SNOW_LAYER.get(), ICE_REMOVAL.get(), CONDENSATION_CHANCE.get(), VAPOR_SKIP_CHANCE.get(),
+                SNOW_LAYER.get(), ICE_REMOVAL.get(), CONDENSATION_CHANCE.get(),
                 RAIN_CLOUD_HEIGHT.get(), HIGH_TERRAIN_ABOVE_SEA.get()),
             new Smoke(FIRE.get(), LAVA.get(), FURNACE.get(),
                 TORCH.get(), CAMPFIRE.get(), EXPLOSION.get(), EXPLOSION_BLOCK.get(), LEAF_CHANCE.get(),
@@ -257,7 +259,7 @@ public final class DynamicAtmosphereServerConfig {
                 SLIME_SPAWN_DENOMINATOR.get(), SLIME_SPAWN_ATTEMPTS.get()),
             new EnderGas(ENDER_MOB.get(), ENDER_PORTAL.get(), ENDER_PASSIVE.get(), ENDER_PEARL_USE.get(),
                 ENDER_PEARL_IMPACT.get(), ENDER_FULL_MOON.get(), ENDER_MOB_INTERVAL.get(),
-                ENDER_PORTAL_INTERVAL.get(), ENDER_MOON_DENOMINATOR.get()),
+                ENDER_PORTAL_INTERVAL.get(), ENDER_MOON_DENOMINATOR.get(), ENDER_PORTAL_BLOCK.get()),
             new PlantGrowth(PLANT_CHANCE.get(), PLANT_COST.get()),
             new Integrations(CREATE_FAN_RPM_COEFFICIENT.get())
         );
@@ -307,11 +309,11 @@ public final class DynamicAtmosphereServerConfig {
     public record RuntimeTuning(int syncIntervalTicks, int fullSnapshotIntervalTicks,
                                 int simulationIntervalTicks, int producerIntervalTicks,
                                 int maxChunkImportsPerTick, int maxProducerChunksPerTick,
-                                int maxSmokeProducerChunksPerTick) { }
+                                int maxSmokeProducerChunksPerTick, double simulationSkipChance) { }
     public record Vapor(double producerChance,
                         int highTerrainEmission, int rainCloudEmission, int snowIceEmission,
                         int maxDarkGroundEmission, int snowRemovalPerLayer, int iceRemovalEmission,
-                        double maxCondensationChance, double skipChance, int rainCloudHeight,
+                        double maxCondensationChance, int rainCloudHeight,
                         int highTerrainBlocksAboveSeaLevel) {
         public int simulationIntervalTicks() { return snapshot().runtime().simulationIntervalTicks(); }
         public int producerIntervalTicks() { return snapshot().runtime().producerIntervalTicks(); }
@@ -342,7 +344,8 @@ public final class DynamicAtmosphereServerConfig {
                         int spawnChanceDenominator, int spawnAttempts) { }
     public record EnderGas(int mobEmission, int portalOccupantEmission, int passiveBlockEmission,
                            int pearlUseEmission, int pearlImpactEmission, int fullMoonEmission,
-                           int mobIntervalTicks, int portalIntervalTicks, int fullMoonChanceDenominator) { }
+                           int mobIntervalTicks, int portalIntervalTicks, int fullMoonChanceDenominator,
+                           int portalBlockEmission) { }
     public record PlantGrowth(double chance, int cost) { }
     public record Integrations(double createFanTransportPerRpm) { }
 

@@ -4,6 +4,8 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.SectionPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -15,6 +17,8 @@ import net.minecraft.world.entity.monster.Shulker;
 import net.minecraft.world.entity.monster.Witch;
 import net.minecraft.world.entity.projectile.ThrownEnderpearl;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.NetherPortalBlock;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
@@ -90,7 +94,7 @@ public final class EnderGasGameplay {
 
     /** Called by the bounded producer schedule for a position it already selected in a loaded chunk. */
     public void onPassiveBlockSample(ServerLevel level, BlockPos pos, BlockState state) {
-        if (isPassiveSource(state)) {
+        if (isPassiveSource(state) && !state.is(Blocks.NETHER_PORTAL)) {
             DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.ENDER_GAS, pos,
                 DynamicAtmosphereServerConfig.snapshot().enderGas().passiveBlockEmission());
         }
@@ -99,6 +103,7 @@ public final class EnderGasGameplay {
     /** Called once for each loaded chunk selected by the bounded producer schedule. */
     public void onLoadedChunkProducerCheck(ServerLevel level, LevelChunk chunk) {
         DynamicAtmosphereServerConfig.EnderGas config = DynamicAtmosphereServerConfig.snapshot().enderGas();
+        emitPortals(level, chunk, config.portalBlockEmission());
         int roll = level.random.nextInt(config.fullMoonChanceDenominator());
         if (!fullMoonBurst(level.isNight(), level.dimensionType().moonPhase(level.getDayTime()), roll)) return;
         int x = chunk.getPos().getMinBlockX() + level.random.nextInt(16);
@@ -131,6 +136,32 @@ public final class EnderGasGameplay {
     }
 
     private EnderGasGameplay() { }
+
+    static Direction portalNormal(Direction.Axis axis) {
+        return axis == Direction.Axis.X ? Direction.NORTH : Direction.EAST;
+    }
+
+    /** Existing chunk budget bounds work; sections without portal blocks require no block scan. */
+    private void emitPortals(ServerLevel level, LevelChunk chunk, int amount) {
+        if (amount <= 0) return;
+        var sections = chunk.getSections();
+        for (int index = 0; index < sections.length; index++) {
+            var section = sections[index];
+            if (!section.maybeHas(state -> state.is(Blocks.NETHER_PORTAL))) continue;
+            int baseY = SectionPos.sectionToBlockCoord(chunk.getSectionYFromSectionIndex(index));
+            for (int y = 0; y < 16; y++) for (int z = 0; z < 16; z++) for (int x = 0; x < 16; x++) {
+                var state = section.getBlockState(x, y, z);
+                if (!state.is(Blocks.NETHER_PORTAL)) continue;
+                var pos = new BlockPos(chunk.getPos().getMinBlockX() + x, baseY + y, chunk.getPos().getMinBlockZ() + z);
+                Direction normal = portalNormal(state.getValue(NetherPortalBlock.AXIS));
+                // Portal blocks themselves are not vacant one-block cells; emit on their open faces.
+                DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.ENDER_GAS,
+                    pos.relative(normal), amount / 2);
+                DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.ENDER_GAS,
+                    pos.relative(normal.getOpposite()), amount - amount / 2);
+            }
+        }
+    }
 
     public static EnderGasGameplay create() { return new EnderGasGameplay(); }
 }

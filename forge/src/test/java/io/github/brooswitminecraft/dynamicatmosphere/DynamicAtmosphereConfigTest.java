@@ -17,7 +17,8 @@ class DynamicAtmosphereConfigTest {
         assertEquals(10.0 / 128, first.smoke().farmlandConversionChance());
         assertEquals(10.0 / 256, first.smoke().villagerConversionChance());
         assertEquals(10.0 / 64, first.smoke().dissipationChance());
-        assertEquals(0.50, first.vapor().skipChance());
+        assertEquals(0.75, first.runtime().simulationSkipChance());
+        assertEquals(100, first.enderGas().portalBlockEmission());
         assertEquals(192, first.vapor().rainCloudHeight());
         assertEquals(24, first.vapor().highTerrainBlocksAboveSeaLevel());
         assertEquals(200, first.runtime().simulationIntervalTicks());

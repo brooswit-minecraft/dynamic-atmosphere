@@ -8,7 +8,7 @@ import net.minecraft.world.level.block.state.BlockState;
 public final class ForgeCapacityBlockClassifier {
     /** Liquid blocks leave the full volume available; waterlogged hosts stay occupied. */
     public static boolean isEmptySpace(BlockState state) {
-        return state.isAir() || state.getBlock() instanceof LiquidBlock;
+        return state.isAir() || state.getBlock() instanceof LiquidBlock || state.is(Blocks.BUBBLE_COLUMN);
     }
 
     /** Any fluid amount, including flowing fluid and waterlogging, blocks downward transfer. */

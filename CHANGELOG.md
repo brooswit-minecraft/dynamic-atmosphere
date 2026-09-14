@@ -1,3 +1,9 @@
+# 0.16.2-alpha.1
+
+- Find portal blocks in loaded sections using palette-gated scans, emitting Ender Gas on both faces instead of into occupied portal cells. `enderGas.portalBlockEmission` defaults to 100 per portal block per producer pass; zero disables this source.
+- Apply configurable `runtime.simulationSkipChance` to all seven materials, defaulting to 0.75. This replaces Vapor-only `vapor.skipChance`; production intervals remain unchanged.
+- Allow magma-created water bubble columns to evaporate, and count them as fluid capacity while retaining their downward-transfer barrier.
+
 # 0.16.1-alpha.1
 
 - Increase default Create fan transfer tenfold, to 1 material unit per RPM per processed turn, and apply it after normal spreading.
