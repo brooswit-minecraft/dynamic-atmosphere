@@ -3,7 +3,7 @@ package io.github.brooswitminecraft.dynamicatmosphere;
 /** Conservative MVP amounts per existing producer pass, not per block/entity tick. */
 public final class SmokeProducerRules {
     public static final int FIRE = 40;
-    public static final int LAVA = 40;
+    public static final int LAVA = 4;
     public static final int LIT_FURNACE = 20;
     public static final int TORCH = 2;
     public static final int LIT_CAMPFIRE = 20;

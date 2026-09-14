@@ -1,3 +1,7 @@
+# 0.15.1-alpha.1
+
+- Reduce lava Smoke production from 40 to 4 units, including lava presence transitions. Fire and all other producers are unchanged; existing Smoke is preserved.
+
 # 0.15.0-alpha.1
 
 - Enable all seven independent, chunk-persisted runtime materials: Vapor (4-block cells), Smoke (8), Dust (2), Ender Gas (1), Violence (8), Exhaust (2), and Slime (16). Initial numeric behavior is MVP tuning, not a balance or performance guarantee.

@@ -167,7 +167,7 @@ client visual disk cache; the other six keep independent session-only visual cac
 
 ### Producers and Effects
 
-- **Smoke:** fire and lava emit 40 units, lit furnaces and campfires 20, and lit
+- **Smoke:** fire emits 40 units and lava 4, lit furnaces and campfires 20, and lit
   torches 2 per producer check. Explosions add an 80-unit burst plus 10 for each
   successfully destroyed block. Fire/lava presence transitions also emit; ordinary
   fire-age/fluid-level changes and scoped fluid transport do not duplicate them.

@@ -7,7 +7,7 @@ class SmokeProducerRulesTest {
     @Test
     void conservativeOngoingAmountsRequireLitCombustionBlocks() {
         assertEquals(40, SmokeProducerRules.ongoing(SmokeProducerRules.Source.FIRE, true));
-        assertEquals(40, SmokeProducerRules.ongoing(SmokeProducerRules.Source.LAVA, true));
+        assertEquals(4, SmokeProducerRules.ongoing(SmokeProducerRules.Source.LAVA, true));
         assertEquals(20, SmokeProducerRules.ongoing(SmokeProducerRules.Source.FURNACE, true));
         assertEquals(20, SmokeProducerRules.ongoing(SmokeProducerRules.Source.CAMPFIRE, true));
         assertEquals(2, SmokeProducerRules.ongoing(SmokeProducerRules.Source.TORCH, true));
@@ -21,8 +21,8 @@ class SmokeProducerRulesTest {
     void realFireAndLavaAdditionsAndRemovalsEmitButAgeAndFluidLevelsDoNot() {
         assertEquals(40, SmokeProducerRules.transition(true, false, true, false, false, false));
         assertEquals(40, SmokeProducerRules.transition(true, true, false, false, false, false));
-        assertEquals(40, SmokeProducerRules.transition(true, false, false, false, true, false));
-        assertEquals(40, SmokeProducerRules.transition(true, false, false, true, false, false));
+        assertEquals(4, SmokeProducerRules.transition(true, false, false, false, true, false));
+        assertEquals(4, SmokeProducerRules.transition(true, false, false, true, false, false));
         assertEquals(0, SmokeProducerRules.transition(true, true, true, false, false, false));
         assertEquals(0, SmokeProducerRules.transition(true, false, false, true, true, false));
         assertEquals(0, SmokeProducerRules.transition(false, false, false, true, false, false));
