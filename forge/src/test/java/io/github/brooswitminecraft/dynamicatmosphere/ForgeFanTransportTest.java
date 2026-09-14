@@ -21,10 +21,10 @@ class ForgeFanTransportTest {
 
     @Test
     void ordersRequestsByCoordinatesRegardlessOfEntryIterationOrder() {
-        var first = new ForgeFanTransport.Request(Direction.NORTH, 1);
-        var second = new ForgeFanTransport.Request(Direction.SOUTH, 2);
-        var third = new ForgeFanTransport.Request(Direction.EAST, 3);
-        var fourth = new ForgeFanTransport.Request(Direction.WEST, 4);
+        var first = new ForgeFanTransport.Request(Direction.NORTH, 1, false);
+        var second = new ForgeFanTransport.Request(Direction.SOUTH, 2, false);
+        var third = new ForgeFanTransport.Request(Direction.EAST, 3, false);
+        var fourth = new ForgeFanTransport.Request(Direction.WEST, 4, false);
         var entries = List.of(
             new ForgeFanTransport.LocatedRequest(new BlockPos(0, 0, 0), fourth),
             new ForgeFanTransport.LocatedRequest(new BlockPos(-1, 0, 0), third),

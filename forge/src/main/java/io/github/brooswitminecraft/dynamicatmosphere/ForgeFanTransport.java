@@ -23,7 +23,8 @@ public final class ForgeFanTransport {
     /**
      * Call once per fan-containing source cell in an independent fan pass, using its minimum block position.
      * Returns one request per rotating fan inside the half-open cell bounds, in X/Z/Y coordinate order.
-     * The caller moves material one cell in request.direction(), bounded by remaining source material,
+     * The caller performs intake and output around request.direction(), reversing these for negative RPM,
+     * bounded by remaining source material,
      * destination empty space, loaded/readable destination state, and its liquid/bedrock edge rules.
      * Physical capacity may be exceeded to create pressure.
      * Read the coefficient from a fresh server config snapshot at the start of the processing tick.
@@ -42,7 +43,7 @@ public final class ForgeFanTransport {
         return CreateAccess.collect(level, cellMin, cellSize, rpmCoefficient);
     }
 
-    public record Request(Direction direction, int amount) {
+    public record Request(Direction direction, int amount, boolean reverse) {
         public Request {
             Objects.requireNonNull(direction, "direction");
             if (amount < 1 || amount > AtmosphereGrid.MAX_AMOUNT) {
@@ -95,9 +96,8 @@ public final class ForgeFanTransport {
                         int amount = AtmosphereFanTransport.requestedAmount(
                             fan.getSpeed(), coefficient, AtmosphereGrid.MAX_AMOUNT);
                         if (amount > 0) {
-                            // Facing is intentional: reverse RPM changes neither the target nor the quantity.
                             requests.add(new LocatedRequest(pos.immutable(),
-                                new Request(fan.getAirflowOriginSide(), amount)));
+                                new Request(fan.getAirflowOriginSide(), amount, fan.getSpeed() < 0)));
                         }
                     }
                 }

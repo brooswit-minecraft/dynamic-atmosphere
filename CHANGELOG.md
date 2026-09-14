@@ -1,3 +1,9 @@
+# 0.19.0-alpha.1
+
+- Positive-RPM fans draw evenly from the five non-facing neighbors before pushing forward. Negative RPM draws from the facing neighbor before distributing evenly to the other five.
+- Each stage shares one RPM-sized budget, redistributes shortages, and rotates integer remainders. Intake works when the fan cell starts empty; blocked output retains material in the center. Preserve material at storage ceilings and respect loaded terrain and downward barriers.
+- Keep the separate five-second unskipped cadence, destination overpressure, and 4x4x4 maximum affected cell size.
+
 # 0.18.1-alpha.1
 
 - Restrict Create fan transport to grids with cell edges of four blocks or less. Vapor, Smoke, Dust, Exhaust, and Ender Gas can move; Violence and Slime are unaffected.

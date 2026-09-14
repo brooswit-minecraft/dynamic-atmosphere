@@ -6,6 +6,7 @@ import com.mojang.logging.LogUtils;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.SectionPos;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
@@ -819,30 +820,49 @@ final class ForgeAtmospherePrototype {
         ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacity,
         BiPredicate<AtmosphereGrid.CellKey<ResourceKey<Level>>, AtmosphereGrid.CellKey<ResourceKey<Level>>> canTransfer) {
         fanCellsChecked++;
-        if (level == null || target.get(source) == null) return;
-        if (capacity.applyAsInt(source) < 0) return;
+        if (level == null) return;
+        int sourceCapacity = capacity.applyAsInt(source);
+        if (sourceCapacity < 0) return;
         BlockPos origin = new BlockPos(source.x() * size, source.y() * size, source.z() * size);
         for (var request : ForgeFanTransport.collect(level, origin, size,
             tuning().integrations().createFanTransportPerRpm())) {
             fanRequests++;
             var current = target.get(source);
-            if (current == null) break;
-            var direction = request.direction();
-            var destination = new AtmosphereGrid.CellKey<>(source.dimension(), source.x() + direction.getStepX(),
-                source.y() + direction.getStepY(), source.z() + direction.getStepZ());
-            int spareCapacity = capacity.applyAsInt(destination);
-            boolean allowed = canTransfer.test(source, destination);
-            var existing = target.get(destination);
-            int existingAmount = existing == null ? 0 : existing.amount();
-            int moved = AtmosphereFanTransport.movableAmount(request.amount(), current.amount(), existingAmount,
-                spareCapacity, allowed);
-            if (moved <= 0) { fanBlocked++; continue; }
-            if (target.set(destination, existingAmount + moved, serverTicks, spareCapacity)) {
-                target.set(source, current.amount() - moved, serverTicks, capacity.applyAsInt(source));
-                materialMoved += moved;
-                fanMaterialMoved += moved;
+            var directions = Direction.values();
+            var neighbors = new ArrayList<AtmosphereGrid.CellKey<ResourceKey<Level>>>(6);
+            int[] amounts = new int[6];
+            int[] capacities = new int[6];
+            boolean[] canPull = new boolean[6];
+            boolean[] canPush = new boolean[6];
+            int facing = 0;
+            for (int i = 0; i < directions.length; i++) {
+                var direction = directions[i];
+                var neighbor = new AtmosphereGrid.CellKey<>(source.dimension(), source.x() + direction.getStepX(),
+                    source.y() + direction.getStepY(), source.z() + direction.getStepZ());
+                neighbors.add(neighbor);
+                capacities[i] = capacity.applyAsInt(neighbor);
+                var existing = target.get(neighbor);
+                amounts[i] = existing == null ? 0 : existing.amount();
+                canPull[i] = capacities[i] >= 0 && canTransfer.test(neighbor, source);
+                canPush[i] = capacities[i] >= 0 && canTransfer.test(source, neighbor);
+                if (direction == request.direction()) facing = i;
+            }
+            int rotation = (int) ((serverTicks / tuning().integrations().createFanIntervalTicks()) % 6);
+            var exchange = AtmosphereFanTransport.exchange(request.amount(), current == null ? 0 : current.amount(),
+                sourceCapacity, amounts, capacities, canPull, canPush, facing, request.reverse(), rotation);
+            int moved = 0;
+            for (int i = 0; i < neighbors.size(); i++) {
+                int edgeMoved = exchange.pulled()[i] + exchange.pushed()[i];
+                if (edgeMoved == 0) continue;
+                target.set(neighbors.get(i), amounts[i] - exchange.pulled()[i] + exchange.pushed()[i],
+                    serverTicks, capacities[i]);
+                moved += edgeMoved;
                 fanTransfers++;
             }
+            if (moved == 0) { fanBlocked++; continue; }
+            target.set(source, exchange.centerAmount(), serverTicks, sourceCapacity);
+            materialMoved += moved;
+            fanMaterialMoved += moved;
         }
     }
 
