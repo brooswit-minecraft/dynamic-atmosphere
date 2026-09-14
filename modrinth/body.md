@@ -194,6 +194,8 @@ With Create installed, rotating Encased Fans move atmosphere one cell in their
 facing direction. Requested movement is
 `floor(abs(RPM) * createFanTransportPerRpm)`, with a default coefficient of 1.0.
 Fan movement runs after normal spreading so its directional effect is retained.
+Normal spreading shares limited material and destination capacity proportionally,
+without preferring X over Z or whichever source is processed first.
 Reverse RPM does not reverse direction. Source amount, destination spare capacity,
 loaded terrain, and liquid/bedrock downward barriers bound the actual transfer.
 

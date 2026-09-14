@@ -331,7 +331,8 @@ public final class AtmosphereGrid<D> {
             Cell<D> cell = cells.get(key);
             amountSnapshot.put(key, cell == null ? 0 : cell.amount);
         }
-        Map<CellKey<D>, Integer> deltas = new LinkedHashMap<>();
+        Map<TransferEdge<D>, Integer> proposals = new LinkedHashMap<>();
+        Map<CellKey<D>, Integer> incoming = new HashMap<>();
 
         for (CellKey<D> sourceKey : sources) {
             int sourceAmount = amountSnapshot.getOrDefault(sourceKey, 0);
@@ -366,13 +367,12 @@ public final class AtmosphereGrid<D> {
             }
 
             int sourceTarget = weightedTarget(totalAmount, capacities.getFirst(), totalCapacity);
-            int alreadyOutgoing = Math.min(0, deltas.getOrDefault(sourceKey, 0));
-            int available = Math.max(0, sourceAmount - sourceTarget + alreadyOutgoing);
+            int available = Math.max(0, sourceAmount - sourceTarget);
             int[] deficits = new int[neighborhood.size()];
             int totalDeficit = 0;
             for (int index = 1; index < neighborhood.size(); index++) {
                 CellKey<D> neighbor = neighborhood.get(index);
-                int neighborAmount = amountSnapshot.getOrDefault(neighbor, 0) + deltas.getOrDefault(neighbor, 0);
+                int neighborAmount = amountSnapshot.getOrDefault(neighbor, 0);
                 int target = weightedTarget(totalAmount, capacities.get(index), totalCapacity);
                 deficits[index] = Math.max(0, target - neighborAmount);
                 totalDeficit += deficits[index];
@@ -384,9 +384,24 @@ public final class AtmosphereGrid<D> {
                 CellKey<D> neighbor = neighborhood.get(index);
                 int transfer = (int) ((long) outgoing * deficits[index] / totalDeficit);
                 if (transfer > 0) {
-                    deltas.merge(sourceKey, -transfer, Integer::sum);
-                    deltas.merge(neighbor, transfer, Integer::sum);
+                    proposals.put(new TransferEdge<>(sourceKey, neighbor), transfer);
+                    incoming.merge(neighbor, transfer, Integer::sum);
                 }
+            }
+        }
+
+        // Resolve competing sources together. Only pre-spread spare capacity is available,
+        // so incoming material cannot be respent and source order cannot claim space first.
+        Map<CellKey<D>, Integer> deltas = new LinkedHashMap<>();
+        for (var proposal : proposals.entrySet()) {
+            var edge = proposal.getKey();
+            int requested = incoming.get(edge.destination);
+            int spare = Math.max(0, boundedCapacity(capacitySnapshot.get(edge.destination))
+                - amountSnapshot.getOrDefault(edge.destination, 0));
+            int accepted = (int) ((long) proposal.getValue() * Math.min(spare, requested) / requested);
+            if (accepted > 0) {
+                deltas.merge(edge.source, -accepted, Integer::sum);
+                deltas.merge(edge.destination, accepted, Integer::sum);
             }
         }
 
