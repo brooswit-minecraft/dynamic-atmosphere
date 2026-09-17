@@ -1,3 +1,12 @@
+# 0.20.0-alpha.1
+
+- Move every atmosphere material onto a uniform 4x4x4-block cell. Dust, Ender Gas, and Exhaust grow from 2x2x2; Violence shrinks from 8x8x8; Slime shrinks from 16x16x16.
+- Collapse `AtmosphereMaterial`'s per-material cell size onto the shared `AtmosphereGridLayout.CELL_SIZE`; the engine's approved specification catalog matches.
+- Bump the Dust/Ender Gas/Exhaust/Violence/Slime chunk storage version. Pre-upgrade chunk data for those materials is retained on disk but treated as unreadable rather than reinterpreted at the new cell size; affected chunks come back with no stored material until new material accumulates. Vapor and Smoke were already 4x4x4 and are unaffected.
+- Remove the now-unreachable legacy one-block Ender Gas merge path, superseded by the storage version bump above.
+- Violence and Slime are fan-transportable for the first time, a direct consequence of sharing Vapor/Smoke/Dust/Exhaust/Ender Gas's existing 4-block fan size limit; no fan code changed.
+- LOD bands (`VIOLENCE_LOD`, `DUST_LOD`, `VAPOR_LOD`) are multipliers of each material's own cell size and were left as-is; see README for the resulting reach change per material.
+
 # 0.19.0-alpha.1
 
 - Positive-RPM fans draw evenly from the five non-facing neighbors before pushing forward. Negative RPM draws from the facing neighbor before distributing evenly to the other five.

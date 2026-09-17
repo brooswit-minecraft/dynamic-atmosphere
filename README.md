@@ -155,24 +155,30 @@ required.
 `0.19.0-alpha.1` enables all seven independent materials, each with chunk-persisted
 server amounts and separate client state. These are active MVP systems, not
 placeholders for future runtime support. Numeric defaults are initial tuning,
-not a claim of balance or measured performance.
+not a claim of balance or measured performance. `0.20.0-alpha.1` moved every
+material onto the same `4x4x4`-block cell; Dust, Ender Gas, Exhaust, Violence,
+and Slime previously used their own smaller or larger cell sizes.
 
 | Material | Base cell edge | Scheduled simulation interval | Color | Optical density |
 | --- | --- | --- | --- | --- |
 | Vapor | 4 blocks | 200 ticks | Minecraft fog/horizon | 1x |
 | Smoke | 4 blocks | 200 ticks | Black | 4x |
-| Dust | 2 blocks | 200 ticks | Brown | 1x |
-| Ender Gas | 2 blocks | 200 ticks | Purple | 40x |
-| Violence | 8 blocks | 200 ticks | Red | 4x |
-| Exhaust | 2 blocks | 200 ticks | Yellow | 1x |
-| Slime | 16 blocks | 200 ticks | Green | 4x |
+| Dust | 4 blocks | 200 ticks | Brown | 1x |
+| Ender Gas | 4 blocks | 200 ticks | Purple | 40x |
+| Violence | 4 blocks | 200 ticks | Red | 4x |
+| Exhaust | 4 blocks | 200 ticks | Yellow | 1x |
+| Slime | 4 blocks | 200 ticks | Green | 4x |
 
 Intervals are scheduled game ticks, subject to bounded work queues, not guaranteed
 wall-clock completion. Scheduled producer passes share a 300-tick cadence. All
 materials have a configurable 75% due-check skip; Vapor retains condensation.
-Material amounts do not combine across identities. Ender Gas legacy one-block cells merge into aligned
-two-block cells on chunk load, preserving material. Invalid or oversized merges
-retain the original data and skip that chunk rather than silently truncating it.
+Material amounts do not combine across identities. `0.20.0-alpha.1`'s move to a
+uniform cell size bumped the Dust/Ender Gas/Exhaust/Violence/Slime storage
+version; their pre-upgrade chunk data is left on disk untouched but is treated
+as unreadable rather than reinterpreted at the new cell size, so those chunks
+come back with no stored material until new material accumulates. Invalid or
+corrupt data is handled the same way: the original tag is retained and that
+chunk is skipped rather than silently truncated.
 Only Vapor uses the persistent
 client visual disk cache; the other six keep independent session-only visual caches.
 Legacy 8-block Smoke cells are split into aligned 4-block children on load. Integer
@@ -249,6 +255,12 @@ render distance from the viewer:
 Violence and Slime use base cells through V and 2x cells through 2V, with nothing
 beyond. Dust, Exhaust, and Ender Gas use base cells only through V/4, with nothing
 beyond. These cutoffs include cached fallback geometry and preserve stored cache data.
+These bands are multipliers of each material's own base cell and were unchanged by
+`0.20.0-alpha.1`'s uniform cell size: Violence and Slime's base cell shrank from
+8/16 blocks to 4, so their absolute LOD reach is now finer at the same tier count,
+while Dust, Exhaust, and Ender Gas's base cell grew from 2 blocks to 4, coarsening
+theirs. Re-tuning these bands for the new base size is a follow-up, not required
+for correctness.
 
 Each coarser volume recursively averages eight children, counting empty volumes
 in that average rather than averaging only occupied children. Coverage does not
@@ -346,8 +358,9 @@ pressure implementation still requires build and server/client verification.
 
 ## Fans and Configuration
 
-Fans affect only cells up to 4x4x4: Vapor, Smoke, Dust, Exhaust, and Ender Gas.
-The larger Violence and Slime grids are unaffected.
+Fans affect cells up to 4x4x4, which now covers every material: Vapor, Smoke,
+Dust, Exhaust, Ender Gas, Violence, and Slime. Violence and Slime previously used
+larger cells and were unaffected; they are fan-transportable as of `0.20.0-alpha.1`.
 
 When Create is installed, a rotating Encased Fan performs intake followed by output
 on a separate five-second pass. Positive RPM draws evenly from the five neighbors

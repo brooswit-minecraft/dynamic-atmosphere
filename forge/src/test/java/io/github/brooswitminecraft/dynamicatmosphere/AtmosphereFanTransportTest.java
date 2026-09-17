@@ -8,9 +8,10 @@ class AtmosphereFanTransportTest {
     void onlyMovesMaterialsWithCellsNoLargerThanFourBlocks() {
         for (int size : new int[] {1, 2, 4}) assertEquals(true, AtmosphereFanTransport.supportsCellSize(size));
         for (int size : new int[] {-1, 0, 5, 8, 16}) assertEquals(false, AtmosphereFanTransport.supportsCellSize(size));
+        // Every material now uses a 4-block cell, so every material now qualifies;
+        // Violence and Slime are fan-transportable as a consequence, not a re-added exemption.
         for (var material : AtmosphereMaterial.values()) {
-            assertEquals(material != AtmosphereMaterial.VIOLENCE && material != AtmosphereMaterial.SLIME,
-                AtmosphereFanTransport.supportsCellSize(material.cellSize()));
+            assertEquals(true, AtmosphereFanTransport.supportsCellSize(material.cellSize()));
         }
     }
 
