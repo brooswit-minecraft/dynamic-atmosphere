@@ -11,11 +11,13 @@ Category: breaking
 - Remove the now-unreachable legacy one-block Ender Gas merge path, superseded by the storage version bump above.
 - Void Gas and Slime are fan-transportable for the first time, a direct consequence of sharing Vapor/Smoke/Dust/Exhaust/Ender Gas's existing 4-block fan size limit; no fan code changed.
 - LOD bands (`VOID_GAS_LOD`, `DUST_LOD`, `VAPOR_LOD`) are multipliers of each material's own cell size and were left as-is; see README for the resulting per-tier volume size change per material.
+- Overworld Endermen now follow the fog (Vapor) spawn rule; the Ender Gas spawn gate is removed. Nether and End spawns use vanilla rules.
 - Rename `AtmosphereMaterial.VIOLENCE` (`"violence"`) to `AtmosphereMaterial.VOID_GAS` (`"void_gas"`) across the server, engine, and client catalogs. Enum order and ordinals are unchanged.
 - Rename `ViolenceGameplay`/`ViolenceGameplayTest` to `VoidGasGameplay`/`VoidGasGameplayTest`. Rename the server `violence` config section to `voidGas`, and the client `violenceReachMultiplier`/`violenceOpticalDensity` keys to `voidGasReachMultiplier`/`voidGasOpticalDensity`. No migration: old values reset to their defaults.
 - Slime continues to share the renamed `VOID_GAS_LOD` constant in the engine catalog; its behavior is unchanged and pinned by a test. A new test confirms the server, engine, and client catalogs agree on the Void Gas entry and that ordinals are unchanged.
 - Smoke's optical density drops from 4x to 2x and its color changes from black to a very dark, subtle brown tint (`0x1F160F`) in the engine and client catalogs. Void Gas's color changes from red to black, keeping its optical density at 4x — the darkness Smoke previously had. No other material's color or optical density changes.
 - Update the client `smokeOpticalDensity` config default from `4` to `2` to match; the renderer reads this config value at render time, not the catalogs' `opticalDensityMultiplier` field, so the config default has to move with the catalogs or Smoke would keep rendering at its old darkness in-game.
+- Void Gas, Ender Gas and Slime now dissipate gradually each processed turn, reusing `SmokeDissipation`'s roll and `dissipationAmount` cap at a chance of Smoke's own `dissipationChance` divided by the new `heavyGas.dissipationFactor` server config option (default 3). The factor is shared by all three, must be finite and greater than zero, and is reloadable like the rest of server config. Dust and Smoke are unchanged.
 
 ## Migration
 

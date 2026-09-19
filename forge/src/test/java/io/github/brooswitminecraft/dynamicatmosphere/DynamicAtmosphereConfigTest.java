@@ -26,6 +26,7 @@ class DynamicAtmosphereConfigTest {
         assertEquals(1.0, first.integrations().createFanTransportPerRpm());
         assertEquals(100, first.integrations().createFanIntervalTicks());
         assertEquals(32, first.integrations().maxFanChunksPerTick());
+        assertEquals(3.0, first.heavyGas().dissipationFactor());
     }
 
     @Test

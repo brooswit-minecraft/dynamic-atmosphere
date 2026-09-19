@@ -211,10 +211,10 @@ and migrated chunks are saved in the new format.
   chests, portals/portal occupants, soul torches/fire/sand, Crying Obsidian, and ender-pearl use and
   impact are sources. Pearl use adds 24 and impact 48. Random full-moon bursts
   have been removed; only source-driven emissions remain.
-  Natural Endermen require strictly more than 50% local Ender Gas fullness,
-  including underground, without consuming it; other normal spawn restrictions
-  still apply. Other natural surface hostiles retain the Vapor fullness gate,
-  Overworld only — Nether and End monster spawns follow vanilla rules.
+  Ender Gas never gates spawning. Overworld monsters, including Endermen,
+  follow the Vapor (fog) spawn rule: no qualifying terrain above and Vapor
+  not strictly more than half full denies natural/chunk-generation monster
+  spawns. Nether and End monster spawns follow vanilla rules.
 - **Void Gas:** hostile mob deaths add 40, sampled netherrack adds 2, and a
   world-bottom producer has a 1/8 chance to add 8. At 10% through 25% fullness,
   eligible villagers can receive three bread for vanilla breeding readiness,
@@ -231,6 +231,13 @@ and migrated chunks are saved in the new format.
 - **Slime:** vanilla-seeded slime chunks can produce 8 units below Y=40 on a
   1/8 producer roll. At 75% fullness or higher, a 1/32 processed-turn roll
   attempts a slime spawn with a quarter-capacity cost and spawn checks.
+- **Void Gas, Ender Gas and Slime dissipation:** like Smoke, each dissipates
+  gradually via an independent processed-turn roll, reusing Smoke's own
+  `dissipationAmount` (up to 40 units) as the cap. The chance is Smoke's own
+  `dissipationChance` divided by `heavyGas.dissipationFactor` (default 3), so
+  by default these three fade at a third of Smoke's rate. The factor is
+  configurable and shared by all three; a factor of 1 means "as fast as
+  Smoke."
 
 Producer hooks and effect scans are bounded and loaded-only; not every block or
 entity is sampled each tick. Effects requiring material cannot spend unavailable

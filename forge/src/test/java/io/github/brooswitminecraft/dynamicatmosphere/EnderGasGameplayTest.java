@@ -25,12 +25,4 @@ class EnderGasGameplayTest {
         }
         assertFalse(EnderGasGameplay.isPassiveSourceId(ResourceLocation.withDefaultNamespace("chest")));
     }
-
-    @Test
-    void futureNaturalEndermanGateUsesOnlyStrictPurpleDecision() {
-        assertTrue(EnderGasSpawnGate.denies(true, true, false));
-        assertFalse(EnderGasSpawnGate.denies(true, true, true));
-        assertFalse(EnderGasSpawnGate.denies(true, false, false));
-        assertFalse(EnderGasSpawnGate.denies(false, true, false));
-    }
 }
