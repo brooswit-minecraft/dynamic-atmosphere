@@ -54,7 +54,7 @@ class MaterialClientTest {
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.SMOKE,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.DUST,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.ENDER_GAS,
-            io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.VIOLENCE,
+            io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.VOID_GAS,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.EXHAUST,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.SLIME);
         var materials = AtmosphereRenderMaterial.values();
@@ -226,8 +226,8 @@ class MaterialClientTest {
         assertEquals(128 / 255f, AtmosphereRenderMaterial.ENDER_GAS.channel(0, fog));
         assertEquals(0, AtmosphereRenderMaterial.ENDER_GAS.channel(1, fog));
         assertEquals(128 / 255f, AtmosphereRenderMaterial.ENDER_GAS.channel(2, fog));
-        assertEquals(1, AtmosphereRenderMaterial.VIOLENCE.channel(0, fog));
-        assertEquals(0, AtmosphereRenderMaterial.VIOLENCE.channel(1, fog));
+        assertEquals(1, AtmosphereRenderMaterial.VOID_GAS.channel(0, fog));
+        assertEquals(0, AtmosphereRenderMaterial.VOID_GAS.channel(1, fog));
         assertEquals(1, AtmosphereRenderMaterial.EXHAUST.channel(0, fog));
         assertEquals(1, AtmosphereRenderMaterial.EXHAUST.channel(1, fog));
         assertEquals(0, AtmosphereRenderMaterial.EXHAUST.channel(2, fog));
@@ -288,8 +288,8 @@ class MaterialClientTest {
     }
 
     @Test
-    void violenceAndSlimeStayBaseThroughViewThenDoubleThroughTwoView() {
-        for (var material : List.of(AtmosphereRenderMaterial.VIOLENCE, AtmosphereRenderMaterial.SLIME)) {
+    void voidGasAndSlimeStayBaseThroughViewThenDoubleThroughTwoView() {
+        for (var material : List.of(AtmosphereRenderMaterial.VOID_GAS, AtmosphereRenderMaterial.SLIME)) {
             for (double distance : new double[] {63.999, 64, 64.001, 127.999, 128, 128.001, 256}) {
                 var lod = new AtmosphereLodHierarchy(material.cellSize, material.rootLevel, material.reach);
                 lod.put(new AtmosphereClientCache.Cell(0, 0, 0), 1000, 1000, 0, 0);
@@ -313,6 +313,18 @@ class MaterialClientTest {
             session.receive(WORLD, DIMENSION, true, true, List.of(new AtmosphereClientCache.Chunk(-1, 0)), List.of());
             assertEquals(0, session.cache().storedAmount(update(-cellsPerChunk, 0).cell()));
             assertEquals(200, session.cache().storedAmount(update(-cellsPerChunk - 1, 0).cell()));
+        }
+    }
+
+    @Test
+    void allThreeCatalogsAgreeOnVoidGasByNameAndKeepItsPreRenamedOrdinal() {
+        assertEquals("void_gas", io.github.brooswitminecraft.dynamicatmosphere.AtmosphereMaterial.VOID_GAS.id());
+        assertEquals(2, io.github.brooswitminecraft.dynamicatmosphere.AtmosphereMaterial.VOID_GAS.ordinal());
+        assertEquals("void_gas",
+            io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.VOID_GAS.id());
+        assertEquals("void_gas", AtmosphereRenderMaterial.VOID_GAS.name().toLowerCase(java.util.Locale.ROOT));
+        for (var material : io.github.brooswitminecraft.dynamicatmosphere.AtmosphereMaterial.values()) {
+            assertNotEquals("violence", material.id());
         }
     }
 

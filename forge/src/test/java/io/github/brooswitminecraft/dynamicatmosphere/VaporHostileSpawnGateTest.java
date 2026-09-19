@@ -26,7 +26,7 @@ class VaporHostileSpawnGateTest {
     @Test
     void nonHostileAndExplicitSpawnSourcesRemainUnderVanillaControl() {
         assertEquals(PASS_THROUGH,
-            VaporHostileSpawnGate.evaluate(MobSpawnType.NATURAL, MobCategory.CREATURE, false, false));
+            VaporHostileSpawnGate.evaluate(MobSpawnType.NATURAL, MobCategory.CREATURE, true, false, false));
         assertEquals(PASS_THROUGH, decide(MobSpawnType.COMMAND, false, false));
         assertEquals(PASS_THROUGH, decide(MobSpawnType.SPAWN_EGG, false, false));
         assertEquals(PASS_THROUGH, decide(MobSpawnType.SPAWNER, false, false));
@@ -40,12 +40,24 @@ class VaporHostileSpawnGateTest {
         assertEquals(PASS_THROUGH, decide(MobSpawnType.NATURAL, false, vaporMoreThanHalfFull));
     }
 
+    @Test
+    void netherAndEndMonstersAreNeverGatedByVapor() {
+        // ATMO-9: no qualifying terrain above and zero Vapor must still pass through
+        // outside the Overworld — the gate has no business there at all.
+        assertEquals(PASS_THROUGH, VaporHostileSpawnGate.evaluate(
+            MobSpawnType.NATURAL, MobCategory.MONSTER, false, false, false));
+        assertEquals(PASS_THROUGH, VaporHostileSpawnGate.evaluate(
+            MobSpawnType.CHUNK_GENERATION, MobCategory.MONSTER, false, false, false));
+        assertEquals(PASS_THROUGH, VaporHostileSpawnGate.evaluate(
+            MobSpawnType.NATURAL, MobCategory.MONSTER, false, false, true));
+    }
+
     private static VaporHostileSpawnGate.Decision decide(
         MobSpawnType spawnType,
         boolean qualifyingTerrainAbove,
         boolean vaporMoreThanHalfFull
     ) {
         return VaporHostileSpawnGate.evaluate(
-            spawnType, MobCategory.MONSTER, qualifyingTerrainAbove, vaporMoreThanHalfFull);
+            spawnType, MobCategory.MONSTER, true, qualifyingTerrainAbove, vaporMoreThanHalfFull);
     }
 }

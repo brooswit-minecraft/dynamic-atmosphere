@@ -7,7 +7,7 @@ import net.minecraft.network.codec.StreamCodec;
 public enum AtmosphereMaterial {
     DUST("dust"),
     ENDER_GAS("ender_gas"),
-    VIOLENCE("violence"),
+    VOID_GAS("void_gas"),
     EXHAUST("exhaust"),
     SLIME("slime");
 

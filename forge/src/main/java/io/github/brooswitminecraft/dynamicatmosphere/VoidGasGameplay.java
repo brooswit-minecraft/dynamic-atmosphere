@@ -17,7 +17,7 @@ import net.minecraft.world.phys.AABB;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 
 /**
- * Loaded-only Violence producers and cell effects. The passive callbacks are
+ * Loaded-only Void Gas producers and cell effects. The passive callbacks are
  * intended for the existing bounded producer schedule; this class never walks
  * the loaded world or requests a chunk.
  *
@@ -29,7 +29,7 @@ import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
  * cost of 5% of the cell's current amount. Neither path creates replacement
  * villagers or forces a breeding partner, bed, or successful birth.</p>
  */
-public final class ViolenceGameplay {
+public final class VoidGasGameplay {
     static final int HOSTILE_DEATH_AMOUNT = 40;
     static final int NETHERRACK_AMOUNT = 2;
     static final int BOTTOM_AMOUNT = 8;
@@ -68,36 +68,36 @@ public final class ViolenceGameplay {
             || !(event.getEntity().level() instanceof ServerLevel level)) {
             return;
         }
-        DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.VIOLENCE,
+        DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.VOID_GAS,
             event.getEntity().blockPosition(),
-            DynamicAtmosphereServerConfig.snapshot().violence().hostileDeathEmission());
+            DynamicAtmosphereServerConfig.snapshot().voidGas().hostileDeathEmission());
     }
 
     /** Called for a position already selected inside a loaded chunk. */
     public void onPassiveBlockSample(ServerLevel level, BlockPos pos, BlockState state) {
         if (state.is(Blocks.NETHERRACK)) {
-            DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.VIOLENCE, pos,
-                DynamicAtmosphereServerConfig.snapshot().violence().netherrackEmission());
+            DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.VOID_GAS, pos,
+                DynamicAtmosphereServerConfig.snapshot().voidGas().netherrackEmission());
         }
     }
 
     /** Called once per loaded chunk selected by the bounded producer schedule. */
     public void onLoadedChunkProducerCheck(ServerLevel level, LevelChunk chunk) {
-        DynamicAtmosphereServerConfig.Violence config = DynamicAtmosphereServerConfig.snapshot().violence();
+        DynamicAtmosphereServerConfig.VoidGas config = DynamicAtmosphereServerConfig.snapshot().voidGas();
         if (level.getChunkSource().getChunkNow(chunk.getPos().x, chunk.getPos().z) != chunk
             || !bottomEmission(level.random.nextInt(config.bottomChanceDenominator()))) {
             return;
         }
         int x = chunk.getPos().getMinBlockX() + level.random.nextInt(16);
         int z = chunk.getPos().getMinBlockZ() + level.random.nextInt(16);
-        DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.VIOLENCE,
+        DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.VOID_GAS,
             new BlockPos(x, level.getMinBuildHeight(), z), config.bottomEmission());
     }
 
-    /** Called once for a processed Violence cell whose origin is already loaded. */
+    /** Called once for a processed Void Gas cell whose origin is already loaded. */
     public void onProcessedCell(ServerLevel level, BlockPos cellOrigin) {
-        DynamicAtmosphereServerConfig.Violence config = DynamicAtmosphereServerConfig.snapshot().violence();
-        DynamicAtmosphereMod.materialState(level, AtmosphereMaterial.VIOLENCE, cellOrigin).ifPresent(state -> {
+        DynamicAtmosphereServerConfig.VoidGas config = DynamicAtmosphereServerConfig.snapshot().voidGas();
+        DynamicAtmosphereMod.materialState(level, AtmosphereMaterial.VOID_GAS, cellOrigin).ifPresent(state -> {
             CellEffect effect = effectFor(state.amount(), state.capacity(),
                 level.random.nextInt(config.spawnChanceDenominator()));
             if (effect.villagerBand()) {
@@ -109,13 +109,13 @@ public final class ViolenceGameplay {
     }
 
     private static void readyOneVillager(ServerLevel level, BlockPos cellOrigin, int cost, int breedingBread) {
-        AABB bounds = cellBounds(cellOrigin, AtmosphereMaterial.VIOLENCE.cellSize());
+        AABB bounds = cellBounds(cellOrigin, AtmosphereMaterial.VOID_GAS.cellSize());
         List<Villager> villagers = level.getEntitiesOfClass(Villager.class, bounds,
             candidate -> bounds.contains(candidate.position()) && eligibleVillager(candidate, breedingBread));
         int checked = 0;
         for (Villager villager : villagers) {
             if (checked++ >= MAX_VILLAGER_CANDIDATES) break;
-            if (!DynamicAtmosphereMod.consumeMaterial(level, AtmosphereMaterial.VIOLENCE, cellOrigin, cost)) return;
+            if (!DynamicAtmosphereMod.consumeMaterial(level, AtmosphereMaterial.VOID_GAS, cellOrigin, cost)) return;
             villager.getInventory().addItem(new ItemStack(Items.BREAD, breedingBread));
             return;
         }
@@ -139,9 +139,9 @@ public final class ViolenceGameplay {
 
     private static void spawnOne(ServerLevel level, BlockPos cellOrigin, int cost, int attempts) {
         BlockPos pos = findSpawnPosition(
-            level, cellOrigin, AtmosphereMaterial.VIOLENCE.cellSize(), EntityType.ZOMBIE, attempts);
+            level, cellOrigin, AtmosphereMaterial.VOID_GAS.cellSize(), EntityType.ZOMBIE, attempts);
         if (pos == null || !DynamicAtmosphereMod.consumeMaterial(
-            level, AtmosphereMaterial.VIOLENCE, cellOrigin, cost)) return;
+            level, AtmosphereMaterial.VOID_GAS, cellOrigin, cost)) return;
         EntityType.ZOMBIE.spawn(level, pos, MobSpawnType.NATURAL);
     }
 
@@ -169,7 +169,7 @@ public final class ViolenceGameplay {
             origin.getX() + size, origin.getY() + size, origin.getZ() + size);
     }
 
-    private ViolenceGameplay() { }
+    private VoidGasGameplay() { }
 
-    public static ViolenceGameplay create() { return new ViolenceGameplay(); }
+    public static VoidGasGameplay create() { return new VoidGasGameplay(); }
 }
