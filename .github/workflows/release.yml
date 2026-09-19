@@ -105,6 +105,11 @@ jobs:
             --file "forge/build/libs/dynamicatmosphere-$VERSION.jar" \
             --version "$VERSION" --changelog-file CHANGELOG.md \
             --game-version 1.21.1 --loader neoforge --channel alpha
+      - name: Sync current Modrinth environment and review state
+        env:
+          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
+          PROJECT_ID: ${{ vars.MODRINTH_PROJECT_ID }}
+        run: python3 scripts/sync-modrinth-settings.py
       # "The publish step exited 0" is not sufficient: this authenticates (the
       # project is not anonymously visible, see docs/release-dispatch-contract.md)
       # and looks the version up by the jar's sha512, retrying with a short
@@ -173,8 +178,3 @@ jobs:
           name: dynamic-atmosphere-released
           path: dynamic-atmosphere-released.json
           if-no-files-found: warn
-      - name: Sync current Modrinth environment and review state
-        env:
-          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
-          PROJECT_ID: ${{ vars.MODRINTH_PROJECT_ID }}
-        run: python3 scripts/sync-modrinth-settings.py

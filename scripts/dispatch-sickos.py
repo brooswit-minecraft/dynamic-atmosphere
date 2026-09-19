@@ -115,7 +115,9 @@ def main(argv=None, env=None, post=None):
     )
 
     artifact_path = Path(argv[0] if argv else env.get("DISPATCH_PAYLOAD_PATH", DEFAULT_ARTIFACT_PATH))
-    artifact_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    # No sort_keys: payload must keep PAYLOAD_KEYS' contract order, matching
+    # the shared fixture byte-for-byte (see FixtureRoundTripTest).
+    artifact_path.write_text(json.dumps(payload, indent=2) + "\n")
     print(f"Wrote dispatch payload to {artifact_path}")
 
     if not should_dispatch(env.get("MODRINTH_PRE_PUBLISH_EXISTS", "")):

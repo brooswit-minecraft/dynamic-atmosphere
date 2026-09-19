@@ -121,6 +121,14 @@ class BuildReleaseNotesTest(unittest.TestCase):
         notes = changelog.build_release_notes(section, "breaking")
         self.assertNotIn("0.19.0-alpha.1", notes)
 
+    def test_notes_are_lf_only_even_if_source_changelog_has_crlf(self):
+        # sickos's extraction fails closed on CRLF (ticket comment 22811).
+        crlf_fixture = ATMO7_FIXTURE.replace("\n", "\r\n")
+        section = changelog.extract_section(crlf_fixture, "0.20.0-alpha.1")
+        notes = changelog.build_release_notes(section, "breaking")
+        self.assertNotIn("\r", notes)
+        self.assertIn("## Migration", notes)
+
 
 class RealChangelogTest(unittest.TestCase):
     """Catches a missing/invalid marker on a PR before it can fail a release on main."""
@@ -132,6 +140,14 @@ class RealChangelogTest(unittest.TestCase):
         category, section_text = changelog.validate_section(changelog_text, version)
         self.assertIn(category, changelog.VALID_CATEGORIES)
         self.assertTrue(section_text.startswith(f"# {version}"))
+
+    def test_real_release_notes_are_lf_only(self):
+        repo_root = Path(__file__).resolve().parent.parent
+        changelog_text = (repo_root / "CHANGELOG.md").read_text()
+        version = (repo_root / "version.txt").read_text().strip()
+        category, section_text = changelog.validate_section(changelog_text, version)
+        notes = changelog.build_release_notes(section_text, category)
+        self.assertNotIn("\r", notes)
 
 
 if __name__ == "__main__":

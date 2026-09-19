@@ -169,6 +169,26 @@ class FixtureTest(unittest.TestCase):
         # A payload built from realistic values must validate the same way.
         dispatch_sickos.build_payload(**fixture)
 
+    def test_artifact_written_from_fixture_values_matches_fixture_bytes_exactly(self):
+        # Catches a format drift (e.g. sort_keys reordering away from contract
+        # order) that a mere key-set/order check on the in-memory dict misses.
+        fixture = json.loads(self._fixture_path().read_text())
+        env = {
+            "VERSION": fixture["version"],
+            "MODRINTH_VERSION_ID": fixture["modrinth_version_id"],
+            "SHA1": fixture["sha1"],
+            "SHA512": fixture["sha512"],
+            "DOWNLOAD_URL": fixture["download_url"],
+            "FILE_NAME": fixture["file_name"],
+            "CATEGORY": fixture["category"],
+            "GITHUB_RELEASE_URL": fixture["github_release_url"],
+            "MODRINTH_PRE_PUBLISH_EXISTS": "true",  # irrelevant to writing; skips dispatch
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = Path(tmp) / "payload.json"
+            dispatch_sickos.main([str(artifact)], env=env, post=lambda r: None)
+            self.assertEqual(artifact.read_bytes(), self._fixture_path().read_bytes())
+
 
 if __name__ == "__main__":
     unittest.main()

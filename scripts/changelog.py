@@ -21,7 +21,13 @@ _ANY_HEADING = re.compile(r"^#{1,2} ", re.MULTILINE)
 
 
 def extract_section(changelog_text, version):
-    """Return the full `# <version>` section, heading included, verbatim."""
+    """Return the full `# <version>` section, heading included, verbatim.
+
+    Normalizes CRLF/CR to LF first: sickos's extraction fails closed on CRLF,
+    and every downstream consumer of this text (release notes, Migration
+    body) should only ever see LF.
+    """
+    changelog_text = changelog_text.replace("\r\n", "\n").replace("\r", "\n")
     match = None
     for candidate in _TOP_HEADING.finditer(changelog_text):
         if candidate.group(1) == version:
@@ -91,7 +97,11 @@ def validate_section(changelog_text, version):
 
 
 def build_release_notes(section_text, category):
-    """Generated GitHub release notes: `category: <value>` then the section verbatim."""
+    """Generated GitHub release notes: `category: <value>` then the section verbatim.
+
+    LF-only: sickos's extraction fails closed on CRLF.
+    """
+    section_text = section_text.replace("\r\n", "\n").replace("\r", "\n")
     return f"category: {category}\n\n{section_text}\n"
 
 
