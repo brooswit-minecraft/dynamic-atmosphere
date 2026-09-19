@@ -6,6 +6,15 @@
 - Rename `ViolenceGameplay`/`ViolenceGameplayTest` to `VoidGasGameplay`/`VoidGasGameplayTest`. Rename the server `violence` config section to `voidGas`, and the client `violenceReachMultiplier`/`violenceOpticalDensity` keys to `voidGasReachMultiplier`/`voidGasOpticalDensity`. No migration: old values reset to their defaults.
 - Slime continues to share the renamed `VOID_GAS_LOD` constant in the engine catalog; its behavior is unchanged and pinned by a test. A new test confirms the server, engine, and client catalogs agree on the Void Gas entry and that ordinals are unchanged.
 
+# 0.19.1-alpha.1
+
+Category: patch
+
+- Fix: scope `VaporHostileSpawnGate` to the Overworld. Natural and chunk-generation
+  monster spawns in the Nether and End no longer require dense local Vapor; they
+  follow vanilla rules again. The Overworld rule (qualifying terrain above, or Vapor
+  strictly more than half full) is unchanged. Endermen and Ender Gas are untouched.
+
 # 0.19.0-alpha.1
 
 - Positive-RPM fans draw evenly from the five non-facing neighbors before pushing forward. Negative RPM draws from the facing neighbor before distributing evenly to the other five.
