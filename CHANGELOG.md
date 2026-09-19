@@ -1,5 +1,7 @@
 # 0.19.1-alpha.1
 
+Category: patch
+
 - Fix: scope `VaporHostileSpawnGate` to the Overworld. Natural and chunk-generation
   monster spawns in the Nether and End no longer require dense local Vapor; they
   follow vanilla rules again. The Overworld rule (qualifying terrain above, or Vapor
