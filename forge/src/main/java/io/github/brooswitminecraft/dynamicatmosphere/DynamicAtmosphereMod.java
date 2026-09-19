@@ -68,7 +68,7 @@ public class DynamicAtmosphereMod {
         NeoForge.EVENT_BUS.addListener(EventPriority.LOWEST, enderGas::onProjectileImpact);
         NeoForge.EVENT_BUS.addListener(enderGas::onEntityLeave);
         NeoForge.EVENT_BUS.addListener(EnderGasSpawnGate::onSpawnPlacementCheck);
-        NeoForge.EVENT_BUS.addListener(prototype.violenceGameplay()::onLivingDeath);
+        NeoForge.EVENT_BUS.addListener(prototype.voidGasGameplay()::onLivingDeath);
         NeoForge.EVENT_BUS.addListener(prototype.exhaustGameplay()::onEntityTick);
         NeoForge.EVENT_BUS.addListener(prototype.exhaustGameplay()::onLivingDamage);
         LOGGER.info("[{}] bounded atmospheric grid enabled", MODID);

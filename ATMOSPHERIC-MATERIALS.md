@@ -18,7 +18,7 @@ and never force chunks to load.
 | Vapor | Current fog color | 4x4x4 | 1x to V/2, 2x to V, 4x to 2V | 1x |
 | Smoke | Black | 4x4x4 | 1x to V/2, 2x to V, 4x to 2V | 4x |
 | Dust | Brown | 4x4x4 | Base cells to V/4 | 1x |
-| Violence | Red | 4x4x4 | 1x to V, 2x to 2V | 4x |
+| Void Gas | Red | 4x4x4 | 1x to V, 2x to 2V | 4x |
 | Exhaust | Yellow | 4x4x4 | Base cells to V/4 | 1x |
 | Slime | Green | 4x4x4 | 1x to V, 2x to 2V | 4x |
 | Ender Gas | Purple | 4x4x4 | Base cells to V/4 | 40x |
@@ -95,10 +95,10 @@ falling-block landings produce Dust. Water or snow/ice movement routes the movem
 emission to Vapor instead. Processed Dust can turn plain water into mud, create
 gravel when overfull, and independently dissipate. Waterlogged hosts are preserved.
 
-### Violence
+### Void Gas
 
 Hostile deaths, sampled Netherrack, and bounded world-bottom checks produce
-Violence. The medium-density villager effect supplies an eligible existing
+Void Gas. The medium-density villager effect supplies an eligible existing
 villager with breeding food while preserving the entity and vanilla breeding
 requirements. High density can attempt one vanilla-checked zombie spawn with a
 finite material cost.
@@ -147,5 +147,5 @@ requires confirmed blocked overflow and a fresh search; unknown boundaries and
 exhausted budgets do not authorize terrain destruction. Back up worlds: this alpha
 can place or remove blocks, alter villagers, damage entities, spawn mobs, and break
 eligible terrain under pressure. Updating to the uniform 4x4x4 cell size discards
-saved Dust, Ender Gas, Exhaust, Violence, and Slime atmosphere; Vapor and Smoke
+saved Dust, Ender Gas, Exhaust, Void Gas, and Slime atmosphere; Vapor and Smoke
 were already 4x4x4 and keep their data. Downgrading does not undo world mutations.
