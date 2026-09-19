@@ -1,11 +1,27 @@
 # 0.20.0-alpha.1
 
-**BREAKING:** the `violence` material is renamed to Void Gas. Existing `violence` server and client config sections are discarded; config resets to `voidGas` defaults on upgrade. Any world with saved `violence` atmosphere loses that stored material on load — old data under the `violence` id is discarded, not migrated.
+Category: breaking
 
+**BREAKING:** saved Dust, Ender Gas, Exhaust, Void Gas, and Slime atmosphere is discarded on upgrade (see the chunk storage version bump below). Existing `violence` server and client config sections are discarded; config resets to `voidGas` defaults on upgrade. Client and server must be upgraded together: a client running the old per-material cell sizes, or the old `violence` id, will file and render material at the wrong size, position, or name against this server. Back up worlds before upgrading.
+
+- Move every atmosphere material onto a uniform 4x4x4-block cell. Dust, Ender Gas, and Exhaust grow from 2x2x2; Void Gas shrinks from 8x8x8; Slime shrinks from 16x16x16.
+- Collapse `AtmosphereMaterial`'s per-material cell size onto the shared `AtmosphereGridLayout.CELL_SIZE`; the engine's approved specification catalog matches.
+- Collapse the client's `AtmosphereRenderMaterial` per-material cell size onto the same `AtmosphereGridLayout.CELL_SIZE`, so the client files and renders cells at the size the server actually sends. A test now asserts the client, server, and engine catalogs agree by material name.
+- Bump the Dust/Ender Gas/Exhaust/Void Gas/Slime chunk storage version. Pre-upgrade chunk data for those materials is retained on disk but treated as unreadable rather than reinterpreted at the new cell size; affected chunks come back with no stored material until new material accumulates. Vapor and Smoke were already 4x4x4 and are unaffected.
+- Remove the now-unreachable legacy one-block Ender Gas merge path, superseded by the storage version bump above.
+- Void Gas and Slime are fan-transportable for the first time, a direct consequence of sharing Vapor/Smoke/Dust/Exhaust/Ender Gas's existing 4-block fan size limit; no fan code changed.
+- LOD bands (`VOID_GAS_LOD`, `DUST_LOD`, `VAPOR_LOD`) are multipliers of each material's own cell size and were left as-is; see README for the resulting per-tier volume size change per material.
 - Overworld Endermen now follow the fog (Vapor) spawn rule; the Ender Gas spawn gate is removed. Nether and End spawns use vanilla rules.
 - Rename `AtmosphereMaterial.VIOLENCE` (`"violence"`) to `AtmosphereMaterial.VOID_GAS` (`"void_gas"`) across the server, engine, and client catalogs. Enum order and ordinals are unchanged.
 - Rename `ViolenceGameplay`/`ViolenceGameplayTest` to `VoidGasGameplay`/`VoidGasGameplayTest`. Rename the server `violence` config section to `voidGas`, and the client `violenceReachMultiplier`/`violenceOpticalDensity` keys to `voidGasReachMultiplier`/`voidGasOpticalDensity`. No migration: old values reset to their defaults.
 - Slime continues to share the renamed `VOID_GAS_LOD` constant in the engine catalog; its behavior is unchanged and pinned by a test. A new test confirms the server, engine, and client catalogs agree on the Void Gas entry and that ordinals are unchanged.
+
+## Migration
+
+- Saved Dust, Ender Gas, Exhaust, Void Gas, and Slime atmosphere is dropped on load; affected chunks come back empty and refill from normal production.
+- Existing `violence` server and client config resets to `voidGas` defaults; old `violence`/`violenceReachMultiplier`/`violenceOpticalDensity` values are not migrated.
+- Client and server must be upgraded together and match versions.
+- Back up worlds before upgrading.
 
 # 0.19.1-alpha.1
 

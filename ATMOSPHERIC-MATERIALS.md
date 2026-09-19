@@ -17,11 +17,11 @@ and never force chunks to load.
 | --- | --- | --- | --- | --- |
 | Vapor | Current fog color | 4x4x4 | 1x to V/2, 2x to V, 4x to 2V | 1x |
 | Smoke | Black | 4x4x4 | 1x to V/2, 2x to V, 4x to 2V | 4x |
-| Dust | Brown | 2x2x2 | Base cells to V/4 | 1x |
-| Void Gas | Red | 8x8x8 | 1x to V, 2x to 2V | 4x |
-| Exhaust | Yellow | 2x2x2 | Base cells to V/4 | 1x |
-| Slime | Green | 16x16x16 | 1x to V, 2x to 2V | 4x |
-| Ender Gas | Purple | 1x1x1 | Base cells to V/4 | 40x |
+| Dust | Brown | 4x4x4 | Base cells to V/4 | 1x |
+| Void Gas | Red | 4x4x4 | 1x to V, 2x to 2V | 4x |
+| Exhaust | Yellow | 4x4x4 | Base cells to V/4 | 1x |
+| Slime | Green | 4x4x4 | 1x to V, 2x to 2V | 4x |
+| Ender Gas | Purple | 4x4x4 | Base cells to V/4 | 40x |
 
 Optical density affects rendering only. It never multiplies stored amounts,
 capacity, production, damage, or effect thresholds. Material identities never
@@ -146,5 +146,6 @@ loaded-only. Gameplay effects cannot spend unavailable material. Pressure relief
 requires confirmed blocked overflow and a fresh search; unknown boundaries and
 exhausted budgets do not authorize terrain destruction. Back up worlds: this alpha
 can place or remove blocks, alter villagers, damage entities, spawn mobs, and break
-eligible terrain under pressure. Updating preserves existing world and material
-state; downgrading does not undo world mutations.
+eligible terrain under pressure. Updating to the uniform 4x4x4 cell size discards
+saved Dust, Ender Gas, Exhaust, Void Gas, and Slime atmosphere; Vapor and Smoke
+were already 4x4x4 and keep their data. Downgrading does not undo world mutations.

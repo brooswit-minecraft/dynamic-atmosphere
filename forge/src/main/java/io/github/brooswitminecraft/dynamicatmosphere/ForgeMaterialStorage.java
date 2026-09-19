@@ -19,7 +19,7 @@ import java.util.function.Supplier;
 
 /** Sparse chunk-owned persistence shared by Dust and Ender Gas. */
 public final class ForgeMaterialStorage {
-    private record MaterialSnapshot(List<MaterialChunkData.Cell> cells, CompoundTag unreadable, boolean migrated) { }
+    private record MaterialSnapshot(List<MaterialChunkData.Cell> cells, CompoundTag unreadable) { }
     private record Snapshot(Map<AtmosphereMaterial, MaterialSnapshot> materials) { }
 
     private static final DeferredRegister<AttachmentType<?>> TYPES =
@@ -37,17 +37,6 @@ public final class ForgeMaterialStorage {
                         if (!tag.contains(material.id(), Tag.TAG_COMPOUND)) continue;
                         CompoundTag materialTag = tag.getCompound(material.id());
                         try {
-                            if (material == AtmosphereMaterial.ENDER_GAS
-                                && materialTag.contains("version", Tag.TAG_INT)
-                                && materialTag.getInt("version") == MaterialChunkData.VERSION
-                                && materialTag.contains("cell_size", Tag.TAG_INT)
-                                && materialTag.getInt("cell_size") == 1
-                                && materialTag.contains("cells", Tag.TAG_INT_ARRAY)) {
-                                materials.put(material, new MaterialSnapshot(MaterialChunkData.migrateEnderGas(
-                                    chunk.getPos().x, chunk.getPos().z, chunk.getMinBuildHeight(),
-                                    chunk.getMaxBuildHeight(), materialTag.getIntArray("cells")), null, true));
-                                continue;
-                            }
                             if (!materialTag.contains("version", Tag.TAG_INT)
                                 || materialTag.getInt("version") != MaterialChunkData.VERSION
                                 || !materialTag.contains("cell_size", Tag.TAG_INT)
@@ -57,9 +46,9 @@ public final class ForgeMaterialStorage {
                             }
                             materials.put(material, new MaterialSnapshot(MaterialChunkData.decode(material,
                                 chunk.getPos().x, chunk.getPos().z, chunk.getMinBuildHeight(),
-                                chunk.getMaxBuildHeight(), materialTag.getIntArray("cells")), null, false));
+                                chunk.getMaxBuildHeight(), materialTag.getIntArray("cells")), null));
                         } catch (IllegalArgumentException exception) {
-                            materials.put(material, new MaterialSnapshot(List.of(), materialTag.copy(), false));
+                            materials.put(material, new MaterialSnapshot(List.of(), materialTag.copy()));
                         }
                     }
                     return new Snapshot(Map.copyOf(materials));
@@ -90,7 +79,6 @@ public final class ForgeMaterialStorage {
         Snapshot snapshot = chunk.getExistingDataOrNull(DATA.get());
         MaterialSnapshot materialSnapshot = snapshot == null ? null : snapshot.materials().get(material);
         requireReadable(material, materialSnapshot);
-        if (materialSnapshot != null && materialSnapshot.migrated()) chunk.setUnsaved(true);
         return materialSnapshot == null ? List.of() : materialSnapshot.cells();
     }
 
@@ -105,7 +93,7 @@ public final class ForgeMaterialStorage {
         var materials = new EnumMap<AtmosphereMaterial, MaterialSnapshot>(AtmosphereMaterial.class);
         if (previous != null) materials.putAll(previous.materials());
         if (validated.isEmpty()) materials.remove(material);
-        else materials.put(material, new MaterialSnapshot(validated, null, false));
+        else materials.put(material, new MaterialSnapshot(validated, null));
         chunk.setData(DATA.get(), new Snapshot(Map.copyOf(materials)));
         chunk.setUnsaved(true);
     }

@@ -19,11 +19,11 @@ not a claim of balance or measured performance.
 | --- | --- | --- | --- | --- |
 | Vapor | 4 blocks | 200 ticks | Minecraft fog/horizon | 1x |
 | Smoke | 4 blocks | 200 ticks | Black | 4x |
-| Dust | 2 blocks | 200 ticks | Brown | 1x |
-| Ender Gas | 2 blocks | 200 ticks | Purple | 40x |
-| Void Gas | 8 blocks | 200 ticks | Red | 4x |
-| Exhaust | 2 blocks | 200 ticks | Yellow | 1x |
-| Slime | 16 blocks | 200 ticks | Green | 4x |
+| Dust | 4 blocks | 200 ticks | Brown | 1x |
+| Ender Gas | 4 blocks | 200 ticks | Purple | 40x |
+| Void Gas | 4 blocks | 200 ticks | Red | 4x |
+| Exhaust | 4 blocks | 200 ticks | Yellow | 1x |
+| Slime | 4 blocks | 200 ticks | Green | 4x |
 
 All materials share the 200-tick simulation cadence and scheduled producer passes
 share a 300-tick cadence. These are scheduled game ticks subject to bounded work
@@ -190,8 +190,9 @@ and frustum. Delta sync is every 20 ticks and full snapshots every 200.
 
 ## Create Fans and Configuration
 
-Fans affect only cells up to 4x4x4: Vapor, Smoke, Dust, Exhaust, and Ender Gas.
-Void Gas and Slime are unaffected.
+Fans affect cells up to 4x4x4, which now covers every material: Vapor, Smoke,
+Dust, Exhaust, Ender Gas, Void Gas, and Slime. Void Gas and Slime previously used
+larger cells and were unaffected; they are fan-transportable as of `0.20.0-alpha.1`.
 
 With Create installed, positive-RPM Encased Fans first draw evenly from their five
 non-facing neighbors, then push toward the facing neighbor. Negative RPM reverses
