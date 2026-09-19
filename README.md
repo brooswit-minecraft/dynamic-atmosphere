@@ -164,10 +164,10 @@ emission sources, thresholds, and costs did not change.
 | Material | Base cell edge | Scheduled simulation interval | Color | Optical density |
 | --- | --- | --- | --- | --- |
 | Vapor | 4 blocks | 200 ticks | Minecraft fog/horizon | 1x |
-| Smoke | 4 blocks | 200 ticks | Black | 4x |
+| Smoke | 4 blocks | 200 ticks | Very dark brown (0x1F160F) | 2x |
 | Dust | 4 blocks | 200 ticks | Brown | 1x |
 | Ender Gas | 4 blocks | 200 ticks | Purple | 40x |
-| Void Gas | 4 blocks | 200 ticks | Red | 4x |
+| Void Gas | 4 blocks | 200 ticks | Black | 4x |
 | Exhaust | 4 blocks | 200 ticks | Yellow | 1x |
 | Slime | 4 blocks | 200 ticks | Green | 4x |
 
@@ -301,7 +301,7 @@ grayscale, distance color blend, or client terrain-light sampling cache.
 The other six materials use the colors in the table above. Vapor-only frames retain
 the constant-color unsorted path; mixed-material slices are merged back-to-front
 through shared bounded GPU batches. Mixed colors are not order-independent.
-Smoke, Void Gas, and Slime multiply optical density by four before
+Void Gas and Slime multiply optical density by four and Smoke by two before
 thickness-integrated alpha; Ender Gas uses 40x. This changes rendering only, not
 material amounts, capacity, or simulation fullness.
 

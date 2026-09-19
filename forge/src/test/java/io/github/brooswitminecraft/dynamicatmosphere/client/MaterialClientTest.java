@@ -60,6 +60,11 @@ class MaterialClientTest {
         var materials = AtmosphereRenderMaterial.values();
         for (int i = 0; i < materials.length; i++) {
             assertEquals(definitions.get(i).settings().opticalDensityMultiplier(), materials[i].opticalDensityMultiplier);
+            // The renderer reads the CLIENT CONFIG default, not the catalog field above,
+            // so a config default that drifts from the catalogs would render the wrong opacity
+            // even though this catalog-only comparison stayed green.
+            assertEquals(materials[i].opticalDensityMultiplier, materials[i].tuning().opticalDensity(),
+                "client config default optical density must match the catalogs for " + materials[i].name());
             var cache = materials[i].newCache();
             cache.changeDimension(DIMENSION);
             cache.restore(List.of(update(0, 500)));
@@ -67,6 +72,40 @@ class MaterialClientTest {
             assertEquals(500, volume.amount(0));
             assertEquals(500, cache.storedAmount(update(0, 0).cell()));
         }
+    }
+
+    @Test
+    void smokeIsTwoTimesAndVoidGasStaysFourTimesWithSlimeEnderVaporDustExhaustUnchanged() {
+        assertEquals(2, AtmosphereRenderMaterial.SMOKE.opticalDensityMultiplier);
+        assertEquals(2, AtmosphereRenderMaterial.SMOKE.tuning().opticalDensity());
+        assertEquals(31 / 255f, AtmosphereRenderMaterial.SMOKE.channel(0, new float[3]));
+        assertEquals(22 / 255f, AtmosphereRenderMaterial.SMOKE.channel(1, new float[3]));
+        assertEquals(15 / 255f, AtmosphereRenderMaterial.SMOKE.channel(2, new float[3]));
+
+        assertEquals(4, AtmosphereRenderMaterial.VOID_GAS.opticalDensityMultiplier);
+        assertEquals(4, AtmosphereRenderMaterial.VOID_GAS.tuning().opticalDensity());
+        assertEquals(0, AtmosphereRenderMaterial.VOID_GAS.channel(0, new float[3]));
+        assertEquals(0, AtmosphereRenderMaterial.VOID_GAS.channel(1, new float[3]));
+        assertEquals(0, AtmosphereRenderMaterial.VOID_GAS.channel(2, new float[3]));
+
+        assertEquals(1, AtmosphereRenderMaterial.VAPOR.opticalDensityMultiplier);
+        assertEquals(1, AtmosphereRenderMaterial.VAPOR.tuning().opticalDensity());
+        assertEquals(1, AtmosphereRenderMaterial.DUST.opticalDensityMultiplier);
+        assertEquals(1, AtmosphereRenderMaterial.DUST.tuning().opticalDensity());
+        assertEquals(1, AtmosphereRenderMaterial.EXHAUST.opticalDensityMultiplier);
+        assertEquals(1, AtmosphereRenderMaterial.EXHAUST.tuning().opticalDensity());
+        assertEquals(4, AtmosphereRenderMaterial.SLIME.opticalDensityMultiplier);
+        assertEquals(4, AtmosphereRenderMaterial.SLIME.tuning().opticalDensity());
+        assertEquals(40, AtmosphereRenderMaterial.ENDER_GAS.opticalDensityMultiplier);
+        assertEquals(40, AtmosphereRenderMaterial.ENDER_GAS.tuning().opticalDensity());
+    }
+
+    @Test
+    void smokeIsHalfItsPreviousOpticalDensity() {
+        assertEquals(2, AtmosphereRenderMaterial.SMOKE.opticalDensityMultiplier);
+        double oldDepth = -Math.log1p(-AtmosphereVolumeGeometry.sliceAlpha(100, 1, 1, 4));
+        double newDepth = -Math.log1p(-AtmosphereVolumeGeometry.sliceAlpha(100, 1, 1, 2));
+        assertEquals(oldDepth / 2, newDepth, 1e-5);
     }
 
     @Test
@@ -219,15 +258,18 @@ class MaterialClientTest {
     void paletteAndSevenMaterialSliceOrderingAreIndependent() {
         float[] fog = {0.2f, 0.5f, 0.8f};
         assertEquals(fog[1], AtmosphereRenderMaterial.VAPOR.channel(1, fog));
-        assertEquals(0, AtmosphereRenderMaterial.SMOKE.channel(0, fog));
+        assertEquals(31 / 255f, AtmosphereRenderMaterial.SMOKE.channel(0, fog));
+        assertEquals(22 / 255f, AtmosphereRenderMaterial.SMOKE.channel(1, fog));
+        assertEquals(15 / 255f, AtmosphereRenderMaterial.SMOKE.channel(2, fog));
         assertEquals(139 / 255f, AtmosphereRenderMaterial.DUST.channel(0, fog));
         assertEquals(69 / 255f, AtmosphereRenderMaterial.DUST.channel(1, fog));
         assertEquals(19 / 255f, AtmosphereRenderMaterial.DUST.channel(2, fog));
         assertEquals(128 / 255f, AtmosphereRenderMaterial.ENDER_GAS.channel(0, fog));
         assertEquals(0, AtmosphereRenderMaterial.ENDER_GAS.channel(1, fog));
         assertEquals(128 / 255f, AtmosphereRenderMaterial.ENDER_GAS.channel(2, fog));
-        assertEquals(1, AtmosphereRenderMaterial.VOID_GAS.channel(0, fog));
+        assertEquals(0, AtmosphereRenderMaterial.VOID_GAS.channel(0, fog));
         assertEquals(0, AtmosphereRenderMaterial.VOID_GAS.channel(1, fog));
+        assertEquals(0, AtmosphereRenderMaterial.VOID_GAS.channel(2, fog));
         assertEquals(1, AtmosphereRenderMaterial.EXHAUST.channel(0, fog));
         assertEquals(1, AtmosphereRenderMaterial.EXHAUST.channel(1, fog));
         assertEquals(0, AtmosphereRenderMaterial.EXHAUST.channel(2, fog));
