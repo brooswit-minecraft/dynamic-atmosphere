@@ -14,6 +14,7 @@ Category: breaking
 - Rename `AtmosphereMaterial.VIOLENCE` (`"violence"`) to `AtmosphereMaterial.VOID_GAS` (`"void_gas"`) across the server, engine, and client catalogs. Enum order and ordinals are unchanged.
 - Rename `ViolenceGameplay`/`ViolenceGameplayTest` to `VoidGasGameplay`/`VoidGasGameplayTest`. Rename the server `violence` config section to `voidGas`, and the client `violenceReachMultiplier`/`violenceOpticalDensity` keys to `voidGasReachMultiplier`/`voidGasOpticalDensity`. No migration: old values reset to their defaults.
 - Slime continues to share the renamed `VOID_GAS_LOD` constant in the engine catalog; its behavior is unchanged and pinned by a test. A new test confirms the server, engine, and client catalogs agree on the Void Gas entry and that ordinals are unchanged.
+- Void Gas, Ender Gas and Slime now dissipate gradually each processed turn, reusing `SmokeDissipation`'s roll and `dissipationAmount` cap at a chance of Smoke's own `dissipationChance` divided by the new `heavyGas.dissipationFactor` server config option (default 3). The factor is shared by all three, must be finite and greater than zero, and is reloadable like the rest of server config. Dust and Smoke are unchanged.
 
 ## Migration
 

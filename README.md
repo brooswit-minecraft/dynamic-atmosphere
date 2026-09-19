@@ -231,6 +231,13 @@ and migrated chunks are saved in the new format.
 - **Slime:** vanilla-seeded slime chunks can produce 8 units below Y=40 on a
   1/8 producer roll. At 75% fullness or higher, a 1/32 processed-turn roll
   attempts a slime spawn with a quarter-capacity cost and spawn checks.
+- **Void Gas, Ender Gas and Slime dissipation:** like Smoke, each dissipates
+  gradually via an independent processed-turn roll, reusing Smoke's own
+  `dissipationAmount` (up to 40 units) as the cap. The chance is Smoke's own
+  `dissipationChance` divided by `heavyGas.dissipationFactor` (default 3), so
+  by default these three fade at a third of Smoke's rate. The factor is
+  configurable and shared by all three; a factor of 1 means "as fast as
+  Smoke."
 
 Producer hooks and effect scans are bounded and loaded-only; not every block or
 entity is sampled each tick. Effects requiring material cannot spend unavailable

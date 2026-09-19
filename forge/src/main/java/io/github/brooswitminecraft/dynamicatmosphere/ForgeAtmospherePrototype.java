@@ -722,8 +722,17 @@ final class ForgeAtmospherePrototype {
                 ServerLevel cellLevel = server.getLevel(key.dimension());
                 if (cellLevel == null) return;
                 BlockPos origin = materialCellOrigin(material, key);
-                if (material == AtmosphereMaterial.VOID_GAS) voidGasGameplay.onProcessedCell(cellLevel, origin);
-                if (material == AtmosphereMaterial.SLIME) slimeGameplay.onProcessedCell(cellLevel, origin);
+                if (material == AtmosphereMaterial.VOID_GAS) {
+                    voidGasGameplay.onProcessedCell(cellLevel, origin);
+                    dissipateHeavyGas(cellLevel, materialGrid, key, capacityAt);
+                }
+                if (material == AtmosphereMaterial.SLIME) {
+                    slimeGameplay.onProcessedCell(cellLevel, origin);
+                    dissipateHeavyGas(cellLevel, materialGrid, key, capacityAt);
+                }
+                if (material == AtmosphereMaterial.ENDER_GAS) {
+                    dissipateHeavyGas(cellLevel, materialGrid, key, capacityAt);
+                }
                 if (material == AtmosphereMaterial.EXHAUST) {
                     int size = material.cellSize();
                     exhaustGameplay.processTurn(cellLevel, origin,
@@ -761,6 +770,22 @@ final class ForgeAtmospherePrototype {
         var cell = materialGrid.get(key);
         if (cell == null) return;
         int loss = DustDissipation.amount(cell.amount(), level.random::nextDouble);
+        if (loss > 0) {
+            materialGrid.set(key, cell.amount() - loss, serverTicks, capacityAt.applyAsInt(key));
+        }
+    }
+
+    /** Void Gas, Ender Gas and Slime dissipation, shared via {@link HeavyGasDissipation}. */
+    private void dissipateHeavyGas(
+        ServerLevel level,
+        AtmosphereGrid<ResourceKey<Level>> materialGrid,
+        AtmosphereGrid.CellKey<ResourceKey<Level>> key,
+        ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacityAt
+    ) {
+        if (level == null) return;
+        var cell = materialGrid.get(key);
+        if (cell == null) return;
+        int loss = HeavyGasDissipation.amount(cell.amount(), tuning().heavyGas().dissipationFactor(), level.random::nextDouble);
         if (loss > 0) {
             materialGrid.set(key, cell.amount() - loss, serverTicks, capacityAt.applyAsInt(key));
         }

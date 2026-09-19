@@ -2,7 +2,11 @@ package io.github.brooswitminecraft.dynamicatmosphere;
 
 import java.util.function.DoubleSupplier;
 
-/** Smoke-only loss once per processed Smoke simulation turn; never apply to Vapor. */
+/**
+ * Smoke's own loss once per processed Smoke simulation turn; never apply to Vapor.
+ * Also reused by {@link HeavyGasDissipation} for Void Gas, Ender Gas and Slime at a
+ * reduced chance.
+ */
 public final class SmokeDissipation {
     public static final int MAX_LOSS = 40;
     public static final double CHANCE = 10.0 / 64;
