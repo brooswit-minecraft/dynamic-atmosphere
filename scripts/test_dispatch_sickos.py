@@ -1,3 +1,4 @@
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -145,16 +146,25 @@ class MainTest(unittest.TestCase):
 class FixtureTest(unittest.TestCase):
     """The shared producer/consumer contract fixture (SICKOS-72 tests against the same bytes).
 
-    Per ticket comment 22701: this fixture is DA-authored only until sickos posts the
-    commit SHA of their own tests/fixtures/dynamic-atmosphere-released.example.json;
-    at that point this file must be replaced with those exact bytes, and the assertion
-    below extends to key ORDER (not just the key set) to catch drift.
+    Per ticket comment 22721: committed verbatim from brooswit-minecraft/sickos path
+    tests/fixtures/dynamic-atmosphere-released.example.json at commit
+    9150466b6a8e4a5fd36058f41421e86fd6fa1ee5 (sickos PR #29 head, lead-verified
+    2026-09-19). See scripts/fixtures/README.md. The sha256 below pins those exact
+    bytes so drift (an accidental hand-edit, or a future re-sync gone wrong) is caught.
     """
 
-    def test_fixture_has_exactly_the_payload_builder_key_set_and_types(self):
-        fixture_path = Path(__file__).with_name("fixtures") / "dynamic-atmosphere-released.example.json"
-        fixture = json.loads(fixture_path.read_text())
-        self.assertEqual(set(fixture), set(dispatch_sickos.PAYLOAD_KEYS))
+    EXPECTED_SHA256 = "ebc66b46071c104d4f92030e0b527ad170814fa3b16b322f613a5800902591d6"
+
+    def _fixture_path(self):
+        return Path(__file__).with_name("fixtures") / "dynamic-atmosphere-released.example.json"
+
+    def test_fixture_bytes_match_the_pinned_sickos_source(self):
+        raw = self._fixture_path().read_bytes()
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), self.EXPECTED_SHA256)
+
+    def test_fixture_has_exactly_the_payload_builder_key_set_order_and_types(self):
+        fixture = json.loads(self._fixture_path().read_text())
+        self.assertEqual(tuple(fixture), dispatch_sickos.PAYLOAD_KEYS)
         self.assertTrue(all(isinstance(v, str) for v in fixture.values()))
         # A payload built from realistic values must validate the same way.
         dispatch_sickos.build_payload(**fixture)
