@@ -8,7 +8,7 @@
 - Bump the Dust/Ender Gas/Exhaust/Violence/Slime chunk storage version. Pre-upgrade chunk data for those materials is retained on disk but treated as unreadable rather than reinterpreted at the new cell size; affected chunks come back with no stored material until new material accumulates. Vapor and Smoke were already 4x4x4 and are unaffected.
 - Remove the now-unreachable legacy one-block Ender Gas merge path, superseded by the storage version bump above.
 - Violence and Slime are fan-transportable for the first time, a direct consequence of sharing Vapor/Smoke/Dust/Exhaust/Ender Gas's existing 4-block fan size limit; no fan code changed.
-- LOD bands (`VIOLENCE_LOD`, `DUST_LOD`, `VAPOR_LOD`) are multipliers of each material's own cell size and were left as-is; see README for the resulting reach change per material.
+- LOD bands (`VIOLENCE_LOD`, `DUST_LOD`, `VAPOR_LOD`) are multipliers of each material's own cell size and were left as-is; see README for the resulting per-tier volume size change per material.
 
 # 0.19.0-alpha.1
 

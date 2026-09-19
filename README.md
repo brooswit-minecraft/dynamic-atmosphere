@@ -255,12 +255,14 @@ render distance from the viewer:
 Violence and Slime use base cells through V and 2x cells through 2V, with nothing
 beyond. Dust, Exhaust, and Ender Gas use base cells only through V/4, with nothing
 beyond. These cutoffs include cached fallback geometry and preserve stored cache data.
-These bands are multipliers of each material's own base cell and were unchanged by
-`0.20.0-alpha.1`'s uniform cell size: Violence and Slime's base cell shrank from
-8/16 blocks to 4, so their absolute LOD reach is now finer at the same tier count,
-while Dust, Exhaust, and Ender Gas's base cell grew from 2 blocks to 4, coarsening
-theirs. Re-tuning these bands for the new base size is a follow-up, not required
-for correctness.
+These distance cutoffs (V/4, V, 2V) are unaffected by `0.20.0-alpha.1`'s uniform
+cell size: reach is `viewBlocks * reachMultiplier`, a distance that does not
+depend on cell size, and no material's reach multiplier changed. What changed is
+the volume size of each LOD tier inside those same cutoffs: Violence and Slime's
+tiers are now 4 then 8 blocks, down from 8 then 16 (Violence) and 16 then 32
+(Slime); Dust, Exhaust, and Ender Gas's base tier is now 4 blocks, up from 2 —
+finer for Violence/Slime, coarser for Dust/Exhaust/Ender Gas. Re-tuning these
+tiers for the new base size is a follow-up, not required for correctness.
 
 Each coarser volume recursively averages eight children, counting empty volumes
 in that average rather than averaging only occupied children. Coverage does not
