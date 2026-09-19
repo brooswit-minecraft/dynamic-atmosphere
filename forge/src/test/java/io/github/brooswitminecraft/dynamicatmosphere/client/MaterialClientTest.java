@@ -6,10 +6,42 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class MaterialClientTest {
+    /**
+     * Cross-checks all three per-material cell-size catalogs by NAME (the way
+     * {@code AtmosphereClient} matches materials with {@code valueOf(name())}):
+     * client {@code AtmosphereRenderMaterial}, server {@code AtmosphereMaterial},
+     * and engine {@code AtmosphericMaterials}. Fails both on a size mismatch and
+     * on a material present in one catalog with no counterpart in another.
+     */
+    @Test
+    void allThreeCellSizeCatalogsAgreeByNameForEveryMaterial() {
+        var engineByName = io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.ALL.stream()
+            .collect(java.util.stream.Collectors.toMap(
+                m -> m.id().toUpperCase(java.util.Locale.ROOT), m -> m.settings().cellSize()));
+        var clientNames = java.util.Arrays.stream(AtmosphereRenderMaterial.values())
+            .map(Enum::name).collect(java.util.stream.Collectors.toSet());
+        assertEquals(engineByName.keySet(), clientNames,
+            "engine and client catalogs must name the exact same materials");
+        for (var material : AtmosphereRenderMaterial.values()) {
+            assertEquals(engineByName.get(material.name()), material.cellSize,
+                "engine/client cell size mismatch for " + material.name());
+        }
+
+        var serverMaterials = io.github.brooswitminecraft.dynamicatmosphere.AtmosphereMaterial.values();
+        var serverNames = java.util.Arrays.stream(serverMaterials)
+            .map(Enum::name).collect(java.util.stream.Collectors.toSet());
+        assertTrue(clientNames.containsAll(serverNames),
+            "every server material must have a client counterpart");
+        for (var material : serverMaterials) {
+            assertEquals(material.cellSize(), AtmosphereRenderMaterial.valueOf(material.name()).cellSize,
+                "server/client cell size mismatch for " + material.name());
+        }
+    }
+
     @Test
     void enderGasIsTenTimesItsPreviousOpticalDensity() {
         assertEquals(40, AtmosphereRenderMaterial.ENDER_GAS.opticalDensityMultiplier);
-        assertEquals(2, AtmosphereRenderMaterial.ENDER_GAS.cellSize);
+        assertEquals(4, AtmosphereRenderMaterial.ENDER_GAS.cellSize);
         assertEquals(4, AtmosphereRenderMaterial.SMOKE.cellSize);
         double oldDepth = -Math.log1p(-AtmosphereVolumeGeometry.sliceAlpha(100, 1, 1, 4));
         double newDepth = -Math.log1p(-AtmosphereVolumeGeometry.sliceAlpha(100, 1, 1, 40));
@@ -88,16 +120,16 @@ class MaterialClientTest {
         var ender = new MaterialClientSession(AtmosphereRenderMaterial.ENDER_GAS);
         dust.world(DIMENSION);
         ender.world(DIMENSION);
-        var scope = List.of(new AtmosphereClientCache.Chunk(0, 0), new AtmosphereClientCache.Chunk(1, 0));
+        var scope = List.of(new AtmosphereClientCache.Chunk(0, 0), new AtmosphereClientCache.Chunk(2, 0));
         dust.receive(WORLD, DIMENSION, true, true, scope, List.of(update(8, 200)));
         ender.receive(WORLD, DIMENSION, true, true, scope, List.of(update(8, 700)));
-        // x=8 is chunk 1 for both two-block grids, but their scopes remain independent.
-        dust.receive(WORLD, DIMENSION, true, false, List.of(new AtmosphereClientCache.Chunk(1, 0)), List.of());
+        // x=8 is chunk 2 for both four-block grids, but their scopes remain independent.
+        dust.receive(WORLD, DIMENSION, true, false, List.of(new AtmosphereClientCache.Chunk(2, 0)), List.of());
         assertEquals(200, dust.cache().storedAmount(update(8, 0).cell()));
         dust.receive(WORLD, DIMENSION, false, true, List.of(), List.of());
         assertEquals(0, dust.cache().storedAmount(update(8, 0).cell()));
         assertEquals(700, ender.cache().storedAmount(update(8, 0).cell()));
-        ender.receive(WORLD, DIMENSION, true, true, List.of(new AtmosphereClientCache.Chunk(1, 0)), List.of());
+        ender.receive(WORLD, DIMENSION, true, true, List.of(new AtmosphereClientCache.Chunk(2, 0)), List.of());
         assertEquals(0, ender.cache().storedAmount(update(8, 0).cell()));
     }
 
