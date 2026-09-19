@@ -121,9 +121,9 @@ a finite material debit.
 Endermen, endermites, the Ender Dragon, witches, shulkers, Nether portals and
 occupants, Ender chests, soul torches, soul fire, soul sand, Crying Obsidian, and
 Ender pearl use/impact produce Ender Gas. Full-moon loaded-chunk checks retain an
-independent 1/256 chance of an 8,000-unit burst. Natural Endermen require strictly
-more than 50% local Ender Gas, including underground, without bypassing other
-vanilla spawn rules or consuming gas.
+independent 1/256 chance of an 8,000-unit burst. Ender Gas never gates spawning;
+Endermen still emit it, but their spawns follow the same Vapor (fog) rule as
+every other Overworld monster — see the Vapor section above.
 
 ## Configuration
 

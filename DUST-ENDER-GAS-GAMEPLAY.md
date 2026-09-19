@@ -41,10 +41,9 @@ distant one-slice shortcut, while retaining thickness-integrated optical density
 - A successfully spawned Ender pearl emits 24 units; its first impact emits 48.
 - During a full-moon night, every bounded loaded-chunk producer check makes an
   independent 1/256 roll. Success emits 8,000 units at a sampled surface position.
-- Natural Endermen require strictly more than 50% local Ender Gas fullness at the
-  spawn position, including underground. The check consumes no gas and never
-  bypasses another vanilla spawn rule. Commands, eggs, spawners, and scripted
-  creation retain their normal behavior.
+- Ender Gas never gates spawning. Endermen still emit it as described above, but
+  their natural/chunk-generation spawns follow the same Overworld-only Vapor
+  (fog) rule as every other monster; Nether and End spawns follow vanilla rules.
 
 ## Configuration
 

@@ -205,10 +205,10 @@ and migrated chunks are saved in the new format.
   chests, portals/portal occupants, soul torches/fire/sand, Crying Obsidian, and ender-pearl use and
   impact are sources. Pearl use adds 24 and impact 48. Random full-moon bursts
   have been removed; only source-driven emissions remain.
-  Natural Endermen require strictly more than 50% local Ender Gas fullness,
-  including underground, without consuming it; other normal spawn restrictions
-  still apply. Other natural surface hostiles retain the Vapor fullness gate,
-  Overworld only — Nether and End monster spawns follow vanilla rules.
+  Ender Gas never gates spawning. Overworld monsters, including Endermen,
+  follow the Vapor (fog) spawn rule: no qualifying terrain above and Vapor
+  not strictly more than half full denies natural/chunk-generation monster
+  spawns. Nether and End monster spawns follow vanilla rules.
 - **Void Gas:** hostile mob deaths add 40, sampled netherrack adds 2, and a
   world-bottom producer has a 1/8 chance to add 8. At 10% through 25% fullness,
   eligible villagers can receive three bread for vanilla breeding readiness,

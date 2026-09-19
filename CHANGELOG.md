@@ -1,3 +1,9 @@
+# 0.23.0
+
+**BREAKING:**
+
+- Overworld Endermen now follow the fog (Vapor) spawn rule; the Ender Gas spawn gate is removed. Nether and End spawns use vanilla rules.
+
 # 0.20.0-alpha.1
 
 **BREAKING:** the `violence` material is renamed to Void Gas. Existing `violence` server and client config sections are discarded; config resets to `voidGas` defaults on upgrade. Any world with saved `violence` atmosphere loses that stored material on load — old data under the `violence` id is discarded, not migrated.
