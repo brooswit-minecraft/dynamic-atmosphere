@@ -6,10 +6,42 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class MaterialClientTest {
+    /**
+     * Cross-checks all three per-material cell-size catalogs by NAME (the way
+     * {@code AtmosphereClient} matches materials with {@code valueOf(name())}):
+     * client {@code AtmosphereRenderMaterial}, server {@code AtmosphereMaterial},
+     * and engine {@code AtmosphericMaterials}. Fails both on a size mismatch and
+     * on a material present in one catalog with no counterpart in another.
+     */
+    @Test
+    void allThreeCellSizeCatalogsAgreeByNameForEveryMaterial() {
+        var engineByName = io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.ALL.stream()
+            .collect(java.util.stream.Collectors.toMap(
+                m -> m.id().toUpperCase(java.util.Locale.ROOT), m -> m.settings().cellSize()));
+        var clientNames = java.util.Arrays.stream(AtmosphereRenderMaterial.values())
+            .map(Enum::name).collect(java.util.stream.Collectors.toSet());
+        assertEquals(engineByName.keySet(), clientNames,
+            "engine and client catalogs must name the exact same materials");
+        for (var material : AtmosphereRenderMaterial.values()) {
+            assertEquals(engineByName.get(material.name()), material.cellSize,
+                "engine/client cell size mismatch for " + material.name());
+        }
+
+        var serverMaterials = io.github.brooswitminecraft.dynamicatmosphere.AtmosphereMaterial.values();
+        var serverNames = java.util.Arrays.stream(serverMaterials)
+            .map(Enum::name).collect(java.util.stream.Collectors.toSet());
+        assertTrue(clientNames.containsAll(serverNames),
+            "every server material must have a client counterpart");
+        for (var material : serverMaterials) {
+            assertEquals(material.cellSize(), AtmosphereRenderMaterial.valueOf(material.name()).cellSize,
+                "server/client cell size mismatch for " + material.name());
+        }
+    }
+
     @Test
     void enderGasIsTenTimesItsPreviousOpticalDensity() {
         assertEquals(40, AtmosphereRenderMaterial.ENDER_GAS.opticalDensityMultiplier);
-        assertEquals(2, AtmosphereRenderMaterial.ENDER_GAS.cellSize);
+        assertEquals(4, AtmosphereRenderMaterial.ENDER_GAS.cellSize);
         assertEquals(4, AtmosphereRenderMaterial.SMOKE.cellSize);
         double oldDepth = -Math.log1p(-AtmosphereVolumeGeometry.sliceAlpha(100, 1, 1, 4));
         double newDepth = -Math.log1p(-AtmosphereVolumeGeometry.sliceAlpha(100, 1, 1, 40));
@@ -22,12 +54,17 @@ class MaterialClientTest {
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.SMOKE,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.DUST,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.ENDER_GAS,
-            io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.VIOLENCE,
+            io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.VOID_GAS,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.EXHAUST,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.SLIME);
         var materials = AtmosphereRenderMaterial.values();
         for (int i = 0; i < materials.length; i++) {
             assertEquals(definitions.get(i).settings().opticalDensityMultiplier(), materials[i].opticalDensityMultiplier);
+            // The renderer reads the CLIENT CONFIG default, not the catalog field above,
+            // so a config default that drifts from the catalogs would render the wrong opacity
+            // even though this catalog-only comparison stayed green.
+            assertEquals(materials[i].opticalDensityMultiplier, materials[i].tuning().opticalDensity(),
+                "client config default optical density must match the catalogs for " + materials[i].name());
             var cache = materials[i].newCache();
             cache.changeDimension(DIMENSION);
             cache.restore(List.of(update(0, 500)));
@@ -35,6 +72,40 @@ class MaterialClientTest {
             assertEquals(500, volume.amount(0));
             assertEquals(500, cache.storedAmount(update(0, 0).cell()));
         }
+    }
+
+    @Test
+    void smokeIsTwoTimesAndVoidGasStaysFourTimesWithSlimeEnderVaporDustExhaustUnchanged() {
+        assertEquals(2, AtmosphereRenderMaterial.SMOKE.opticalDensityMultiplier);
+        assertEquals(2, AtmosphereRenderMaterial.SMOKE.tuning().opticalDensity());
+        assertEquals(31 / 255f, AtmosphereRenderMaterial.SMOKE.channel(0, new float[3]));
+        assertEquals(22 / 255f, AtmosphereRenderMaterial.SMOKE.channel(1, new float[3]));
+        assertEquals(15 / 255f, AtmosphereRenderMaterial.SMOKE.channel(2, new float[3]));
+
+        assertEquals(4, AtmosphereRenderMaterial.VOID_GAS.opticalDensityMultiplier);
+        assertEquals(4, AtmosphereRenderMaterial.VOID_GAS.tuning().opticalDensity());
+        assertEquals(0, AtmosphereRenderMaterial.VOID_GAS.channel(0, new float[3]));
+        assertEquals(0, AtmosphereRenderMaterial.VOID_GAS.channel(1, new float[3]));
+        assertEquals(0, AtmosphereRenderMaterial.VOID_GAS.channel(2, new float[3]));
+
+        assertEquals(1, AtmosphereRenderMaterial.VAPOR.opticalDensityMultiplier);
+        assertEquals(1, AtmosphereRenderMaterial.VAPOR.tuning().opticalDensity());
+        assertEquals(1, AtmosphereRenderMaterial.DUST.opticalDensityMultiplier);
+        assertEquals(1, AtmosphereRenderMaterial.DUST.tuning().opticalDensity());
+        assertEquals(1, AtmosphereRenderMaterial.EXHAUST.opticalDensityMultiplier);
+        assertEquals(1, AtmosphereRenderMaterial.EXHAUST.tuning().opticalDensity());
+        assertEquals(4, AtmosphereRenderMaterial.SLIME.opticalDensityMultiplier);
+        assertEquals(4, AtmosphereRenderMaterial.SLIME.tuning().opticalDensity());
+        assertEquals(40, AtmosphereRenderMaterial.ENDER_GAS.opticalDensityMultiplier);
+        assertEquals(40, AtmosphereRenderMaterial.ENDER_GAS.tuning().opticalDensity());
+    }
+
+    @Test
+    void smokeIsHalfItsPreviousOpticalDensity() {
+        assertEquals(2, AtmosphereRenderMaterial.SMOKE.opticalDensityMultiplier);
+        double oldDepth = -Math.log1p(-AtmosphereVolumeGeometry.sliceAlpha(100, 1, 1, 4));
+        double newDepth = -Math.log1p(-AtmosphereVolumeGeometry.sliceAlpha(100, 1, 1, 2));
+        assertEquals(oldDepth / 2, newDepth, 1e-5);
     }
 
     @Test
@@ -88,16 +159,16 @@ class MaterialClientTest {
         var ender = new MaterialClientSession(AtmosphereRenderMaterial.ENDER_GAS);
         dust.world(DIMENSION);
         ender.world(DIMENSION);
-        var scope = List.of(new AtmosphereClientCache.Chunk(0, 0), new AtmosphereClientCache.Chunk(1, 0));
+        var scope = List.of(new AtmosphereClientCache.Chunk(0, 0), new AtmosphereClientCache.Chunk(2, 0));
         dust.receive(WORLD, DIMENSION, true, true, scope, List.of(update(8, 200)));
         ender.receive(WORLD, DIMENSION, true, true, scope, List.of(update(8, 700)));
-        // x=8 is chunk 1 for both two-block grids, but their scopes remain independent.
-        dust.receive(WORLD, DIMENSION, true, false, List.of(new AtmosphereClientCache.Chunk(1, 0)), List.of());
+        // x=8 is chunk 2 for both four-block grids, but their scopes remain independent.
+        dust.receive(WORLD, DIMENSION, true, false, List.of(new AtmosphereClientCache.Chunk(2, 0)), List.of());
         assertEquals(200, dust.cache().storedAmount(update(8, 0).cell()));
         dust.receive(WORLD, DIMENSION, false, true, List.of(), List.of());
         assertEquals(0, dust.cache().storedAmount(update(8, 0).cell()));
         assertEquals(700, ender.cache().storedAmount(update(8, 0).cell()));
-        ender.receive(WORLD, DIMENSION, true, true, List.of(new AtmosphereClientCache.Chunk(1, 0)), List.of());
+        ender.receive(WORLD, DIMENSION, true, true, List.of(new AtmosphereClientCache.Chunk(2, 0)), List.of());
         assertEquals(0, ender.cache().storedAmount(update(8, 0).cell()));
     }
 
@@ -187,15 +258,18 @@ class MaterialClientTest {
     void paletteAndSevenMaterialSliceOrderingAreIndependent() {
         float[] fog = {0.2f, 0.5f, 0.8f};
         assertEquals(fog[1], AtmosphereRenderMaterial.VAPOR.channel(1, fog));
-        assertEquals(0, AtmosphereRenderMaterial.SMOKE.channel(0, fog));
+        assertEquals(31 / 255f, AtmosphereRenderMaterial.SMOKE.channel(0, fog));
+        assertEquals(22 / 255f, AtmosphereRenderMaterial.SMOKE.channel(1, fog));
+        assertEquals(15 / 255f, AtmosphereRenderMaterial.SMOKE.channel(2, fog));
         assertEquals(139 / 255f, AtmosphereRenderMaterial.DUST.channel(0, fog));
         assertEquals(69 / 255f, AtmosphereRenderMaterial.DUST.channel(1, fog));
         assertEquals(19 / 255f, AtmosphereRenderMaterial.DUST.channel(2, fog));
         assertEquals(128 / 255f, AtmosphereRenderMaterial.ENDER_GAS.channel(0, fog));
         assertEquals(0, AtmosphereRenderMaterial.ENDER_GAS.channel(1, fog));
         assertEquals(128 / 255f, AtmosphereRenderMaterial.ENDER_GAS.channel(2, fog));
-        assertEquals(1, AtmosphereRenderMaterial.VIOLENCE.channel(0, fog));
-        assertEquals(0, AtmosphereRenderMaterial.VIOLENCE.channel(1, fog));
+        assertEquals(0, AtmosphereRenderMaterial.VOID_GAS.channel(0, fog));
+        assertEquals(0, AtmosphereRenderMaterial.VOID_GAS.channel(1, fog));
+        assertEquals(0, AtmosphereRenderMaterial.VOID_GAS.channel(2, fog));
         assertEquals(1, AtmosphereRenderMaterial.EXHAUST.channel(0, fog));
         assertEquals(1, AtmosphereRenderMaterial.EXHAUST.channel(1, fog));
         assertEquals(0, AtmosphereRenderMaterial.EXHAUST.channel(2, fog));
@@ -256,8 +330,8 @@ class MaterialClientTest {
     }
 
     @Test
-    void violenceAndSlimeStayBaseThroughViewThenDoubleThroughTwoView() {
-        for (var material : List.of(AtmosphereRenderMaterial.VIOLENCE, AtmosphereRenderMaterial.SLIME)) {
+    void voidGasAndSlimeStayBaseThroughViewThenDoubleThroughTwoView() {
+        for (var material : List.of(AtmosphereRenderMaterial.VOID_GAS, AtmosphereRenderMaterial.SLIME)) {
             for (double distance : new double[] {63.999, 64, 64.001, 127.999, 128, 128.001, 256}) {
                 var lod = new AtmosphereLodHierarchy(material.cellSize, material.rootLevel, material.reach);
                 lod.put(new AtmosphereClientCache.Cell(0, 0, 0), 1000, 1000, 0, 0);
@@ -281,6 +355,18 @@ class MaterialClientTest {
             session.receive(WORLD, DIMENSION, true, true, List.of(new AtmosphereClientCache.Chunk(-1, 0)), List.of());
             assertEquals(0, session.cache().storedAmount(update(-cellsPerChunk, 0).cell()));
             assertEquals(200, session.cache().storedAmount(update(-cellsPerChunk - 1, 0).cell()));
+        }
+    }
+
+    @Test
+    void allThreeCatalogsAgreeOnVoidGasByNameAndKeepItsPreRenamedOrdinal() {
+        assertEquals("void_gas", io.github.brooswitminecraft.dynamicatmosphere.AtmosphereMaterial.VOID_GAS.id());
+        assertEquals(2, io.github.brooswitminecraft.dynamicatmosphere.AtmosphereMaterial.VOID_GAS.ordinal());
+        assertEquals("void_gas",
+            io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.VOID_GAS.id());
+        assertEquals("void_gas", AtmosphereRenderMaterial.VOID_GAS.name().toLowerCase(java.util.Locale.ROOT));
+        for (var material : io.github.brooswitminecraft.dynamicatmosphere.AtmosphereMaterial.values()) {
+            assertNotEquals("violence", material.id());
         }
     }
 

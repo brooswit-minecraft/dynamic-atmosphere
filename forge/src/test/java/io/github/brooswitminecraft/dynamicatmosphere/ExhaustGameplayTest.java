@@ -42,10 +42,10 @@ class ExhaustGameplayTest {
     }
 
     @Test
-    void exposureUsesOnlyTheTwoBlockExhaustCell() {
-        assertTrue(ExhaustGameplay.sameExhaustCell(new BlockPos(0, 0, 0), new BlockPos(1, 1, 1)));
-        assertFalse(ExhaustGameplay.sameExhaustCell(new BlockPos(0, 0, 0), new BlockPos(2, 1, 1)));
-        assertTrue(ExhaustGameplay.sameExhaustCell(new BlockPos(-1, -1, -1), new BlockPos(-2, -2, -2)));
-        assertFalse(ExhaustGameplay.sameExhaustCell(new BlockPos(-1, -1, -1), new BlockPos(-3, -2, -2)));
+    void exposureUsesOnlyTheSharedFourBlockExhaustCell() {
+        assertTrue(ExhaustGameplay.sameExhaustCell(new BlockPos(0, 0, 0), new BlockPos(3, 3, 3)));
+        assertFalse(ExhaustGameplay.sameExhaustCell(new BlockPos(0, 0, 0), new BlockPos(4, 1, 1)));
+        assertTrue(ExhaustGameplay.sameExhaustCell(new BlockPos(-1, -1, -1), new BlockPos(-4, -4, -4)));
+        assertFalse(ExhaustGameplay.sameExhaustCell(new BlockPos(-1, -1, -1), new BlockPos(-5, -2, -2)));
     }
 }

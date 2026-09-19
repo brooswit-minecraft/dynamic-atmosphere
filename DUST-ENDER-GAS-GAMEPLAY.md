@@ -17,7 +17,7 @@ chunk to load.
   64, and suppresses the ordinary landing burst for that tick.
 - Breaking a block emits 16 Dust; placing one emits 12; a successfully placed
   falling block emits 24 at its landing position.
-- Each processed 2x2x2 Dust cell examines at most its eight blocks. Plain water
+- Each processed 4x4x4 Dust cell examines at most its 64 blocks. Plain water
   can become mud with chance 0% at 50% fullness, rising linearly to 100% at full
   capacity. Success consumes half the current Dust, rounded up. Failed placement
   or debit restores the water and consumes nothing. Waterlogged hosts are ignored.
@@ -28,7 +28,7 @@ chunk to load.
 
 ## Ender Gas
 
-Ender Gas uses 1x1x1 server cells and a client optical density of 40. The density
+Ender Gas uses 4x4x4 server cells and a client optical density of 40. The density
 is visual only and does not alter amounts, capacity, fullness, or gameplay gates.
 Dust and Ender Gas render only their base-cell LOD through V/4. Like all materials,
 their geometry uses `baseCellSize / slicesPerBaseCell` slice spacing rather than a
@@ -41,10 +41,9 @@ distant one-slice shortcut, while retaining thickness-integrated optical density
 - A successfully spawned Ender pearl emits 24 units; its first impact emits 48.
 - During a full-moon night, every bounded loaded-chunk producer check makes an
   independent 1/256 roll. Success emits 8,000 units at a sampled surface position.
-- Natural Endermen require strictly more than 50% local Ender Gas fullness at the
-  spawn position, including underground. The check consumes no gas and never
-  bypasses another vanilla spawn rule. Commands, eggs, spawners, and scripted
-  creation retain their normal behavior.
+- Ender Gas never gates spawning. Endermen still emit it as described above, but
+  their natural/chunk-generation spawns follow the same Overworld-only Vapor
+  (fog) rule as every other monster; Nether and End spawns follow vanilla rules.
 
 ## Configuration
 

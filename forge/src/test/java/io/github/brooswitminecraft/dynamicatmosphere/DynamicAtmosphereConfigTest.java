@@ -26,6 +26,7 @@ class DynamicAtmosphereConfigTest {
         assertEquals(1.0, first.integrations().createFanTransportPerRpm());
         assertEquals(100, first.integrations().createFanIntervalTicks());
         assertEquals(32, first.integrations().maxFanChunksPerTick());
+        assertEquals(3.0, first.heavyGas().dissipationFactor());
     }
 
     @Test
@@ -37,7 +38,7 @@ class DynamicAtmosphereConfigTest {
         assertEquals(4, first.slicesPerBaseCell());
         assertEquals(4096, first.selectionWorkPerTick());
         assertEquals(2, first.smoke().reachMultiplier());
-        assertEquals(4, first.smoke().opticalDensity());
+        assertEquals(2, first.smoke().opticalDensity());
         assertEquals(40, first.enderGas().opticalDensity());
         assertEquals(200_000, first.allocation().cellBudget());
     }

@@ -113,7 +113,7 @@ final class ForgeAtmospherePrototype {
         createMaterialSyncPlanners();
     private final DustGameplay dustGameplay = DustGameplay.create();
     private final EnderGasGameplay enderGasGameplay = EnderGasGameplay.create();
-    private final ViolenceGameplay violenceGameplay = ViolenceGameplay.create();
+    private final VoidGasGameplay voidGasGameplay = VoidGasGameplay.create();
     private final SlimeGameplay slimeGameplay = SlimeGameplay.create();
     private final ExhaustGameplay exhaustGameplay = ExhaustGameplay.create();
     private final Map<AtmosphereMaterial, AtmosphereProducerSchedule<ChunkKey>> materialProducerSchedules =
@@ -124,13 +124,13 @@ final class ForgeAtmospherePrototype {
 
     ForgeAtmospherePrototype() {
         registerMaterialProducer(AtmosphereMaterial.ENDER_GAS, this::sampleEnderGasChunk);
-        registerMaterialProducer(AtmosphereMaterial.VIOLENCE, (level, chunk) -> {
-            violenceGameplay.onLoadedChunkProducerCheck(level, chunk);
+        registerMaterialProducer(AtmosphereMaterial.VOID_GAS, (level, chunk) -> {
+            voidGasGameplay.onLoadedChunkProducerCheck(level, chunk);
             int x = chunk.getPos().getMinBlockX() + level.random.nextInt(16);
             int z = chunk.getPos().getMinBlockZ() + level.random.nextInt(16);
             int y = level.getMinBuildHeight() + level.random.nextInt(level.getHeight());
             BlockPos pos = new BlockPos(x, y, z);
-            violenceGameplay.onPassiveBlockSample(level, pos, chunk.getBlockState(pos));
+            voidGasGameplay.onPassiveBlockSample(level, pos, chunk.getBlockState(pos));
         });
         registerMaterialProducer(AtmosphereMaterial.SLIME, slimeGameplay::onLoadedChunkProducerCheck);
     }
@@ -722,8 +722,17 @@ final class ForgeAtmospherePrototype {
                 ServerLevel cellLevel = server.getLevel(key.dimension());
                 if (cellLevel == null) return;
                 BlockPos origin = materialCellOrigin(material, key);
-                if (material == AtmosphereMaterial.VIOLENCE) violenceGameplay.onProcessedCell(cellLevel, origin);
-                if (material == AtmosphereMaterial.SLIME) slimeGameplay.onProcessedCell(cellLevel, origin);
+                if (material == AtmosphereMaterial.VOID_GAS) {
+                    voidGasGameplay.onProcessedCell(cellLevel, origin);
+                    dissipateHeavyGas(cellLevel, materialGrid, key, capacityAt);
+                }
+                if (material == AtmosphereMaterial.SLIME) {
+                    slimeGameplay.onProcessedCell(cellLevel, origin);
+                    dissipateHeavyGas(cellLevel, materialGrid, key, capacityAt);
+                }
+                if (material == AtmosphereMaterial.ENDER_GAS) {
+                    dissipateHeavyGas(cellLevel, materialGrid, key, capacityAt);
+                }
                 if (material == AtmosphereMaterial.EXHAUST) {
                     int size = material.cellSize();
                     exhaustGameplay.processTurn(cellLevel, origin,
@@ -766,9 +775,25 @@ final class ForgeAtmospherePrototype {
         }
     }
 
+    /** Void Gas, Ender Gas and Slime dissipation, shared via {@link HeavyGasDissipation}. */
+    private void dissipateHeavyGas(
+        ServerLevel level,
+        AtmosphereGrid<ResourceKey<Level>> materialGrid,
+        AtmosphereGrid.CellKey<ResourceKey<Level>> key,
+        ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacityAt
+    ) {
+        if (level == null) return;
+        var cell = materialGrid.get(key);
+        if (cell == null) return;
+        int loss = HeavyGasDissipation.amount(cell.amount(), tuning().heavyGas().dissipationFactor(), level.random::nextDouble);
+        if (loss > 0) {
+            materialGrid.set(key, cell.amount() - loss, serverTicks, capacityAt.applyAsInt(key));
+        }
+    }
+
     DustGameplay dustGameplay() { return dustGameplay; }
     EnderGasGameplay enderGasGameplay() { return enderGasGameplay; }
-    ViolenceGameplay violenceGameplay() { return violenceGameplay; }
+    VoidGasGameplay voidGasGameplay() { return voidGasGameplay; }
     ExhaustGameplay exhaustGameplay() { return exhaustGameplay; }
 
     private boolean shouldSimulate(MinecraftServer server, AtmosphereGrid.CellKey<ResourceKey<Level>> key) {

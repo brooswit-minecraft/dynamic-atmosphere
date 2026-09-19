@@ -60,13 +60,13 @@ public final class DynamicAtmosphereServerConfig {
     private static final DoubleOption DUST_DISSIPATION_CHANCE;
     private static final IntOption DUST_DISSIPATION_AMOUNT;
 
-    private static final IntOption VIOLENCE_HOSTILE_DEATH;
-    private static final IntOption VIOLENCE_NETHERRACK;
-    private static final IntOption VIOLENCE_BOTTOM;
-    private static final IntOption VIOLENCE_BOTTOM_DENOMINATOR;
-    private static final IntOption VIOLENCE_SPAWN_DENOMINATOR;
-    private static final IntOption VIOLENCE_SPAWN_ATTEMPTS;
-    private static final IntOption VIOLENCE_BREAD;
+    private static final IntOption VOID_GAS_HOSTILE_DEATH;
+    private static final IntOption VOID_GAS_NETHERRACK;
+    private static final IntOption VOID_GAS_BOTTOM;
+    private static final IntOption VOID_GAS_BOTTOM_DENOMINATOR;
+    private static final IntOption VOID_GAS_SPAWN_DENOMINATOR;
+    private static final IntOption VOID_GAS_SPAWN_ATTEMPTS;
+    private static final IntOption VOID_GAS_BREAD;
 
     private static final IntOption EXHAUST_PASSIVE;
     private static final IntOption EXHAUST_LIVING_DENOMINATOR;
@@ -84,6 +84,8 @@ public final class DynamicAtmosphereServerConfig {
     private static final IntOption SLIME_UNDERGROUND_DENOMINATOR;
     private static final IntOption SLIME_SPAWN_DENOMINATOR;
     private static final IntOption SLIME_SPAWN_ATTEMPTS;
+
+    private static final DoubleOption HEAVY_GAS_DISSIPATION_FACTOR;
 
     private static final IntOption ENDER_MOB;
     private static final IntOption ENDER_PORTAL;
@@ -164,14 +166,14 @@ public final class DynamicAtmosphereServerConfig {
         DUST_DISSIPATION_AMOUNT = integer(builder, "dissipationAmount", 40, 0, 1_000_000);
         builder.pop();
 
-        builder.push("violence");
-        VIOLENCE_HOSTILE_DEATH = integer(builder, "hostileDeathEmission", 40, 0, 1_000_000);
-        VIOLENCE_NETHERRACK = integer(builder, "netherrackEmission", 2, 0, 1_000_000);
-        VIOLENCE_BOTTOM = integer(builder, "bottomEmission", 8, 0, 1_000_000);
-        VIOLENCE_BOTTOM_DENOMINATOR = integer(builder, "bottomChanceDenominator", 8, 1, 1_000_000);
-        VIOLENCE_SPAWN_DENOMINATOR = integer(builder, "spawnChanceDenominator", 32, 1, 1_000_000);
-        VIOLENCE_SPAWN_ATTEMPTS = integer(builder, "spawnAttempts", 8, 1, 1024);
-        VIOLENCE_BREAD = integer(builder, "breedingBread", 3, 0, 64);
+        builder.push("voidGas");
+        VOID_GAS_HOSTILE_DEATH = integer(builder, "hostileDeathEmission", 40, 0, 1_000_000);
+        VOID_GAS_NETHERRACK = integer(builder, "netherrackEmission", 2, 0, 1_000_000);
+        VOID_GAS_BOTTOM = integer(builder, "bottomEmission", 8, 0, 1_000_000);
+        VOID_GAS_BOTTOM_DENOMINATOR = integer(builder, "bottomChanceDenominator", 8, 1, 1_000_000);
+        VOID_GAS_SPAWN_DENOMINATOR = integer(builder, "spawnChanceDenominator", 32, 1, 1_000_000);
+        VOID_GAS_SPAWN_ATTEMPTS = integer(builder, "spawnAttempts", 8, 1, 1024);
+        VOID_GAS_BREAD = integer(builder, "breedingBread", 3, 0, 64);
         builder.pop();
 
         builder.push("exhaust");
@@ -193,6 +195,13 @@ public final class DynamicAtmosphereServerConfig {
         SLIME_UNDERGROUND_DENOMINATOR = integer(builder, "undergroundChanceDenominator", 8, 1, 1_000_000);
         SLIME_SPAWN_DENOMINATOR = integer(builder, "spawnChanceDenominator", 32, 1, 1_000_000);
         SLIME_SPAWN_ATTEMPTS = integer(builder, "spawnAttempts", 8, 1, 1024);
+        builder.pop();
+
+        builder.push("heavyGas");
+        // Shared by Void Gas, Ender Gas and Slime: their dissipation chance is Smoke's own
+        // dissipationChance() divided by this factor, keeping Smoke's dissipationAmount() as maxLoss.
+        // 1 means "dissipate exactly as fast as Smoke"; a factor must stay finite and greater than zero.
+        HEAVY_GAS_DISSIPATION_FACTOR = decimal(builder, "dissipationFactor", 3.0, 0.001, 1_000.0);
         builder.pop();
 
         builder.push("enderGas");
@@ -248,9 +257,9 @@ public final class DynamicAtmosphereServerConfig {
                 DUST_FALL_PER_POINT.get(), DUST_FALL_MAX.get(), DUST_BREAK.get(), DUST_PLACE.get(),
                 DUST_WALK_INTERVAL.get(), DUST_RUN_INTERVAL.get(), FALLING_BLOCK.get(), GRAVEL_CHANCE.get(),
                 DUST_DISSIPATION_CHANCE.get(), DUST_DISSIPATION_AMOUNT.get()),
-            new Violence(VIOLENCE_HOSTILE_DEATH.get(), VIOLENCE_NETHERRACK.get(), VIOLENCE_BOTTOM.get(),
-                VIOLENCE_BOTTOM_DENOMINATOR.get(), VIOLENCE_SPAWN_DENOMINATOR.get(),
-                VIOLENCE_SPAWN_ATTEMPTS.get(), VIOLENCE_BREAD.get()),
+            new VoidGas(VOID_GAS_HOSTILE_DEATH.get(), VOID_GAS_NETHERRACK.get(), VOID_GAS_BOTTOM.get(),
+                VOID_GAS_BOTTOM_DENOMINATOR.get(), VOID_GAS_SPAWN_DENOMINATOR.get(),
+                VOID_GAS_SPAWN_ATTEMPTS.get(), VOID_GAS_BREAD.get()),
             new Exhaust(EXHAUST_PASSIVE.get(), EXHAUST_LIVING_DENOMINATOR.get(),
                 EXHAUST_CREEPER_DENOMINATOR.get(), EXHAUST_DAMAGE_PER_POINT.get(), EXHAUST_DAMAGE_MAX.get(),
                 EXHAUST_MIN_FULLNESS.get(), EXHAUST_MAX_FULLNESS.get(), EXHAUST_MIN_DAMAGE.get(),
@@ -261,7 +270,8 @@ public final class DynamicAtmosphereServerConfig {
                 ENDER_PEARL_IMPACT.get(), ENDER_MOB_INTERVAL.get(),
                 ENDER_PORTAL_INTERVAL.get(), ENDER_PORTAL_BLOCK.get()),
             new PlantGrowth(PLANT_CHANCE.get(), PLANT_COST.get()),
-            new Integrations(CREATE_FAN_RPM_COEFFICIENT.get(), CREATE_FAN_INTERVAL.get(), CREATE_FAN_CHUNK_BUDGET.get())
+            new Integrations(CREATE_FAN_RPM_COEFFICIENT.get(), CREATE_FAN_INTERVAL.get(), CREATE_FAN_CHUNK_BUDGET.get()),
+            new HeavyGas(HEAVY_GAS_DISSIPATION_FACTOR.get())
         );
     }
 
@@ -303,9 +313,9 @@ public final class DynamicAtmosphereServerConfig {
         }
     }
 
-    public record Snapshot(RuntimeTuning runtime, Vapor vapor, Smoke smoke, Dust dust, Violence violence,
+    public record Snapshot(RuntimeTuning runtime, Vapor vapor, Smoke smoke, Dust dust, VoidGas voidGas,
                            Exhaust exhaust, Slime slime, EnderGas enderGas, PlantGrowth plantGrowth,
-                           Integrations integrations) { }
+                           Integrations integrations, HeavyGas heavyGas) { }
     public record RuntimeTuning(int syncIntervalTicks, int fullSnapshotIntervalTicks,
                                 int simulationIntervalTicks, int producerIntervalTicks,
                                 int maxChunkImportsPerTick, int maxProducerChunksPerTick,
@@ -332,9 +342,9 @@ public final class DynamicAtmosphereServerConfig {
                        int blockBreakEmission, int blockPlaceEmission, int walkIntervalTicks,
                        int runIntervalTicks, int fallingBlockEmission, double gravelChance,
                        double dissipationChance, int dissipationAmount) { }
-    public record Violence(int hostileDeathEmission, int netherrackEmission, int bottomEmission,
-                           int bottomChanceDenominator, int spawnChanceDenominator,
-                           int spawnAttempts, int breedingBread) { }
+    public record VoidGas(int hostileDeathEmission, int netherrackEmission, int bottomEmission,
+                          int bottomChanceDenominator, int spawnChanceDenominator,
+                          int spawnAttempts, int breedingBread) { }
     public record Exhaust(int passiveEmission, int livingChanceDenominator, int creeperChanceDenominator,
                           int damageEmissionPerPoint, int maxDamageEmission, double suffocationMinFullness,
                           double suffocationMaxFullness, double suffocationMinDamage,
@@ -349,6 +359,8 @@ public final class DynamicAtmosphereServerConfig {
     public record PlantGrowth(double chance, int cost) { }
     public record Integrations(double createFanTransportPerRpm, int createFanIntervalTicks,
                                int maxFanChunksPerTick) { }
+    /** Shared by Void Gas, Ender Gas and Slime: their dissipation chance is Smoke's own divided by this. */
+    public record HeavyGas(double dissipationFactor) { }
 
     private DynamicAtmosphereServerConfig() { }
 }

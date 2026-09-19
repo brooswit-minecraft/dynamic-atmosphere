@@ -5,11 +5,11 @@ import net.minecraft.network.codec.StreamCodec;
 
 /** Additional atmospheric materials introduced after the dedicated Vapor and Smoke formats. */
 public enum AtmosphereMaterial {
-    DUST("dust", 2),
-    ENDER_GAS("ender_gas", 2),
-    VIOLENCE("violence", 8),
-    EXHAUST("exhaust", 2),
-    SLIME("slime", 16);
+    DUST("dust"),
+    ENDER_GAS("ender_gas"),
+    VOID_GAS("void_gas"),
+    EXHAUST("exhaust"),
+    SLIME("slime");
 
     public static final StreamCodec<RegistryFriendlyByteBuf, AtmosphereMaterial> STREAM_CODEC =
         new StreamCodec<>() {
@@ -30,27 +30,26 @@ public enum AtmosphereMaterial {
         };
 
     private final String id;
-    private final int cellSize;
 
-    AtmosphereMaterial(String id, int cellSize) {
+    AtmosphereMaterial(String id) {
         this.id = id;
-        this.cellSize = cellSize;
     }
 
     public String id() { return id; }
-    public int cellSize() { return cellSize; }
+    /** Every material shares the grid's cell size; there is no per-material override. */
+    public int cellSize() { return AtmosphereGridLayout.CELL_SIZE; }
     public int simulationIntervalTicks() { return DynamicAtmosphereServerConfig.snapshot().runtime().simulationIntervalTicks(); }
 
     public int cellCoordinate(int blockCoordinate) {
-        return Math.floorDiv(blockCoordinate, cellSize);
+        return Math.floorDiv(blockCoordinate, cellSize());
     }
 
     public int chunkCoordinate(int cellCoordinate) {
-        return Math.floorDiv(cellCoordinate, 16 / cellSize);
+        return Math.floorDiv(cellCoordinate, 16 / cellSize());
     }
 
     public int capacityForAirBlocks(int airBlocks) {
-        int volume = cellSize * cellSize * cellSize;
+        int volume = cellSize() * cellSize() * cellSize();
         int empty = Math.clamp(airBlocks, 0, volume);
         return empty == 0 ? 0 : Math.max(1, empty * AtmosphereGrid.MAX_AMOUNT / volume);
     }

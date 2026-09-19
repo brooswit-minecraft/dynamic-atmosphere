@@ -20,8 +20,8 @@ public final class DynamicAtmosphereClientConfig {
     private static final DoubleOption SMOKE_DENSITY;
     private static final DoubleOption DUST_REACH;
     private static final DoubleOption DUST_DENSITY;
-    private static final DoubleOption VIOLENCE_REACH;
-    private static final DoubleOption VIOLENCE_DENSITY;
+    private static final DoubleOption VOID_GAS_REACH;
+    private static final DoubleOption VOID_GAS_DENSITY;
     private static final DoubleOption EXHAUST_REACH;
     private static final DoubleOption EXHAUST_DENSITY;
     private static final DoubleOption SLIME_REACH;
@@ -46,11 +46,11 @@ public final class DynamicAtmosphereClientConfig {
         VAPOR_REACH = decimal(builder, "vaporReachMultiplier", 2, 0.25, 4);
         VAPOR_DENSITY = decimal(builder, "vaporOpticalDensity", 1, 0, 1000);
         SMOKE_REACH = decimal(builder, "smokeReachMultiplier", 2, 0.25, 4);
-        SMOKE_DENSITY = decimal(builder, "smokeOpticalDensity", 4, 0, 1000);
+        SMOKE_DENSITY = decimal(builder, "smokeOpticalDensity", 2, 0, 1000);
         DUST_REACH = decimal(builder, "dustReachMultiplier", 0.25, 0.25, 4);
         DUST_DENSITY = decimal(builder, "dustOpticalDensity", 1, 0, 1000);
-        VIOLENCE_REACH = decimal(builder, "violenceReachMultiplier", 2, 0.25, 4);
-        VIOLENCE_DENSITY = decimal(builder, "violenceOpticalDensity", 4, 0, 1000);
+        VOID_GAS_REACH = decimal(builder, "voidGasReachMultiplier", 2, 0.25, 4);
+        VOID_GAS_DENSITY = decimal(builder, "voidGasOpticalDensity", 4, 0, 1000);
         EXHAUST_REACH = decimal(builder, "exhaustReachMultiplier", 0.25, 0.25, 4);
         EXHAUST_DENSITY = decimal(builder, "exhaustOpticalDensity", 1, 0, 1000);
         SLIME_REACH = decimal(builder, "slimeReachMultiplier", 2, 0.25, 4);
@@ -85,7 +85,7 @@ public final class DynamicAtmosphereClientConfig {
             new Material(VAPOR_REACH.get(), VAPOR_DENSITY.get()),
             new Material(SMOKE_REACH.get(), SMOKE_DENSITY.get()),
             new Material(DUST_REACH.get(), DUST_DENSITY.get()),
-            new Material(VIOLENCE_REACH.get(), VIOLENCE_DENSITY.get()),
+            new Material(VOID_GAS_REACH.get(), VOID_GAS_DENSITY.get()),
             new Material(EXHAUST_REACH.get(), EXHAUST_DENSITY.get()),
             new Material(SLIME_REACH.get(), SLIME_DENSITY.get()),
             new Material(ENDER_GAS_REACH.get(), ENDER_GAS_DENSITY.get()),
@@ -155,7 +155,7 @@ public final class DynamicAtmosphereClientConfig {
 
     public record Snapshot(boolean enabled, int slicesPerBaseCell, int transitionTicks,
                            int selectionWorkPerTick, int slicesPerBatch, Material vapor, Material smoke,
-                           Material dust, Material violence, Material exhaust, Material slime,
+                           Material dust, Material voidGas, Material exhaust, Material slime,
                            Material enderGas, Allocation allocation) { }
     public record Material(double reachMultiplier, double opticalDensity) { }
     public record Allocation(int cellBudget) { }
