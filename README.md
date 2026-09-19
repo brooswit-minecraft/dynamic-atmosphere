@@ -176,11 +176,13 @@ wall-clock completion. Scheduled producer passes share a 300-tick cadence. All
 materials have a configurable 75% due-check skip; Vapor retains condensation.
 Material amounts do not combine across identities. `0.20.0-alpha.1`'s move to a
 uniform cell size bumped the Dust/Ender Gas/Exhaust/Void Gas/Slime storage
-version; their pre-upgrade chunk data is left on disk untouched but is treated
-as unreadable rather than reinterpreted at the new cell size, so those chunks
-come back with no stored material until new material accumulates. Invalid or
-corrupt data is handled the same way: the original tag is retained and that
-chunk is skipped rather than silently truncated.
+version; a chunk whose stored tag still has the old version or cell size loads
+as empty for that material and accumulates new material normally, with the
+stale tag replaced on the next save (`0.20.1-alpha.1`; from `0.20.0-alpha.1`
+until then, those chunks came back permanently without the material instead).
+Genuinely invalid or corrupt data — a missing `cells` array, a malformed tag,
+a decode failure — is handled differently: the original tag is retained and
+that chunk is skipped rather than silently truncated.
 Only Vapor uses the persistent
 client visual disk cache; the other six keep independent session-only visual caches.
 Legacy 8-block Smoke cells are split into aligned 4-block children on load. Integer

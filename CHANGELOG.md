@@ -1,3 +1,9 @@
+# 0.20.1-alpha.1
+
+Category: patch
+
+- Fix: `0.20.0`'s Dust/Ender Gas/Exhaust/Void Gas/Slime chunk storage version bump left those materials permanently absent in chunks saved by `0.19.x` or earlier, contrary to the `0.20.0` changelog's claim that they would return once new material accumulated — the write path refused to overwrite the preserved old-format tag, so nothing ever could. A chunk whose stored tag has a stale `version`/`cell_size` for one of those five materials now loads as empty and accumulates new material normally, with the stale tag replaced on the next save. Genuinely corrupt or unparseable data (a missing `cells` array, a malformed tag, a decode failure) is still preserved and skipped, as before. Vapor and Smoke are unaffected.
+
 # 0.20.0-alpha.1
 
 Category: breaking
@@ -7,7 +13,7 @@ Category: breaking
 - Move every atmosphere material onto a uniform 4x4x4-block cell. Dust, Ender Gas, and Exhaust grow from 2x2x2; Void Gas shrinks from 8x8x8; Slime shrinks from 16x16x16.
 - Collapse `AtmosphereMaterial`'s per-material cell size onto the shared `AtmosphereGridLayout.CELL_SIZE`; the engine's approved specification catalog matches.
 - Collapse the client's `AtmosphereRenderMaterial` per-material cell size onto the same `AtmosphereGridLayout.CELL_SIZE`, so the client files and renders cells at the size the server actually sends. A test now asserts the client, server, and engine catalogs agree by material name.
-- Bump the Dust/Ender Gas/Exhaust/Void Gas/Slime chunk storage version. Pre-upgrade chunk data for those materials is retained on disk but treated as unreadable rather than reinterpreted at the new cell size; affected chunks come back with no stored material until new material accumulates. Vapor and Smoke were already 4x4x4 and are unaffected.
+- Bump the Dust/Ender Gas/Exhaust/Void Gas/Slime chunk storage version. Pre-upgrade chunk data for those materials is retained on disk but treated as unreadable rather than reinterpreted at the new cell size. Vapor and Smoke were already 4x4x4 and are unaffected. **Correction (see `0.20.1-alpha.1`):** this left affected chunks permanently without that material rather than the empty-then-refilling behavior originally claimed here; `0.20.1-alpha.1` fixes it.
 - Remove the now-unreachable legacy one-block Ender Gas merge path, superseded by the storage version bump above.
 - Void Gas and Slime are fan-transportable for the first time, a direct consequence of sharing Vapor/Smoke/Dust/Exhaust/Ender Gas's existing 4-block fan size limit; no fan code changed.
 - LOD bands (`VOID_GAS_LOD`, `DUST_LOD`, `VAPOR_LOD`) are multipliers of each material's own cell size and were left as-is; see README for the resulting per-tier volume size change per material.
@@ -21,7 +27,7 @@ Category: breaking
 
 ## Migration
 
-- Saved Dust, Ender Gas, Exhaust, Void Gas, and Slime atmosphere is dropped on load; affected chunks come back empty and refill from normal production.
+- Saved Dust, Ender Gas, Exhaust, Void Gas, and Slime atmosphere is dropped on load. **Correction (see `0.20.1-alpha.1`):** affected chunks did not refill from normal production as claimed here — that required `0.20.1-alpha.1`.
 - Existing `violence` server and client config resets to `voidGas` defaults; old `violence`/`violenceReachMultiplier`/`violenceOpticalDensity` values are not migrated.
 - Forge config keeps an already-saved value when a default changes: a client with a saved `smokeOpticalDensity` (e.g. `4`, the old default) keeps rendering Smoke at that value. Delete `dynamicatmosphere-client.toml` or manually set `smokeOpticalDensity` to `2` to see the new look.
 - Client and server must be upgraded together and match versions.

@@ -19,8 +19,7 @@ import java.util.function.Supplier;
 
 /** Sparse chunk-owned persistence shared by Dust and Ender Gas. */
 public final class ForgeMaterialStorage {
-    private record MaterialSnapshot(List<MaterialChunkData.Cell> cells, CompoundTag unreadable) { }
-    private record Snapshot(Map<AtmosphereMaterial, MaterialSnapshot> materials) { }
+    private record Snapshot(Map<AtmosphereMaterial, MaterialChunkData.StoredMaterial> materials) { }
 
     private static final DeferredRegister<AttachmentType<?>> TYPES =
         DeferredRegister.create(NeoForgeRegistries.ATTACHMENT_TYPES, DynamicAtmosphereMod.MODID);
@@ -32,24 +31,14 @@ public final class ForgeMaterialStorage {
                     if (!(holder instanceof ChunkAccess chunk)) {
                         throw new IllegalArgumentException("material storage requires a chunk");
                     }
-                    var materials = new EnumMap<AtmosphereMaterial, MaterialSnapshot>(AtmosphereMaterial.class);
+                    var materials = new EnumMap<AtmosphereMaterial, MaterialChunkData.StoredMaterial>(AtmosphereMaterial.class);
                     for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
                         if (!tag.contains(material.id(), Tag.TAG_COMPOUND)) continue;
                         CompoundTag materialTag = tag.getCompound(material.id());
-                        try {
-                            if (!materialTag.contains("version", Tag.TAG_INT)
-                                || materialTag.getInt("version") != MaterialChunkData.VERSION
-                                || !materialTag.contains("cell_size", Tag.TAG_INT)
-                                || materialTag.getInt("cell_size") != material.cellSize()
-                                || !materialTag.contains("cells", Tag.TAG_INT_ARRAY)) {
-                                throw new IllegalArgumentException("unsupported material chunk format");
-                            }
-                            materials.put(material, new MaterialSnapshot(MaterialChunkData.decode(material,
-                                chunk.getPos().x, chunk.getPos().z, chunk.getMinBuildHeight(),
-                                chunk.getMaxBuildHeight(), materialTag.getIntArray("cells")), null));
-                        } catch (IllegalArgumentException exception) {
-                            materials.put(material, new MaterialSnapshot(List.of(), materialTag.copy()));
-                        }
+                        MaterialChunkData.StoredMaterial stored = MaterialChunkData.decodeStored(material,
+                            chunk.getPos().x, chunk.getPos().z, chunk.getMinBuildHeight(),
+                            chunk.getMaxBuildHeight(), materialTag);
+                        if (stored != null) materials.put(material, stored);
                     }
                     return new Snapshot(Map.copyOf(materials));
                 }
@@ -77,29 +66,29 @@ public final class ForgeMaterialStorage {
 
     public static List<MaterialChunkData.Cell> read(LevelChunk chunk, AtmosphereMaterial material) {
         Snapshot snapshot = chunk.getExistingDataOrNull(DATA.get());
-        MaterialSnapshot materialSnapshot = snapshot == null ? null : snapshot.materials().get(material);
-        requireReadable(material, materialSnapshot);
-        return materialSnapshot == null ? List.of() : materialSnapshot.cells();
+        MaterialChunkData.StoredMaterial stored = snapshot == null ? null : snapshot.materials().get(material);
+        requireReadable(material, stored);
+        return stored == null ? List.of() : stored.cells();
     }
 
     public static void write(LevelChunk chunk, AtmosphereMaterial material, List<MaterialChunkData.Cell> cells) {
         Snapshot previous = chunk.getExistingDataOrNull(DATA.get());
-        MaterialSnapshot oldMaterial = previous == null ? null : previous.materials().get(material);
+        MaterialChunkData.StoredMaterial oldMaterial = previous == null ? null : previous.materials().get(material);
         requireReadable(material, oldMaterial);
         List<MaterialChunkData.Cell> validated = MaterialChunkData.validate(material, chunk.getPos().x,
             chunk.getPos().z, chunk.getMinBuildHeight(), chunk.getMaxBuildHeight(), cells);
         if ((oldMaterial == null && validated.isEmpty())
             || (oldMaterial != null && oldMaterial.cells().equals(validated))) return;
-        var materials = new EnumMap<AtmosphereMaterial, MaterialSnapshot>(AtmosphereMaterial.class);
+        var materials = new EnumMap<AtmosphereMaterial, MaterialChunkData.StoredMaterial>(AtmosphereMaterial.class);
         if (previous != null) materials.putAll(previous.materials());
         if (validated.isEmpty()) materials.remove(material);
-        else materials.put(material, new MaterialSnapshot(validated, null));
+        else materials.put(material, new MaterialChunkData.StoredMaterial(validated, null));
         chunk.setData(DATA.get(), new Snapshot(Map.copyOf(materials)));
         chunk.setUnsaved(true);
     }
 
-    private static void requireReadable(AtmosphereMaterial material, MaterialSnapshot snapshot) {
-        if (snapshot != null && snapshot.unreadable() != null) {
+    private static void requireReadable(AtmosphereMaterial material, MaterialChunkData.StoredMaterial stored) {
+        if (stored != null && stored.unreadable() != null) {
             throw new IllegalStateException("Unsupported/corrupt " + material.id()
                 + " data retained; skip this chunk without overwriting it");
         }

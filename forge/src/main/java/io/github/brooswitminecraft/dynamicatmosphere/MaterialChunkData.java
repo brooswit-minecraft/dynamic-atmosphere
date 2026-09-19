@@ -1,5 +1,8 @@
 package io.github.brooswitminecraft.dynamicatmosphere;
 
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.Tag;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -13,6 +16,32 @@ public final class MaterialChunkData {
 
     public record Cell(int x, int y, int z, int amount) { }
     private record Position(int x, int y, int z) { }
+
+    /** A material's decoded chunk cells, or the raw tag preserved because it is corrupt/unparseable. */
+    public record StoredMaterial(List<Cell> cells, CompoundTag unreadable) { }
+
+    /** Null means a stale version/cell_size: caller should treat it as empty, not preserve-and-skip. */
+    public static StoredMaterial decodeStored(AtmosphereMaterial material, int chunkX, int chunkZ,
+                                               int minBlockY, int maxBlockY, CompoundTag materialTag) {
+        if (isStaleVersion(material, materialTag)) return null;
+        if (!materialTag.contains("cells", Tag.TAG_INT_ARRAY)) {
+            return new StoredMaterial(List.of(), materialTag.copy());
+        }
+        try {
+            return new StoredMaterial(decode(material, chunkX, chunkZ, minBlockY, maxBlockY,
+                materialTag.getIntArray("cells")), null);
+        } catch (IllegalArgumentException exception) {
+            return new StoredMaterial(List.of(), materialTag.copy());
+        }
+    }
+
+    /** Checked before "cells" is even looked at, so a version/cell_size mismatch never counts as corrupt. */
+    private static boolean isStaleVersion(AtmosphereMaterial material, CompoundTag materialTag) {
+        return !materialTag.contains("version", Tag.TAG_INT)
+            || materialTag.getInt("version") != VERSION
+            || !materialTag.contains("cell_size", Tag.TAG_INT)
+            || materialTag.getInt("cell_size") != material.cellSize();
+    }
 
     public static List<Cell> validate(AtmosphereMaterial material, int chunkX, int chunkZ,
                                       int minBlockY, int maxBlockY, List<Cell> cells) {
