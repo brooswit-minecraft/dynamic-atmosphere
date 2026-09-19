@@ -205,7 +205,8 @@ and migrated chunks are saved in the new format.
   have been removed; only source-driven emissions remain.
   Natural Endermen require strictly more than 50% local Ender Gas fullness,
   including underground, without consuming it; other normal spawn restrictions
-  still apply. Other natural surface hostiles retain the Vapor fullness gate.
+  still apply. Other natural surface hostiles retain the Vapor fullness gate,
+  Overworld only — Nether and End monster spawns follow vanilla rules.
 - **Violence:** hostile mob deaths add 40, sampled netherrack adds 2, and a
   world-bottom producer has a 1/8 chance to add 8. At 10% through 25% fullness,
   eligible villagers can receive three bread for vanilla breeding readiness,
