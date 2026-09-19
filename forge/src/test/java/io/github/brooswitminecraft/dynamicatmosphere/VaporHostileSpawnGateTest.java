@@ -1,15 +1,31 @@
 package io.github.brooswitminecraft.dynamicatmosphere;
 
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.MobCategory;
 import net.minecraft.world.entity.MobSpawnType;
+import net.neoforged.fml.loading.LoadingModList;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Map;
 
 import static io.github.brooswitminecraft.dynamicatmosphere.VaporHostileSpawnGate.Decision.DENY;
 import static io.github.brooswitminecraft.dynamicatmosphere.VaporHostileSpawnGate.Decision.PASS_THROUGH;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class VaporHostileSpawnGateTest {
+
+    @BeforeAll
+    static void bootstrap() {
+        if (LoadingModList.get() == null) {
+            LoadingModList.of(List.of(), List.of(), List.of(), List.of(), Map.of());
+        }
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+    }
 
     @Test
     void monstersWithoutQualifyingOverheadTerrainRequireDenseVapor() {
