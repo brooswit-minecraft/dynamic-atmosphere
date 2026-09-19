@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 class AtmosphericMaterialsTest {
     @Test
     void opticalDensityIsRenderingOnlyAndUnspecifiedSettingsDefaultToOne() {
-        assertEquals(List.of(1.0, 1.0, 4.0, 4.0, 1.0, 4.0, 40.0),
+        assertEquals(List.of(1.0, 1.0, 2.0, 4.0, 1.0, 4.0, 40.0),
             AtmosphericMaterials.ALL.stream().map(m -> m.settings().opticalDensityMultiplier()).toList());
         var vapor = AtmosphericMaterials.VAPOR.settings();
         assertEquals(1, new MaterialSettings(vapor.cellSize(), vapor.lod(), vapor.simulationSpeed(),

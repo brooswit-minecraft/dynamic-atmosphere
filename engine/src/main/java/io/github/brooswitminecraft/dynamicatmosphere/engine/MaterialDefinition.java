@@ -23,7 +23,7 @@ public record MaterialDefinition(
     }
 
     // Named colors preserve the specification without selecting unspecified RGB values.
-    public enum Color { CURRENT_FOG, BROWN, BLACK, RED, YELLOW, GREEN, PURPLE }
+    public enum Color { CURRENT_FOG, BROWN, DARK_BROWN, BLACK, YELLOW, GREEN, PURPLE }
 
     public enum Producer {
         EXISTING_VAPOR_RULES, SNOW_ICE_SURFACE,

@@ -18,10 +18,10 @@ not a claim of balance or measured performance.
 | Material | Base cell edge | Scheduled simulation interval | Color | Optical density |
 | --- | --- | --- | --- | --- |
 | Vapor | 4 blocks | 200 ticks | Minecraft fog/horizon | 1x |
-| Smoke | 4 blocks | 200 ticks | Black | 4x |
+| Smoke | 4 blocks | 200 ticks | Very dark brown (0x1F160F) | 2x |
 | Dust | 4 blocks | 200 ticks | Brown | 1x |
 | Ender Gas | 4 blocks | 200 ticks | Purple | 40x |
-| Void Gas | 4 blocks | 200 ticks | Red | 4x |
+| Void Gas | 4 blocks | 200 ticks | Black | 4x |
 | Exhaust | 4 blocks | 200 ticks | Yellow | 1x |
 | Slime | 4 blocks | 200 ticks | Green | 4x |
 
@@ -170,7 +170,7 @@ shortcut. Aggregation, cutoffs, and thickness-integrated density remain unchange
 
 Mixed-color slices share back-to-front ordering and bounded GPU batches.
 Vapor uses current Minecraft fog RGB; the other six use their listed colors.
-Smoke, Void Gas, and Slime use 4x optical density before thickness-integrated
+Void Gas and Slime use 4x optical density and Smoke 2x before thickness-integrated
 alpha; Ender Gas uses 40x. Density does not change stored fullness, capacity, or
 gameplay. Vapor-only frames retain their constant-color unsorted path. No measured
 FPS improvement is claimed.
