@@ -26,10 +26,10 @@ public final class AtmosphericMaterials {
         settings(CELL_SIZE, DUST_LOD, 1, OptionalDouble.of(1)),
         Set.of(PLAYER_WALKING, MOB_WALKING, BLOCK_BREAKING, BLOCK_PLACEMENT,
             PLAYER_FALL_DAMAGE, MOB_FALL_DAMAGE), Set.of(MaterialDefinition.Transformation.GRAVEL));
-    public static final MaterialDefinition SMOKE = new MaterialDefinition("smoke", BLACK,
-        new MaterialSettings(CELL_SIZE, VAPOR_LOD, 1, OptionalDouble.of(1), 4),
+    public static final MaterialDefinition SMOKE = new MaterialDefinition("smoke", DARK_BROWN,
+        new MaterialSettings(CELL_SIZE, VAPOR_LOD, 1, OptionalDouble.of(1), 2),
         Set.of(LAVA, FIRE, EXPLOSIONS, EXPLOSION_DESTROYED_BLOCKS, FURNACES, TORCHES, CAMPFIRES), Set.of());
-    public static final MaterialDefinition VOID_GAS = new MaterialDefinition("void_gas", RED,
+    public static final MaterialDefinition VOID_GAS = new MaterialDefinition("void_gas", BLACK,
         new MaterialSettings(CELL_SIZE, VOID_GAS_LOD, 1, OptionalDouble.of(1), 4),
         Set.of(HOSTILE_MOB_DEATHS, NETHERRACK), Set.of(MaterialDefinition.Transformation.ZOMBIE));
     public static final MaterialDefinition EXHAUST = new MaterialDefinition("exhaust", YELLOW,

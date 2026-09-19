@@ -46,7 +46,7 @@ public final class DynamicAtmosphereClientConfig {
         VAPOR_REACH = decimal(builder, "vaporReachMultiplier", 2, 0.25, 4);
         VAPOR_DENSITY = decimal(builder, "vaporOpticalDensity", 1, 0, 1000);
         SMOKE_REACH = decimal(builder, "smokeReachMultiplier", 2, 0.25, 4);
-        SMOKE_DENSITY = decimal(builder, "smokeOpticalDensity", 4, 0, 1000);
+        SMOKE_DENSITY = decimal(builder, "smokeOpticalDensity", 2, 0, 1000);
         DUST_REACH = decimal(builder, "dustReachMultiplier", 0.25, 0.25, 4);
         DUST_DENSITY = decimal(builder, "dustOpticalDensity", 1, 0, 1000);
         VOID_GAS_REACH = decimal(builder, "voidGasReachMultiplier", 2, 0.25, 4);

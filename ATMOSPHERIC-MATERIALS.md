@@ -16,9 +16,9 @@ and never force chunks to load.
 | Material | Color | Base cell | Render reach and LOD | Optical density |
 | --- | --- | --- | --- | --- |
 | Vapor | Current fog color | 4x4x4 | 1x to V/2, 2x to V, 4x to 2V | 1x |
-| Smoke | Black | 4x4x4 | 1x to V/2, 2x to V, 4x to 2V | 4x |
+| Smoke | Very dark brown (0x1F160F) | 4x4x4 | 1x to V/2, 2x to V, 4x to 2V | 2x |
 | Dust | Brown | 4x4x4 | Base cells to V/4 | 1x |
-| Void Gas | Red | 4x4x4 | 1x to V, 2x to 2V | 4x |
+| Void Gas | Black | 4x4x4 | 1x to V, 2x to 2V | 4x |
 | Exhaust | Yellow | 4x4x4 | Base cells to V/4 | 1x |
 | Slime | Green | 4x4x4 | 1x to V, 2x to 2V | 4x |
 | Ender Gas | Purple | 4x4x4 | Base cells to V/4 | 40x |
