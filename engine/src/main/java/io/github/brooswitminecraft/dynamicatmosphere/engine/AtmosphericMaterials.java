@@ -14,7 +14,7 @@ public final class AtmosphericMaterials {
         new MaterialSettings.LodBand(4, 2));
     private static final List<MaterialSettings.LodBand> DUST_LOD = List.of(
         new MaterialSettings.LodBand(1, 0.25));
-    private static final List<MaterialSettings.LodBand> VIOLENCE_LOD = List.of(
+    private static final List<MaterialSettings.LodBand> VOID_GAS_LOD = List.of(
         new MaterialSettings.LodBand(1, 1), new MaterialSettings.LodBand(2, 2));
 
     public static final MaterialDefinition VAPOR = new MaterialDefinition("vapor", CURRENT_FOG,
@@ -27,21 +27,21 @@ public final class AtmosphericMaterials {
     public static final MaterialDefinition SMOKE = new MaterialDefinition("smoke", BLACK,
         new MaterialSettings(4, VAPOR_LOD, 1, OptionalDouble.of(1), 4),
         Set.of(LAVA, FIRE, EXPLOSIONS, EXPLOSION_DESTROYED_BLOCKS, FURNACES, TORCHES, CAMPFIRES), Set.of());
-    public static final MaterialDefinition VIOLENCE = new MaterialDefinition("violence", RED,
-        new MaterialSettings(8, VIOLENCE_LOD, 1, OptionalDouble.of(1), 4),
+    public static final MaterialDefinition VOID_GAS = new MaterialDefinition("void_gas", RED,
+        new MaterialSettings(8, VOID_GAS_LOD, 1, OptionalDouble.of(1), 4),
         Set.of(HOSTILE_MOB_DEATHS, NETHERRACK), Set.of(MaterialDefinition.Transformation.ZOMBIE));
     public static final MaterialDefinition EXHAUST = new MaterialDefinition("exhaust", YELLOW,
         settings(2, DUST_LOD, 1, OptionalDouble.of(1)),
         Set.of(LIVING_MOBS_RANDOMLY, CREEPERS_FREQUENTLY, PLAYER_DAMAGE, MOB_DAMAGE), Set.of());
     public static final MaterialDefinition SLIME = new MaterialDefinition("slime", GREEN,
-        new MaterialSettings(16, VIOLENCE_LOD, 1, OptionalDouble.of(1), 4),
+        new MaterialSettings(16, VOID_GAS_LOD, 1, OptionalDouble.of(1), 4),
         Set.of(UNDERGROUND_SLIME_CHUNKS_RANDOMLY), Set.of(MaterialDefinition.Transformation.SLIME));
     public static final MaterialDefinition ENDER_GAS = new MaterialDefinition("ender_gas", PURPLE,
         new MaterialSettings(2, DUST_LOD, 1, OptionalDouble.of(1), 40),
         Set.of(NETHER_PORTAL_BLOCKS_SLOWLY, ENDERMEN, ENDERMITES, ENDER_DRAGON,
             ENDER_PEARL_USE, STANDING_IN_NETHER_PORTAL, SOUL_TORCHES, SOUL_FIRES, SOUL_SAND), Set.of());
 
-    public static final List<MaterialDefinition> ALL = List.of(VAPOR, DUST, SMOKE, VIOLENCE, EXHAUST, SLIME, ENDER_GAS);
+    public static final List<MaterialDefinition> ALL = List.of(VAPOR, DUST, SMOKE, VOID_GAS, EXHAUST, SLIME, ENDER_GAS);
 
     private AtmosphericMaterials() { }
 

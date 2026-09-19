@@ -155,7 +155,9 @@ required.
 `0.19.0-alpha.1` enables all seven independent materials, each with chunk-persisted
 server amounts and separate client state. These are active MVP systems, not
 placeholders for future runtime support. Numeric defaults are initial tuning,
-not a claim of balance or measured performance.
+not a claim of balance or measured performance. `0.20.0-alpha.1` renamed Void
+Gas's id, config keys, and identifiers (see CHANGELOG); its emission sources,
+thresholds, and costs did not change.
 
 | Material | Base cell edge | Scheduled simulation interval | Color | Optical density |
 | --- | --- | --- | --- | --- |
@@ -163,7 +165,7 @@ not a claim of balance or measured performance.
 | Smoke | 4 blocks | 200 ticks | Black | 4x |
 | Dust | 2 blocks | 200 ticks | Brown | 1x |
 | Ender Gas | 2 blocks | 200 ticks | Purple | 40x |
-| Violence | 8 blocks | 200 ticks | Red | 4x |
+| Void Gas | 8 blocks | 200 ticks | Red | 4x |
 | Exhaust | 2 blocks | 200 ticks | Yellow | 1x |
 | Slime | 16 blocks | 200 ticks | Green | 4x |
 
@@ -206,7 +208,7 @@ and migrated chunks are saved in the new format.
   Natural Endermen require strictly more than 50% local Ender Gas fullness,
   including underground, without consuming it; other normal spawn restrictions
   still apply. Other natural surface hostiles retain the Vapor fullness gate.
-- **Violence:** hostile mob deaths add 40, sampled netherrack adds 2, and a
+- **Void Gas:** hostile mob deaths add 40, sampled netherrack adds 2, and a
   world-bottom producer has a 1/8 chance to add 8. At 10% through 25% fullness,
   eligible villagers can receive three bread for vanilla breeding readiness,
   costing 5% of the current amount rounded up; this does not force a birth.
@@ -246,7 +248,7 @@ render distance from the viewer:
 | `V < d <= 2V` | 16x16x16 blocks | 16x16x16 blocks |
 | `d > 2V` | Not rendered | Not rendered |
 
-Violence and Slime use base cells through V and 2x cells through 2V, with nothing
+Void Gas and Slime use base cells through V and 2x cells through 2V, with nothing
 beyond. Dust, Exhaust, and Ender Gas use base cells only through V/4, with nothing
 beyond. These cutoffs include cached fallback geometry and preserve stored cache data.
 
@@ -277,7 +279,7 @@ grayscale, distance color blend, or client terrain-light sampling cache.
 The other six materials use the colors in the table above. Vapor-only frames retain
 the constant-color unsorted path; mixed-material slices are merged back-to-front
 through shared bounded GPU batches. Mixed colors are not order-independent.
-Smoke, Violence, and Slime multiply optical density by four before
+Smoke, Void Gas, and Slime multiply optical density by four before
 thickness-integrated alpha; Ender Gas uses 40x. This changes rendering only, not
 material amounts, capacity, or simulation fullness.
 
@@ -347,7 +349,7 @@ pressure implementation still requires build and server/client verification.
 ## Fans and Configuration
 
 Fans affect only cells up to 4x4x4: Vapor, Smoke, Dust, Exhaust, and Ender Gas.
-The larger Violence and Slime grids are unaffected.
+The larger Void Gas and Slime grids are unaffected.
 
 When Create is installed, a rotating Encased Fan performs intake followed by output
 on a separate five-second pass. Positive RPM draws evenly from the five neighbors

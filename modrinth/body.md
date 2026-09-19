@@ -21,7 +21,7 @@ not a claim of balance or measured performance.
 | Smoke | 4 blocks | 200 ticks | Black | 4x |
 | Dust | 2 blocks | 200 ticks | Brown | 1x |
 | Ender Gas | 2 blocks | 200 ticks | Purple | 40x |
-| Violence | 8 blocks | 200 ticks | Red | 4x |
+| Void Gas | 8 blocks | 200 ticks | Red | 4x |
 | Exhaust | 2 blocks | 200 ticks | Yellow | 1x |
 | Slime | 16 blocks | 200 ticks | Green | 4x |
 
@@ -61,7 +61,7 @@ the exact total stored Smoke mass; migrated chunks are saved in the new format.
   Natural Endermen require strictly more than 50% local Ender Gas fullness,
   including underground, without consuming it; other normal spawn restrictions
   still apply. Other natural surface hostiles retain the Vapor fullness gate.
-- **Violence:** hostile mob deaths add 40, sampled netherrack adds 2, and a
+- **Void Gas:** hostile mob deaths add 40, sampled netherrack adds 2, and a
   world-bottom producer has a 1/8 chance to add 8. At 10% through 25% fullness,
   eligible villagers can receive three bread for vanilla breeding readiness,
   costing 5% of the current amount rounded up; this does not force a birth.
@@ -155,7 +155,7 @@ enough room; it never creates pressure overflow.
 
 Let V be Minecraft's effective client view distance in blocks:
 - Vapor and Smoke: base cells through V/2, 2x through V, 4x through 2V; nothing beyond.
-- Violence and Slime: base cells through V, 2x through 2V; nothing beyond.
+- Void Gas and Slime: base cells through V, 2x through 2V; nothing beyond.
 - Dust, Exhaust, and Ender Gas: base cells through V/4 only; nothing beyond.
 
 Coarse volumes recursively average eight children, including empty volumes.
@@ -170,7 +170,7 @@ shortcut. Aggregation, cutoffs, and thickness-integrated density remain unchange
 
 Mixed-color slices share back-to-front ordering and bounded GPU batches.
 Vapor uses current Minecraft fog RGB; the other six use their listed colors.
-Smoke, Violence, and Slime use 4x optical density before thickness-integrated
+Smoke, Void Gas, and Slime use 4x optical density before thickness-integrated
 alpha; Ender Gas uses 40x. Density does not change stored fullness, capacity, or
 gameplay. Vapor-only frames retain their constant-color unsorted path. No measured
 FPS improvement is claimed.
@@ -191,7 +191,7 @@ and frustum. Delta sync is every 20 ticks and full snapshots every 200.
 ## Create Fans and Configuration
 
 Fans affect only cells up to 4x4x4: Vapor, Smoke, Dust, Exhaust, and Ender Gas.
-Violence and Slime are unaffected.
+Void Gas and Slime are unaffected.
 
 With Create installed, positive-RPM Encased Fans first draw evenly from their five
 non-facing neighbors, then push toward the facing neighbor. Negative RPM reverses
