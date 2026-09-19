@@ -130,13 +130,12 @@ After a successful read-back, `release.yml` runs
      The shared contract fixture lives at
      `scripts/fixtures/dynamic-atmosphere-released.example.json`, committed
      verbatim from sickos's own
-     `tests/fixtures/dynamic-atmosphere-released.example.json` (sickos PR #29
-     / SICKOS-75, commit `9150466b6a8e4a5fd36058f41421e86fd6fa1ee5`) — see
-     `scripts/fixtures/README.md` for the source and pinned sha256. From here
-     on DA's copy is the source of truth and sickos checks for drift against
-     it. `scripts/test_dispatch_sickos.py` pins the fixture's sha256 and
-     asserts the payload builder's output matches its key set, key order, and
-     types.
+     `tests/fixtures/dynamic-atmosphere-released.example.json` (SICKOS-75,
+     now on sickos `main`) — see `scripts/fixtures/README.md` for the source
+     commit and pinned sha256. From here on DA's copy is the source of truth
+     and sickos checks for drift against it. `scripts/test_dispatch_sickos.py`
+     pins the fixture's sha256 and asserts the payload builder's output
+     matches its key set, key order, and types.
 
 ### When it fires
 
