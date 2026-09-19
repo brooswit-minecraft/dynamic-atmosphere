@@ -18,7 +18,7 @@ and never force chunks to load.
 | Vapor | Current fog color | 4x4x4 | 1x to V/2, 2x to V, 4x to 2V | 1x |
 | Smoke | Black | 4x4x4 | 1x to V/2, 2x to V, 4x to 2V | 4x |
 | Dust | Brown | 2x2x2 | Base cells to V/4 | 1x |
-| Violence | Red | 8x8x8 | 1x to V, 2x to 2V | 4x |
+| Void Gas | Red | 8x8x8 | 1x to V, 2x to 2V | 4x |
 | Exhaust | Yellow | 2x2x2 | Base cells to V/4 | 1x |
 | Slime | Green | 16x16x16 | 1x to V, 2x to 2V | 4x |
 | Ender Gas | Purple | 1x1x1 | Base cells to V/4 | 40x |
@@ -95,10 +95,10 @@ falling-block landings produce Dust. Water or snow/ice movement routes the movem
 emission to Vapor instead. Processed Dust can turn plain water into mud, create
 gravel when overfull, and independently dissipate. Waterlogged hosts are preserved.
 
-### Violence
+### Void Gas
 
 Hostile deaths, sampled Netherrack, and bounded world-bottom checks produce
-Violence. The medium-density villager effect supplies an eligible existing
+Void Gas. The medium-density villager effect supplies an eligible existing
 villager with breeding food while preserving the entity and vanilla breeding
 requirements. High density can attempt one vanilla-checked zombie spawn with a
 finite material cost.

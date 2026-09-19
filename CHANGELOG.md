@@ -1,3 +1,11 @@
+# 0.20.0-alpha.1
+
+**BREAKING:** the `violence` material is renamed to Void Gas. Existing `violence` server and client config sections are discarded; config resets to `voidGas` defaults on upgrade. Any world with saved `violence` atmosphere loses that stored material on load — old data under the `violence` id is discarded, not migrated.
+
+- Rename `AtmosphereMaterial.VIOLENCE` (`"violence"`) to `AtmosphereMaterial.VOID_GAS` (`"void_gas"`) across the server, engine, and client catalogs. Enum order and ordinals are unchanged.
+- Rename `ViolenceGameplay`/`ViolenceGameplayTest` to `VoidGasGameplay`/`VoidGasGameplayTest`. Rename the server `violence` config section to `voidGas`, and the client `violenceReachMultiplier`/`violenceOpticalDensity` keys to `voidGasReachMultiplier`/`voidGasOpticalDensity`. No migration: old values reset to their defaults.
+- Slime continues to share the renamed `VOID_GAS_LOD` constant in the engine catalog; its behavior is unchanged and pinned by a test. A new test confirms the server, engine, and client catalogs agree on the Void Gas entry and that ordinals are unchanged.
+
 # 0.19.0-alpha.1
 
 - Positive-RPM fans draw evenly from the five non-facing neighbors before pushing forward. Negative RPM draws from the facing neighbor before distributing evenly to the other five.

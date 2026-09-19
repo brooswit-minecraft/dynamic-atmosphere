@@ -9,7 +9,7 @@ class AtmosphereFanTransportTest {
         for (int size : new int[] {1, 2, 4}) assertEquals(true, AtmosphereFanTransport.supportsCellSize(size));
         for (int size : new int[] {-1, 0, 5, 8, 16}) assertEquals(false, AtmosphereFanTransport.supportsCellSize(size));
         for (var material : AtmosphereMaterial.values()) {
-            assertEquals(material != AtmosphereMaterial.VIOLENCE && material != AtmosphereMaterial.SLIME,
+            assertEquals(material != AtmosphereMaterial.VOID_GAS && material != AtmosphereMaterial.SLIME,
                 AtmosphereFanTransport.supportsCellSize(material.cellSize()));
         }
     }
