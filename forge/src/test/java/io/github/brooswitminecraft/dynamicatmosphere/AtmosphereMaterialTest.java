@@ -9,17 +9,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AtmosphereMaterialTest {
     @Test
-    void layoutsUseIndependentCellSizesAndNegativeCoordinates() {
-        assertEquals(2, AtmosphereMaterial.DUST.cellSize());
-        assertEquals(2, AtmosphereMaterial.ENDER_GAS.cellSize());
-        assertEquals(8, AtmosphereMaterial.VOID_GAS.cellSize());
-        assertEquals(2, AtmosphereMaterial.EXHAUST.cellSize());
-        assertEquals(16, AtmosphereMaterial.SLIME.cellSize());
-        assertEquals(-1, AtmosphereMaterial.DUST.cellCoordinate(-1));
-        assertEquals(-1, AtmosphereMaterial.DUST.chunkCoordinate(-1));
-        assertEquals(-2, AtmosphereMaterial.DUST.chunkCoordinate(-9));
-        assertEquals(-1, AtmosphereMaterial.ENDER_GAS.chunkCoordinate(-1));
-        assertEquals(-2, AtmosphereMaterial.ENDER_GAS.chunkCoordinate(-9));
+    void layoutsShareTheUniformCellSizeAndSupportNegativeCoordinates() {
+        for (var material : AtmosphereMaterial.values()) {
+            assertEquals(4, material.cellSize());
+            assertEquals(-1, material.cellCoordinate(-1));
+            assertEquals(-1, material.chunkCoordinate(-1));
+            assertEquals(-3, material.chunkCoordinate(-9));
+        }
     }
 
     @Test
@@ -45,15 +41,13 @@ class AtmosphereMaterialTest {
     }
 
     @Test
-    void capacityScalesToEachCellVolume() {
-        assertEquals(500, AtmosphereMaterial.DUST.capacityForAirBlocks(4));
-        assertEquals(125, AtmosphereMaterial.ENDER_GAS.capacityForAirBlocks(1));
-        assertEquals(1000, AtmosphereMaterial.ENDER_GAS.capacityForAirBlocks(8));
-        assertEquals(0, AtmosphereMaterial.ENDER_GAS.capacityForAirBlocks(0));
-        assertEquals(500, AtmosphereMaterial.VOID_GAS.capacityForAirBlocks(256));
-        assertEquals(500, AtmosphereMaterial.EXHAUST.capacityForAirBlocks(4));
-        assertEquals(500, AtmosphereMaterial.SLIME.capacityForAirBlocks(2048));
-        assertEquals(1, AtmosphereMaterial.SLIME.capacityForAirBlocks(1));
+    void capacityScalesToTheSharedSixtyFourBlockCellVolume() {
+        for (var material : AtmosphereMaterial.values()) {
+            assertEquals(0, material.capacityForAirBlocks(0));
+            assertEquals(15, material.capacityForAirBlocks(1));
+            assertEquals(500, material.capacityForAirBlocks(32));
+            assertEquals(1000, material.capacityForAirBlocks(64));
+        }
     }
 
     @Test

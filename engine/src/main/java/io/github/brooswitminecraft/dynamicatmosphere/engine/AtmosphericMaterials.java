@@ -9,6 +9,8 @@ import java.util.Set;
 
 /** Approved specification catalog, deliberately not registered with any running simulation. */
 public final class AtmosphericMaterials {
+    /** Every material shares one cell size; there is no per-material override. */
+    private static final int CELL_SIZE = 4;
     private static final List<MaterialSettings.LodBand> VAPOR_LOD = List.of(
         new MaterialSettings.LodBand(1, 0.5), new MaterialSettings.LodBand(2, 1),
         new MaterialSettings.LodBand(4, 2));
@@ -18,26 +20,26 @@ public final class AtmosphericMaterials {
         new MaterialSettings.LodBand(1, 1), new MaterialSettings.LodBand(2, 2));
 
     public static final MaterialDefinition VAPOR = new MaterialDefinition("vapor", CURRENT_FOG,
-        settings(4, VAPOR_LOD, 1, OptionalDouble.of(1)), Set.of(EXISTING_VAPOR_RULES, SNOW_ICE_SURFACE),
+        settings(CELL_SIZE, VAPOR_LOD, 1, OptionalDouble.of(1)), Set.of(EXISTING_VAPOR_RULES, SNOW_ICE_SURFACE),
         Set.of(MaterialDefinition.Transformation.WATER));
     public static final MaterialDefinition DUST = new MaterialDefinition("dust", BROWN,
-        settings(2, DUST_LOD, 1, OptionalDouble.of(1)),
+        settings(CELL_SIZE, DUST_LOD, 1, OptionalDouble.of(1)),
         Set.of(PLAYER_WALKING, MOB_WALKING, BLOCK_BREAKING, BLOCK_PLACEMENT,
             PLAYER_FALL_DAMAGE, MOB_FALL_DAMAGE), Set.of(MaterialDefinition.Transformation.GRAVEL));
     public static final MaterialDefinition SMOKE = new MaterialDefinition("smoke", BLACK,
-        new MaterialSettings(4, VAPOR_LOD, 1, OptionalDouble.of(1), 4),
+        new MaterialSettings(CELL_SIZE, VAPOR_LOD, 1, OptionalDouble.of(1), 4),
         Set.of(LAVA, FIRE, EXPLOSIONS, EXPLOSION_DESTROYED_BLOCKS, FURNACES, TORCHES, CAMPFIRES), Set.of());
     public static final MaterialDefinition VOID_GAS = new MaterialDefinition("void_gas", RED,
-        new MaterialSettings(8, VOID_GAS_LOD, 1, OptionalDouble.of(1), 4),
+        new MaterialSettings(CELL_SIZE, VOID_GAS_LOD, 1, OptionalDouble.of(1), 4),
         Set.of(HOSTILE_MOB_DEATHS, NETHERRACK), Set.of(MaterialDefinition.Transformation.ZOMBIE));
     public static final MaterialDefinition EXHAUST = new MaterialDefinition("exhaust", YELLOW,
-        settings(2, DUST_LOD, 1, OptionalDouble.of(1)),
+        settings(CELL_SIZE, DUST_LOD, 1, OptionalDouble.of(1)),
         Set.of(LIVING_MOBS_RANDOMLY, CREEPERS_FREQUENTLY, PLAYER_DAMAGE, MOB_DAMAGE), Set.of());
     public static final MaterialDefinition SLIME = new MaterialDefinition("slime", GREEN,
-        new MaterialSettings(16, VOID_GAS_LOD, 1, OptionalDouble.of(1), 4),
+        new MaterialSettings(CELL_SIZE, VOID_GAS_LOD, 1, OptionalDouble.of(1), 4),
         Set.of(UNDERGROUND_SLIME_CHUNKS_RANDOMLY), Set.of(MaterialDefinition.Transformation.SLIME));
     public static final MaterialDefinition ENDER_GAS = new MaterialDefinition("ender_gas", PURPLE,
-        new MaterialSettings(2, DUST_LOD, 1, OptionalDouble.of(1), 40),
+        new MaterialSettings(CELL_SIZE, DUST_LOD, 1, OptionalDouble.of(1), 40),
         Set.of(NETHER_PORTAL_BLOCKS_SLOWLY, ENDERMEN, ENDERMITES, ENDER_DRAGON,
             ENDER_PEARL_USE, STANDING_IN_NETHER_PORTAL, SOUL_TORCHES, SOUL_FIRES, SOUL_SAND), Set.of());
 
