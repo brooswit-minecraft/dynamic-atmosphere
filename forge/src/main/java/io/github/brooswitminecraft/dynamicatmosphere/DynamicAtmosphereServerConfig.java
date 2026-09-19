@@ -85,6 +85,8 @@ public final class DynamicAtmosphereServerConfig {
     private static final IntOption SLIME_SPAWN_DENOMINATOR;
     private static final IntOption SLIME_SPAWN_ATTEMPTS;
 
+    private static final DoubleOption HEAVY_GAS_DISSIPATION_FACTOR;
+
     private static final IntOption ENDER_MOB;
     private static final IntOption ENDER_PORTAL;
     private static final IntOption ENDER_PORTAL_BLOCK;
@@ -195,6 +197,13 @@ public final class DynamicAtmosphereServerConfig {
         SLIME_SPAWN_ATTEMPTS = integer(builder, "spawnAttempts", 8, 1, 1024);
         builder.pop();
 
+        builder.push("heavyGas");
+        // Shared by Void Gas, Ender Gas and Slime: their dissipation chance is Smoke's own
+        // dissipationChance() divided by this factor, keeping Smoke's dissipationAmount() as maxLoss.
+        // 1 means "dissipate exactly as fast as Smoke"; a factor must stay finite and greater than zero.
+        HEAVY_GAS_DISSIPATION_FACTOR = decimal(builder, "dissipationFactor", 3.0, 0.001, 1_000.0);
+        builder.pop();
+
         builder.push("enderGas");
         ENDER_MOB = integer(builder, "mobEmission", 1, 0, 1_000_000);
         ENDER_PORTAL = integer(builder, "portalOccupantEmission", 2, 0, 1_000_000);
@@ -261,7 +270,8 @@ public final class DynamicAtmosphereServerConfig {
                 ENDER_PEARL_IMPACT.get(), ENDER_MOB_INTERVAL.get(),
                 ENDER_PORTAL_INTERVAL.get(), ENDER_PORTAL_BLOCK.get()),
             new PlantGrowth(PLANT_CHANCE.get(), PLANT_COST.get()),
-            new Integrations(CREATE_FAN_RPM_COEFFICIENT.get(), CREATE_FAN_INTERVAL.get(), CREATE_FAN_CHUNK_BUDGET.get())
+            new Integrations(CREATE_FAN_RPM_COEFFICIENT.get(), CREATE_FAN_INTERVAL.get(), CREATE_FAN_CHUNK_BUDGET.get()),
+            new HeavyGas(HEAVY_GAS_DISSIPATION_FACTOR.get())
         );
     }
 
@@ -305,7 +315,7 @@ public final class DynamicAtmosphereServerConfig {
 
     public record Snapshot(RuntimeTuning runtime, Vapor vapor, Smoke smoke, Dust dust, VoidGas voidGas,
                            Exhaust exhaust, Slime slime, EnderGas enderGas, PlantGrowth plantGrowth,
-                           Integrations integrations) { }
+                           Integrations integrations, HeavyGas heavyGas) { }
     public record RuntimeTuning(int syncIntervalTicks, int fullSnapshotIntervalTicks,
                                 int simulationIntervalTicks, int producerIntervalTicks,
                                 int maxChunkImportsPerTick, int maxProducerChunksPerTick,
@@ -349,6 +359,8 @@ public final class DynamicAtmosphereServerConfig {
     public record PlantGrowth(double chance, int cost) { }
     public record Integrations(double createFanTransportPerRpm, int createFanIntervalTicks,
                                int maxFanChunksPerTick) { }
+    /** Shared by Void Gas, Ender Gas and Slime: their dissipation chance is Smoke's own divided by this. */
+    public record HeavyGas(double dissipationFactor) { }
 
     private DynamicAtmosphereServerConfig() { }
 }
