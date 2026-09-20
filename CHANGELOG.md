@@ -38,6 +38,13 @@
 
   Reasoning: `obsidianEmission` is kept at the same order of magnitude as the existing shared passive default (1) since plain obsidian is only meant to be a faint ambient source. `cryingObsidianEmission` is set to 32 — the ticket's suggested "massively increased" starting point — putting it above the mob (1), portal-occupancy (2), and shared-passive (1) sources but still well below the pearl-impact (48) and portal-block (100) bursts, and consistent with the scale of the C1 Void Gas/Slime amplification above (defaults moved into the tens/hundreds range). Both keys use `RestartType.NONE` like the rest of server config.
 
+# 0.20.2-alpha.1
+
+Category: patch
+
+- Release notes now carry a `Category: patch|minor|breaking` marker; a release fails fast if it is missing or invalid, instead of shipping a category-less build.
+- Every published release now sends a `repository_dispatch` to the Sickos repository, once Modrinth confirms the upload through an authenticated read-back. The dispatch is skipped with a warning when no dispatch credential is configured (no credential is configured as of 0.20.2-alpha.1), and consuming it requires a receiving workflow on Sickos's default branch.
+
 # 0.20.1-alpha.1
 
 Category: patch
