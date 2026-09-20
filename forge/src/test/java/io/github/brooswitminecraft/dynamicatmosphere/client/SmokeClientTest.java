@@ -115,14 +115,14 @@ class SmokeClientTest {
                 var selection = lod.select(-distances[i], 0, 0, 8, 0);
                 var volume = selection.volumes().getFirst();
                 assertEquals(size * multipliers[i], volume.size());
-                assertTrue(AtmosphereLodHierarchy.withinReach(volume, -distances[i], 0, 0, 8));
-                assertFalse(AtmosphereLodHierarchy.withinReach(volume, -256.001, 0, 0, 8));
+                assertTrue(AtmosphereLodHierarchy.withinReach(volume, -distances[i], 0, 8));
+                assertFalse(AtmosphereLodHierarchy.withinReach(volume, -256.001, 0, 8));
             }
             var lod = new AtmosphereLodHierarchy(size, 2, 2);
             lod.put(new AtmosphereClientCache.Cell(0, 0, 0), 1000, 1000, 0, 0);
             var fallback = lod.select(0, 0, 0, 8, 0).unloadedFallbacks().getFirst();
-            assertTrue(AtmosphereLodHierarchy.withinReach(fallback, -256, 0, 0, 8));
-            assertFalse(AtmosphereLodHierarchy.withinReach(fallback, -256.001, 0, 0, 8));
+            assertTrue(AtmosphereLodHierarchy.withinReach(fallback, -256, 0, 8));
+            assertFalse(AtmosphereLodHierarchy.withinReach(fallback, -256.001, 0, 8));
         }
     }
 
@@ -133,13 +133,15 @@ class SmokeClientTest {
             new AtmosphereVolumeGeometry.Point(100, -100, 250),
             new AtmosphereVolumeGeometry.Point(100, 100, 250),
             new AtmosphereVolumeGeometry.Point(-100, 100, 250)));
-        var forward = new AtmosphereVolumeGeometry.Point(0, 0, 1);
-        var clipped = AtmosphereVolumeGeometry.clipToReach(List.of(slice), forward, 256);
+        var clipped = AtmosphereVolumeGeometry.clipToReach(List.of(slice), 256);
         assertEquals(1, clipped.size());
         assertEquals(0.2f, clipped.getFirst().alpha());
-        for (var point : clipped.getFirst().vertices()) assertTrue(point.dot(point) <= 256 * 256 + 1e-8);
-        assertTrue(AtmosphereVolumeGeometry.clipToReach(List.of(slice), forward, 249).isEmpty());
-        assertSame(slice, AtmosphereVolumeGeometry.clipToReach(List.of(slice), forward, 1000).getFirst());
+        // Cylindrical: only x/z (horizontal) must stay within reach; y (here +-100) is unbounded.
+        for (var point : clipped.getFirst().vertices()) {
+            assertTrue(point.x() * point.x() + point.z() * point.z() <= 256 * 256 + 1e-8);
+        }
+        assertTrue(AtmosphereVolumeGeometry.clipToReach(List.of(slice), 249).isEmpty());
+        assertSame(slice, AtmosphereVolumeGeometry.clipToReach(List.of(slice), 1000).getFirst());
     }
 
     @Test
