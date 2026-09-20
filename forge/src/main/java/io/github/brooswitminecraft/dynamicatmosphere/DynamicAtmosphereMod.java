@@ -39,6 +39,7 @@ public class DynamicAtmosphereMod {
         modEventBus.addListener(DynamicAtmosphereClientConfig::onReloading);
         modEventBus.addListener(DynamicAtmosphereClientConfig::onUnloading);
         LOGGER.info("[{}] engine module reachable: {}", MODID, EngineInfo.DESCRIPTION);
+        LavaIceInteractions.register();
         modEventBus.addListener(AtmosphereNetwork::register);
         ForgeAtmosphereStorage.register(modEventBus);
         ForgeAtmosphereCapacity.register(modEventBus);
