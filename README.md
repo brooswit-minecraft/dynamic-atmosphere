@@ -370,6 +370,40 @@ Back up existing worlds before upgrading. Downgrading the mod does not restore
 broken blocks; restore the backup to roll back terrain damage. This alpha's
 pressure implementation still requires build and server/client verification.
 
+## Lava, Ice, and Obsidian
+
+`0.21.0-alpha.1` adds an ice ladder that lava degrades one rung at a time via
+NeoForge's `FluidInteractionRegistry`, each rung paying out a different
+lava-side result:
+
+| Neighbor block | Neighbor becomes | Lava becomes |
+| --- | --- | --- |
+| Ice | Water | Magma block |
+| Packed ice | Ice | Obsidian |
+| Blue ice | Packed ice | Obsidian |
+
+Blue ice and packed ice both route to obsidian, not just water — lava does
+not simply melt them. Only ice's own rung produces water; there is no
+config option to change that.
+
+`FluidInteractionRegistry`'s adjacency check never looks straight down: it
+walks `LiquidBlock.POSSIBLE_FLOW_DIRECTIONS` (down, south, north, east, west)
+and tests `pos.relative(direction.getOpposite())`, so the neighbors actually
+probed are up, north, south, east, and west. **Ice directly below a lava
+source never triggers any of these three rules** — only ice beside or above
+the lava does.
+
+**Known, accepted exception:** blue ice directly above soul soil still makes
+basalt, not obsidian — NeoForge registers its own lava + soul-soil-below +
+blue-ice-adjacent → basalt interaction ahead of this mod's, and that is left
+unfixed. This only affects the standard basalt-generator layout (blue ice
+resting on soul soil); blue ice beside lava with no soul soil below still
+converts to packed ice and obsidian as tabled above.
+
+All three rules remove the lava fluid at its own position (converting it to
+magma or obsidian), which is exactly the transition Smoke already emits for
+via the existing lava-removal mixin hook; no mixin changes were needed.
+
 ## Fans and Configuration
 
 Fans affect cells up to 4x4x4, which now covers every material: Vapor, Smoke,
