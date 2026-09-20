@@ -1,3 +1,19 @@
+# Unreleased
+
+- Void Gas + Slime amplification (ATMO-24 C1): the `voidGas.bottomChanceDenominator` and `slime.undergroundChanceDenominator` production gates now fire on every scheduled check instead of 1-in-8, Void Gas and Slime "amount produced" emissions are ×8, and `heavyGas.dissipationFactor` rises from 3 (introduced by commit 83eb877, shipped in `0.20.0-alpha.1`) to 12 — so Void Gas, Ender Gas and Slime now dissipate at a twelfth of Smoke's rate instead of a third. The factor is shared by all three materials, so Ender Gas dissipation slowing is an intended side effect of this change, not a separate one. This is pure numeric tuning: no gameplay/spawn-path code changed. Saturation is an intended design feature (ATMO-22) — Void Gas and Slime cells in loaded caves are expected to trend toward permanently full and billow upward, not be capped or damped.
+
+  | Key | Old | New |
+  | --- | --- | --- |
+  | `voidGas.bottomChanceDenominator` | 8 | 1 |
+  | `voidGas.bottomEmission` | 8 | 64 |
+  | `voidGas.hostileDeathEmission` | 40 | 320 |
+  | `voidGas.netherrackEmission` | 2 | 16 |
+  | `slime.undergroundChanceDenominator` | 8 | 1 |
+  | `slime.undergroundEmission` | 8 | 64 |
+  | `heavyGas.dissipationFactor` | 3 | 12 |
+
+  All seven keys stay in the same file and section they already lived in (server config, `[voidGas]`, `[slime]`, and `[heavyGas]` respectively) — only the defaults changed, not their location.
+
 # 0.20.1-alpha.1
 
 Category: patch

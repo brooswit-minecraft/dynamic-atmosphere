@@ -217,8 +217,8 @@ and migrated chunks are saved in the new format.
   follow the Vapor (fog) spawn rule: no qualifying terrain above and Vapor
   not strictly more than half full denies natural/chunk-generation monster
   spawns. Nether and End monster spawns follow vanilla rules.
-- **Void Gas:** hostile mob deaths add 40, sampled netherrack adds 2, and a
-  world-bottom producer has a 1/8 chance to add 8. At 10% through 25% fullness,
+- **Void Gas:** hostile mob deaths add 320, sampled netherrack adds 16, and a
+  world-bottom producer unconditionally adds 64 every producer check. At 10% through 25% fullness,
   eligible villagers can receive three bread for vanilla breeding readiness,
   costing 5% of the current amount rounded up; this does not force a birth.
   At 75% fullness or higher, a 1/32 processed-turn roll attempts a zombie spawn,
@@ -230,16 +230,21 @@ and migrated chunks are saved in the new format.
   rising to 4 at 100%, consuming 25% through 50% of the current amount when damage
   succeeds. Vapor and Exhaust can also grow eligible crops/saplings through
   normal bonemeal behavior: a 10% roll and 40-unit cost on successful growth.
-- **Slime:** vanilla-seeded slime chunks can produce 8 units below Y=40 on a
-  1/8 producer roll. At 75% fullness or higher, a 1/32 processed-turn roll
-  attempts a slime spawn with a quarter-capacity cost and spawn checks.
+- **Slime:** vanilla-seeded slime chunks unconditionally produce 64 units
+  below Y=40 on every producer check. At 75% fullness or higher, a 1/32
+  processed-turn roll attempts a slime spawn with a quarter-capacity cost and
+  spawn checks.
 - **Void Gas, Ender Gas and Slime dissipation:** like Smoke, each dissipates
   gradually via an independent processed-turn roll, reusing Smoke's own
   `dissipationAmount` (up to 40 units) as the cap. The chance is Smoke's own
-  `dissipationChance` divided by `heavyGas.dissipationFactor` (default 3), so
-  by default these three fade at a third of Smoke's rate. The factor is
+  `dissipationChance` divided by `heavyGas.dissipationFactor` (default 12), so
+  by default these three fade at a twelfth of Smoke's rate. The factor is
   configurable and shared by all three; a factor of 1 means "as fast as
-  Smoke."
+  Smoke." With production gates now firing on every check and emissions ×8,
+  Void Gas and Slime cells in loaded caves saturate far faster than they
+  dissipate (roughly 330:1 at the default factor) — this is intended: full
+  cells billow upward and are a stable, load-bearing signal, not a runaway to
+  be capped or damped.
 
 Producer hooks and effect scans are bounded and loaded-only; not every block or
 entity is sampled each tick. Effects requiring material cannot spend unavailable

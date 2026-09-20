@@ -167,10 +167,10 @@ public final class DynamicAtmosphereServerConfig {
         builder.pop();
 
         builder.push("voidGas");
-        VOID_GAS_HOSTILE_DEATH = integer(builder, "hostileDeathEmission", 40, 0, 1_000_000);
-        VOID_GAS_NETHERRACK = integer(builder, "netherrackEmission", 2, 0, 1_000_000);
-        VOID_GAS_BOTTOM = integer(builder, "bottomEmission", 8, 0, 1_000_000);
-        VOID_GAS_BOTTOM_DENOMINATOR = integer(builder, "bottomChanceDenominator", 8, 1, 1_000_000);
+        VOID_GAS_HOSTILE_DEATH = integer(builder, "hostileDeathEmission", 320, 0, 1_000_000);
+        VOID_GAS_NETHERRACK = integer(builder, "netherrackEmission", 16, 0, 1_000_000);
+        VOID_GAS_BOTTOM = integer(builder, "bottomEmission", 64, 0, 1_000_000);
+        VOID_GAS_BOTTOM_DENOMINATOR = integer(builder, "bottomChanceDenominator", 1, 1, 1_000_000);
         VOID_GAS_SPAWN_DENOMINATOR = integer(builder, "spawnChanceDenominator", 32, 1, 1_000_000);
         VOID_GAS_SPAWN_ATTEMPTS = integer(builder, "spawnAttempts", 8, 1, 1024);
         VOID_GAS_BREAD = integer(builder, "breedingBread", 3, 0, 64);
@@ -191,8 +191,8 @@ public final class DynamicAtmosphereServerConfig {
         builder.pop();
 
         builder.push("slime");
-        SLIME_UNDERGROUND = integer(builder, "undergroundEmission", 8, 0, 1_000_000);
-        SLIME_UNDERGROUND_DENOMINATOR = integer(builder, "undergroundChanceDenominator", 8, 1, 1_000_000);
+        SLIME_UNDERGROUND = integer(builder, "undergroundEmission", 64, 0, 1_000_000);
+        SLIME_UNDERGROUND_DENOMINATOR = integer(builder, "undergroundChanceDenominator", 1, 1, 1_000_000);
         SLIME_SPAWN_DENOMINATOR = integer(builder, "spawnChanceDenominator", 32, 1, 1_000_000);
         SLIME_SPAWN_ATTEMPTS = integer(builder, "spawnAttempts", 8, 1, 1024);
         builder.pop();
@@ -201,7 +201,7 @@ public final class DynamicAtmosphereServerConfig {
         // Shared by Void Gas, Ender Gas and Slime: their dissipation chance is Smoke's own
         // dissipationChance() divided by this factor, keeping Smoke's dissipationAmount() as maxLoss.
         // 1 means "dissipate exactly as fast as Smoke"; a factor must stay finite and greater than zero.
-        HEAVY_GAS_DISSIPATION_FACTOR = decimal(builder, "dissipationFactor", 3.0, 0.001, 1_000.0);
+        HEAVY_GAS_DISSIPATION_FACTOR = decimal(builder, "dissipationFactor", 12.0, 0.001, 1_000.0);
         builder.pop();
 
         builder.push("enderGas");
