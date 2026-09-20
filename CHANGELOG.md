@@ -3,7 +3,7 @@
 Category: patch
 
 - Release notes now carry a `Category: patch|minor|breaking` marker; a release fails fast if it is missing or invalid, instead of shipping a category-less build.
-- Every published release now notifies the Sickos modpack via a `repository_dispatch`, once Modrinth confirms the upload through an authenticated read-back.
+- Every published release now sends a `repository_dispatch` to the Sickos repository, once Modrinth confirms the upload through an authenticated read-back. The dispatch is skipped with a warning when no dispatch credential is configured (the current state), and consuming it requires a receiving workflow on Sickos's default branch.
 
 # 0.20.1-alpha.1
 
