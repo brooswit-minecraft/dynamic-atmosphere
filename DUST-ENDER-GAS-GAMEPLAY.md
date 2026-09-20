@@ -30,9 +30,12 @@ chunk to load.
 
 Ender Gas uses 4x4x4 server cells and a client optical density of 40. The density
 is visual only and does not alter amounts, capacity, fullness, or gameplay gates.
-Dust and Ender Gas render only their base-cell LOD through V/4. Like all materials,
-their geometry uses `baseCellSize / slicesPerBaseCell` slice spacing rather than a
-distant one-slice shortcut, while retaining thickness-integrated optical density.
+Dust and Ender Gas render only their base-cell LOD, out to the same shared
+`maxDistanceMultiplier * V` cutoff every other material now uses (previously
+V/4, their own per-material reach), fading out rather than stopping abruptly.
+Like all materials, their geometry uses `baseCellSize / slicesPerBaseCell` slice
+spacing rather than a distant one-slice shortcut, while retaining
+thickness-integrated optical density.
 
 - Endermen, endermites, Ender Dragons, witches, and shulkers emit 1 unit every
   40 ticks. Any entity actively occupying a Nether portal emits 2 every 20 ticks.
@@ -53,7 +56,8 @@ producer intervals are under `runtime`; material-specific settings are under
 `dust` and `enderGas`. Server values are read through reloadable snapshots and
 apply after NeoForge reloads the server config.
 
-Ender Gas reach and optical density are client settings in
+Ender Gas optical density, and the shared max distance/fade settings every
+material now uses, are client settings in
 `<game-directory>/config/dynamicatmosphere-client.toml`. Client presentation
 settings hot-reload. Only client `allocation.cellBudget` requires a game restart.
 Cell sizes, persisted formats, and the network protocol are structural and are not
