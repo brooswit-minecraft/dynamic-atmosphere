@@ -1,4 +1,15 @@
+# 0.21.0-alpha.1
+
+Category: minor
+
 - The new obsidian route (ATMO-23): lava beside or above packed ice turns the packed ice into ice and the lava into obsidian; lava beside or above blue ice turns the blue ice into packed ice and the lava into obsidian. Exception: blue ice directly above soul soil still makes basalt — vanilla basalt generation is unchanged and takes precedence. Lava beside or above ice turns the ice into water and the lava into magma — both fluids are consumed. Registered via three `FluidInteractionRegistry.addInteraction` entries; no mixins added or changed. See README for the adjacency rule (beside/above, never below).
+
+# 0.20.2-alpha.1
+
+Category: patch
+
+- Release notes now carry a `Category: patch|minor|breaking` marker; a release fails fast if it is missing or invalid, instead of shipping a category-less build.
+- Every published release now sends a `repository_dispatch` to the Sickos repository, once Modrinth confirms the upload through an authenticated read-back. The dispatch is skipped with a warning when no dispatch credential is configured (no credential is configured as of 0.20.2-alpha.1), and consuming it requires a receiving workflow on Sickos's default branch.
 
 # 0.20.1-alpha.1
 
