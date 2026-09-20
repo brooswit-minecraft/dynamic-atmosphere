@@ -229,7 +229,7 @@ public final class DynamicAtmosphereServerConfig {
         builder.pop();
 
         builder.push("magma");
-        // Chance a removed magma block leaves a lava source; read fresh each roll, no restart needed.
+        // Chance a removed magma block leaves a lava source; RestartType.NONE (undeclared = NONE; see magmaBreakLavaChanceRestartType()), read fresh each roll.
         MAGMA_BREAK_LAVA_CHANCE = decimal(builder, "breakLavaChance", 0.1, 0, 1);
         builder.pop();
         SPEC = builder.build();
@@ -238,6 +238,11 @@ public final class DynamicAtmosphereServerConfig {
 
     public static Snapshot snapshot() {
         return cached;
+    }
+
+    /** Machine-checked per ATMO-8's standing directive: live-vs-baked must be declared in the spec, not prose. */
+    static ModConfigSpec.RestartType magmaBreakLavaChanceRestartType() {
+        return MAGMA_BREAK_LAVA_CHANCE.value().getSpec().restartType();
     }
 
     public static void onLoading(ModConfigEvent.Loading event) { refresh(event); }

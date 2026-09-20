@@ -1,5 +1,6 @@
 package io.github.brooswitminecraft.dynamicatmosphere;
 
+import net.neoforged.neoforge.common.ModConfigSpec;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -42,6 +43,11 @@ class DynamicAtmosphereConfigTest {
         assertEquals(2, first.smoke().opticalDensity());
         assertEquals(40, first.enderGas().opticalDensity());
         assertEquals(200_000, first.allocation().cellBudget());
+    }
+
+    @Test
+    void magmaBreakLavaChanceIsDeclaredLiveNotBaked() {
+        assertEquals(ModConfigSpec.RestartType.NONE, DynamicAtmosphereServerConfig.magmaBreakLavaChanceRestartType());
     }
 
     @Test

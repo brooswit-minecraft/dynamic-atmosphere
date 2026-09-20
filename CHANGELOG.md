@@ -1,7 +1,3 @@
-# 0.21.0-alpha.1
-
-Category: minor
-
 - Breaking a magma block, by any actor or mechanism (player, explosion, piston, mob, or an automated machine), now independently rolls a `magma.breakLavaChance` chance (default `0.1`) to leave a lava source at the removed position. Placing magma, or replacing magma with magma, never rolls. Config-backed and reloadable at runtime; see README's "Lava and Magma" section.
 
 # 0.20.1-alpha.1
