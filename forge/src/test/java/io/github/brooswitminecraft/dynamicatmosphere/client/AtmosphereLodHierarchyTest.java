@@ -87,17 +87,29 @@ class AtmosphereLodHierarchyTest {
     }
 
     @Test
-    void negativeCoordinatesFloorAndVerticalDistanceAlsoSelectsLod() {
+    void negativeCoordinatesFloor() {
         var tree = new AtmosphereLodHierarchy();
         seed(tree, -21, -1, -1, 1000);
-        seed(tree, 0, 20, 0, 1000);
-        var volumes = tree.select(0, 0, 0, 4, 0).volumes();
-        assertEquals(2, volumes.size());
-        assertTrue(volumes.stream().allMatch(v -> v.size() == 16));
-        var negative = volumes.stream().filter(v -> v.x < 0).findFirst().orElseThrow();
+        var negative = tree.select(0, 0, 0, 4, 0).volumes().getFirst();
+        assertEquals(16, negative.size());
         assertEquals(-96, negative.blockX());
         assertEquals(-16, negative.blockY());
         assertEquals(-16, negative.blockZ());
+    }
+
+    /** Cylindrical cull: proves both directions the definition of done requires. */
+    @Test
+    void cylindricalCullSelectsFarVerticalButCullsFarHorizontalAtTheSameDistance() {
+        var tree = new AtmosphereLodHierarchy();
+        seed(tree, 0, 10000, 0, 1000); // ~40,000 blocks straight up: must still be selected.
+        seed(tree, 10000, 0, 0, 1000); // ~40,000 blocks horizontally: must be culled.
+        var volumes = tree.select(0, 0, 0, 4, 0).volumes();
+        assertEquals(1, volumes.size(), "the far-horizontal cell must be culled, leaving only the vertical one");
+        var vertical = volumes.getFirst();
+        assertEquals(0, vertical.blockX());
+        assertEquals(0, vertical.blockZ());
+        assertEquals(40000, vertical.blockY(), "far beyond old spherical reach, but at ~0 horizontal distance");
+        assertEquals(4, vertical.size(), "horizontal distance ~0 also drives LOD detail level, not just cull");
     }
 
     @Test
@@ -158,12 +170,11 @@ class AtmosphereLodHierarchyTest {
     }
 
     @Test
-    void largeOffscreenCacheDoesNotAddGlobalRootWalksToViewSelection() {
+    void largeOffscreenCacheOnXOrZDoesNotAddGlobalRootWalksToViewSelection() {
         var tree = new AtmosphereLodHierarchy();
         seed(tree, 1, 0, 0, 1000);
         for (int i = 10000; i < 30000; i++) {
             seed(tree, i * 8, 0, 0, 1000);
-            seed(tree, 0, i * 8, 0, 1000);
             seed(tree, 0, 0, i * 8, 1000);
         }
         var selected = tree.select(0, 0, 0, 4, 0);
@@ -174,6 +185,23 @@ class AtmosphereLodHierarchyTest {
         assertFalse(tree.selectionPending());
         assertEquals(1, moved.volumes().size());
         assertTrue(tree.lastSelectionWork() < 32);
+    }
+
+    /**
+     * Cylindrical cull intentionally drops the old vertical bound: a tall column of
+     * cells directly above the camera now costs selection work roughly proportional
+     * to its height instead of being excluded outright, unlike far X/Z offsets (the
+     * test above), which stay excluded and cheap. This is the "billows up as far as
+     * it can" feature (ATMO-22), not a regression — pinned here so a future change
+     * to this cost is a deliberate decision, not a silent one.
+     */
+    @Test
+    void largeOffscreenCacheOnYIsNoLongerExcludedUnlikeXOrZ() {
+        var tree = new AtmosphereLodHierarchy();
+        seed(tree, 1, 0, 0, 1000);
+        for (int i = 10000; i < 30000; i++) seed(tree, 0, i * 8, 0, 1000);
+        var selected = tree.select(0, 0, 0, 4, 0);
+        assertTrue(selected.volumes().size() > 1, "far vertical column must now be selected, not culled by height");
     }
 
     @Test
