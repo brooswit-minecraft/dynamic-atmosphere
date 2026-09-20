@@ -14,6 +14,13 @@
 
   All seven keys stay in the same file and section they already lived in (server config, `[voidGas]`, `[slime]`, and `[heavyGas]` respectively) — only the defaults changed, not their location.
 
+# 0.20.2-alpha.1
+
+Category: patch
+
+- Release notes now carry a `Category: patch|minor|breaking` marker; a release fails fast if it is missing or invalid, instead of shipping a category-less build.
+- Every published release now sends a `repository_dispatch` to the Sickos repository, once Modrinth confirms the upload through an authenticated read-back. The dispatch is skipped with a warning when no dispatch credential is configured (no credential is configured as of 0.20.2-alpha.1), and consuming it requires a receiving workflow on Sickos's default branch.
+
 # 0.20.1-alpha.1
 
 Category: patch
