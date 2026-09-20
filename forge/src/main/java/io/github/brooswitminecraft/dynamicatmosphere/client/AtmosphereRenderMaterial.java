@@ -6,7 +6,7 @@ import io.github.brooswitminecraft.dynamicatmosphere.DynamicAtmosphereClientConf
 /** Client layout and palette. Brown/purple RGB values are presentation defaults. */
 enum AtmosphereRenderMaterial {
     VAPOR(2, 2, 0, 1), SMOKE(2, 2, 0x1F160F, 2),
-    DUST(0, 0.25, 0x8B4513, 1), ENDER_GAS(0, 0.25, 0x800080, 40),
+    DUST(0, 0.25, 0x8B4513, 1), OBSIDIAN_POWDER(0, 0.25, 0x800080, 40),
     VOID_GAS(1, 2, 0x000000, 4), EXHAUST(0, 0.25, 0xFFFF00, 1),
     SLIME(1, 2, 0x00FF00, 4);
 
@@ -37,7 +37,7 @@ enum AtmosphereRenderMaterial {
             case VOID_GAS -> config.voidGas();
             case EXHAUST -> config.exhaust();
             case SLIME -> config.slime();
-            case ENDER_GAS -> config.enderGas();
+            case OBSIDIAN_POWDER -> config.obsidianPowder();
         };
     }
 

@@ -33,7 +33,7 @@ class MaterialChunkDataTest {
         assertThrows(IllegalArgumentException.class, () -> MaterialChunkData.validate(
             AtmosphereMaterial.DUST, 0, 0, -64, 320, List.of(duplicate, duplicate)));
         assertThrows(IllegalArgumentException.class, () -> MaterialChunkData.validate(
-            AtmosphereMaterial.ENDER_GAS, 0, 0, -64, 320,
+            AtmosphereMaterial.OBSIDIAN_POWDER, 0, 0, -64, 320,
             List.of(new MaterialChunkData.Cell(16, 0, 0, 1))));
     }
 }

@@ -3,7 +3,7 @@ package io.github.brooswitminecraft.dynamicatmosphere;
 import java.util.function.DoubleSupplier;
 
 /**
- * Void Gas, Ender Gas and Slime loss once per processed simulation turn. Reuses
+ * Void Gas, Obsidian Powder and Slime loss once per processed simulation turn. Reuses
  * {@link SmokeDissipation}'s roll and {@code maxLoss} semantics at 1/factor of
  * Smoke's chance, so fade rate stays linear in the configured factor.
  */

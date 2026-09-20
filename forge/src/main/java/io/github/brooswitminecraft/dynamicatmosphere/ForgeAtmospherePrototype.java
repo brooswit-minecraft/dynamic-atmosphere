@@ -112,7 +112,7 @@ final class ForgeAtmospherePrototype {
     private final Map<AtmosphereMaterial, SmokeSyncPlanner<UUID, ResourceKey<Level>>> materialSyncPlanners =
         createMaterialSyncPlanners();
     private final DustGameplay dustGameplay = DustGameplay.create();
-    private final EnderGasGameplay enderGasGameplay = EnderGasGameplay.create();
+    private final ObsidianPowderGameplay obsidianPowderGameplay = ObsidianPowderGameplay.create();
     private final VoidGasGameplay voidGasGameplay = VoidGasGameplay.create();
     private final SlimeGameplay slimeGameplay = SlimeGameplay.create();
     private final ExhaustGameplay exhaustGameplay = ExhaustGameplay.create();
@@ -123,7 +123,7 @@ final class ForgeAtmospherePrototype {
     private final Map<AtmosphereMaterial, Long> nextMaterialProducerTicks = createMaterialProducerTicks();
 
     ForgeAtmospherePrototype() {
-        registerMaterialProducer(AtmosphereMaterial.ENDER_GAS, this::sampleEnderGasChunk);
+        registerMaterialProducer(AtmosphereMaterial.OBSIDIAN_POWDER, this::sampleObsidianPowderChunk);
         registerMaterialProducer(AtmosphereMaterial.VOID_GAS, (level, chunk) -> {
             voidGasGameplay.onLoadedChunkProducerCheck(level, chunk);
             int x = chunk.getPos().getMinBlockX() + level.random.nextInt(16);
@@ -512,14 +512,14 @@ final class ForgeAtmospherePrototype {
             .add(Objects.requireNonNull(producer, "producer"));
     }
 
-    private void sampleEnderGasChunk(ServerLevel level, LevelChunk chunk) {
-        enderGasGameplay.onLoadedChunkProducerCheck(level, chunk);
+    private void sampleObsidianPowderChunk(ServerLevel level, LevelChunk chunk) {
+        obsidianPowderGameplay.onLoadedChunkProducerCheck(level, chunk);
         int x = chunk.getPos().getMinBlockX() + level.random.nextInt(16);
         int z = chunk.getPos().getMinBlockZ() + level.random.nextInt(16);
         int y = level.getMinBuildHeight()
             + level.random.nextInt(level.getMaxBuildHeight() - level.getMinBuildHeight());
         BlockPos sample = new BlockPos(x, y, z);
-        enderGasGameplay.onPassiveBlockSample(level, sample, chunk.getBlockState(sample));
+        obsidianPowderGameplay.onPassiveBlockSample(level, sample, chunk.getBlockState(sample));
     }
 
     private boolean isMaterialProducerChunkActive(
@@ -730,7 +730,7 @@ final class ForgeAtmospherePrototype {
                     slimeGameplay.onProcessedCell(cellLevel, origin);
                     dissipateHeavyGas(cellLevel, materialGrid, key, capacityAt);
                 }
-                if (material == AtmosphereMaterial.ENDER_GAS) {
+                if (material == AtmosphereMaterial.OBSIDIAN_POWDER) {
                     dissipateHeavyGas(cellLevel, materialGrid, key, capacityAt);
                 }
                 if (material == AtmosphereMaterial.EXHAUST) {
@@ -775,7 +775,7 @@ final class ForgeAtmospherePrototype {
         }
     }
 
-    /** Void Gas, Ender Gas and Slime dissipation, shared via {@link HeavyGasDissipation}. */
+    /** Void Gas, Obsidian Powder and Slime dissipation, shared via {@link HeavyGasDissipation}. */
     private void dissipateHeavyGas(
         ServerLevel level,
         AtmosphereGrid<ResourceKey<Level>> materialGrid,
@@ -792,7 +792,7 @@ final class ForgeAtmospherePrototype {
     }
 
     DustGameplay dustGameplay() { return dustGameplay; }
-    EnderGasGameplay enderGasGameplay() { return enderGasGameplay; }
+    ObsidianPowderGameplay obsidianPowderGameplay() { return obsidianPowderGameplay; }
     VoidGasGameplay voidGasGameplay() { return voidGasGameplay; }
     ExhaustGameplay exhaustGameplay() { return exhaustGameplay; }
 
