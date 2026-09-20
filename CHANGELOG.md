@@ -1,7 +1,3 @@
-# 0.21.0-alpha.1
-
-Category: minor
-
 - The new obsidian route (ATMO-23): lava beside or above packed ice turns the packed ice into ice and the lava into obsidian; lava beside or above blue ice turns the blue ice into packed ice and the lava into obsidian. Exception: blue ice directly above soul soil still makes basalt — vanilla basalt generation is unchanged and takes precedence. Lava beside or above ice turns the ice into water and the lava into magma — both fluids are consumed. Registered via three `FluidInteractionRegistry.addInteraction` entries; no mixins added or changed. See README for the adjacency rule (beside/above, never below).
 
 # 0.20.1-alpha.1
