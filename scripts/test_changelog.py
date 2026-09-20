@@ -25,6 +25,29 @@ Category: breaking
 - Older section, no marker.
 """
 
+FENCED_FIXTURE = """# 0.21.0-alpha.1
+
+Category: breaking
+
+- Some feature bullet.
+
+## Migration
+
+Run the following before upgrading:
+
+```
+# comment inside the fence, not a real heading
+## also not a real heading
+echo done
+```
+
+- Back up your world first.
+
+# 0.20.0-alpha.1
+
+- Older section, no marker.
+"""
+
 
 class ExtractSectionTest(unittest.TestCase):
     def test_extracts_only_the_named_section(self):
@@ -36,6 +59,26 @@ class ExtractSectionTest(unittest.TestCase):
     def test_missing_version_raises(self):
         with self.assertRaises(ValueError):
             changelog.extract_section(ATMO7_FIXTURE, "9.9.9")
+
+
+class FencedCodeHeadingTest(unittest.TestCase):
+    """A `#`/`##` line inside a fenced code block is not a real heading."""
+
+    def test_section_survives_fenced_hash_comments(self):
+        section = changelog.extract_section(FENCED_FIXTURE, "0.21.0-alpha.1")
+        self.assertTrue(section.startswith("# 0.21.0-alpha.1"))
+        self.assertIn("Back up your world first.", section)
+        self.assertNotIn("0.20.0-alpha.1", section)
+
+    def test_migration_body_survives_fenced_hash_comments(self):
+        section = changelog.extract_section(FENCED_FIXTURE, "0.21.0-alpha.1")
+        category, section_text = changelog.validate_section(FENCED_FIXTURE, "0.21.0-alpha.1")
+        self.assertEqual(category, "breaking")
+        notes = changelog.build_release_notes(section_text, category)
+        self.assertIn("# comment inside the fence, not a real heading", notes)
+        self.assertIn("## also not a real heading", notes)
+        self.assertIn("Back up your world first.", notes)
+        self.assertIn(section, notes)
 
 
 class ParseCategoryTest(unittest.TestCase):

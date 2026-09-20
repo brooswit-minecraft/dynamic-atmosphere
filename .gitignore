@@ -8,7 +8,6 @@ build/
 run/
 runs/
 .neoforge/
-forge/logs/
 
 # IDE
 .idea/

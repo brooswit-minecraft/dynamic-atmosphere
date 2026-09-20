@@ -14,7 +14,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 USER_AGENT = "brooswit-minecraft/dynamic-atmosphere-release"
@@ -49,7 +49,24 @@ def verify(project_id, version, artifact, token, *, attempts=5, delay_seconds=5,
     last_error = "Modrinth read-back never ran."
 
     for attempt in range(1, attempts + 1):
-        record = lookup_version_file(sha512, token, fetch)
+        try:
+            record = lookup_version_file(sha512, token, fetch)
+        except HTTPError as error:
+            if error.code in (401, 403):
+                raise SystemExit(
+                    f"::error::Modrinth read-back failed: HTTP {error.code} from "
+                    f"Modrinth ({error.reason}); not retrying."
+                )
+            last_error = f"HTTP {error.code} from Modrinth: {error.reason}"
+            if attempt < attempts:
+                sleep(delay_seconds)
+            continue
+        except (URLError, TimeoutError) as error:
+            last_error = f"network error contacting Modrinth: {error}"
+            if attempt < attempts:
+                sleep(delay_seconds)
+            continue
+
         if record is None:
             last_error = f"no version_file match yet for sha512 {sha512[:12]}..."
         elif record.get("project_id") != project_id:

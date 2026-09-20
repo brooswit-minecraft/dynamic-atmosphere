@@ -18,6 +18,37 @@ _TOP_HEADING = re.compile(r"^# (.+?)\s*$", re.MULTILINE)
 _CATEGORY_LINE = re.compile(r"^Category:[ \t]*(\S*)[ \t]*$", re.MULTILINE)
 _MIGRATION_HEADING = re.compile(r"^## Migration[ \t]*$", re.MULTILINE)
 _ANY_HEADING = re.compile(r"^#{1,2} ", re.MULTILINE)
+_FENCE_LINE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})[^\n]*$", re.MULTILINE)
+
+
+def _fenced_ranges(text):
+    """Return (start, end) char ranges covering the interior of fenced code blocks.
+
+    A fence opens on a ``` or ~~~ line (3+ of the same character, optionally
+    indented up to 3 spaces) and closes on the next such line using the same
+    character with at least as many repeats, matching CommonMark. An
+    unterminated fence runs to the end of the text.
+    """
+    ranges = []
+    open_char = open_len = interior_start = None
+    for fence in _FENCE_LINE.finditer(text):
+        marker, length = fence.group(1)[0], len(fence.group(1))
+        if open_char is None:
+            open_char, open_len, interior_start = marker, length, fence.end() + 1
+        elif marker == open_char and length >= open_len:
+            ranges.append((interior_start, fence.start()))
+            open_char = open_len = interior_start = None
+    if open_char is not None:
+        ranges.append((interior_start, len(text)))
+    return ranges
+
+
+def _unfenced_matches(pattern, text, pos=0):
+    """Yield `pattern` matches in `text` from `pos`, skipping fenced code blocks."""
+    ranges = _fenced_ranges(text)
+    for match in pattern.finditer(text, pos):
+        if not any(start <= match.start() < end for start, end in ranges):
+            yield match
 
 
 def extract_section(changelog_text, version):
@@ -29,14 +60,14 @@ def extract_section(changelog_text, version):
     """
     changelog_text = changelog_text.replace("\r\n", "\n").replace("\r", "\n")
     match = None
-    for candidate in _TOP_HEADING.finditer(changelog_text):
+    for candidate in _unfenced_matches(_TOP_HEADING, changelog_text):
         if candidate.group(1) == version:
             match = candidate
             break
     if match is None:
         raise ValueError(f"No CHANGELOG.md section found for version {version!r}.")
     start = match.start()
-    next_heading = _TOP_HEADING.search(changelog_text, match.end())
+    next_heading = next(_unfenced_matches(_TOP_HEADING, changelog_text, match.end()), None)
     end = next_heading.start() if next_heading else len(changelog_text)
     return changelog_text[start:end].rstrip("\n")
 
@@ -60,10 +91,10 @@ def parse_category(section_text):
 
 
 def _migration_body(section_text):
-    heading = _MIGRATION_HEADING.search(section_text)
+    heading = next(_unfenced_matches(_MIGRATION_HEADING, section_text), None)
     if heading is None:
         return None
-    next_heading = _ANY_HEADING.search(section_text, heading.end())
+    next_heading = next(_unfenced_matches(_ANY_HEADING, section_text, heading.end()), None)
     end = next_heading.start() if next_heading else len(section_text)
     return section_text[heading.end():end]
 
