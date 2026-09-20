@@ -25,7 +25,7 @@ class AtmosphericMaterialsTest {
 
     @Test
     void catalogMatchesTheUniformCellSizeAndIndependentColorsAndSimulationSpeeds() {
-        assertEquals(List.of("vapor", "dust", "smoke", "void_gas", "exhaust", "slime", "ender_gas"),
+        assertEquals(List.of("vapor", "dust", "smoke", "void_gas", "exhaust", "slime", "obsidian_powder"),
             AtmosphericMaterials.ALL.stream().map(MaterialDefinition::id).toList());
         assertEquals(java.util.Collections.nCopies(7, 4),
             AtmosphericMaterials.ALL.stream().map(m -> m.settings().cellSize()).toList());
@@ -66,7 +66,7 @@ class AtmosphericMaterialsTest {
         assertEquals(Set.of(MaterialDefinition.Transformation.WATER), AtmosphericMaterials.VAPOR.transformations());
         assertTrue(AtmosphericMaterials.SMOKE.transformations().isEmpty());
         assertTrue(AtmosphericMaterials.EXHAUST.transformations().isEmpty());
-        assertTrue(AtmosphericMaterials.ENDER_GAS.transformations().isEmpty());
+        assertTrue(AtmosphericMaterials.OBSIDIAN_POWDER.transformations().isEmpty());
     }
 
     @Test
@@ -106,7 +106,7 @@ class AtmosphericMaterialsTest {
 
     @Test
     void rejectsInvalidMaterialIdentityAndMissingSettings() {
-        for (String id : List.of("", "Ender Gas", "../vapor")) {
+        for (String id : List.of("", "Obsidian Powder", "../vapor")) {
             assertThrows(IllegalArgumentException.class, () -> new MaterialDefinition(id,
                 MaterialDefinition.Color.CURRENT_FOG, AtmosphericMaterials.VAPOR.settings(), Set.of(), Set.of()));
         }

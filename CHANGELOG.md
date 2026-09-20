@@ -14,6 +14,30 @@
 
   All seven keys stay in the same file and section they already lived in (server config, `[voidGas]`, `[slime]`, and `[heavyGas]` respectively) — only the defaults changed, not their location.
 
+- Rename Ender Gas to Obsidian Powder (ATMO-25/ATMO-38), behavior unchanged: the material/registry id `ender_gas` becomes `obsidian_powder`; the `AtmosphereMaterial`/`AtmosphereRenderMaterial` enum constant `ENDER_GAS` is renamed in place to `OBSIDIAN_POWDER` on both server and client, so its ordinal (and the StreamCodec wire encoding built on that ordinal) is unchanged — no protocol or save-format bump. Every `enderGas.*` server config key and the client `enderGasReachMultiplier`/`enderGasOpticalDensity` keys are renamed to `obsidianPowder.*` (table below); no value changes except where noted. `EnderGasGameplay`/`EnderGasGameplayTest` are renamed to `ObsidianPowderGameplay`/`ObsidianPowderGameplayTest`, and `DUST-ENDER-GAS-GAMEPLAY.md` is renamed to `DUST-OBSIDIAN-POWDER-GAMEPLAY.md`. Identifiers describing the *ender mob/pearl/portal* sources (`isEnderMob`, `EnderMan`, `ender_chest`, etc.) are unchanged — only the material's own name moves. Optical density (`obsidianPowderOpticalDensity`, still 40) and the material's colour (still `0x800080`) are unchanged; a later story changes the density value. **Saves:** `ForgeMaterialStorage` keys per-material NBT by `material.id()` and silently skips ids it doesn't recognize on load, so existing worlds lose their stored Ender Gas the first time they load on this version — no migration, no crash. This is accepted, matching the precedent of the earlier violence→Void Gas rename.
+
+  | Old key | New key | File |
+  | --- | --- | --- |
+  | `enderGas.mobEmission` | `obsidianPowder.mobEmission` | `dynamicatmosphere-server.toml` |
+  | `enderGas.portalOccupantEmission` | `obsidianPowder.portalOccupantEmission` | `dynamicatmosphere-server.toml` |
+  | `enderGas.portalBlockEmission` | `obsidianPowder.portalBlockEmission` | `dynamicatmosphere-server.toml` |
+  | `enderGas.passiveBlockEmission` | `obsidianPowder.passiveBlockEmission` | `dynamicatmosphere-server.toml` |
+  | `enderGas.pearlUseEmission` | `obsidianPowder.pearlUseEmission` | `dynamicatmosphere-server.toml` |
+  | `enderGas.pearlImpactEmission` | `obsidianPowder.pearlImpactEmission` | `dynamicatmosphere-server.toml` |
+  | `enderGas.mobIntervalTicks` | `obsidianPowder.mobIntervalTicks` | `dynamicatmosphere-server.toml` |
+  | `enderGas.portalIntervalTicks` | `obsidianPowder.portalIntervalTicks` | `dynamicatmosphere-server.toml` |
+  | `enderGasReachMultiplier` | `obsidianPowderReachMultiplier` | `dynamicatmosphere-client.toml` |
+  | `enderGasOpticalDensity` | `obsidianPowderOpticalDensity` | `dynamicatmosphere-client.toml` |
+
+- Add two new Obsidian Powder passive sources, each with its own server config key (ATMO-25/ATMO-38): plain `minecraft:obsidian` is a genuinely new passive source (it was not in the passive set before), emitting a little; Crying Obsidian was already a passive source but shared the general `obsidianPowder.passiveBlockEmission` key (default 1) — it is now split out onto its own key with a much larger default, since it is meant to be a strong source. The remaining passive blocks (Nether portal sampling aside — that already has its own `portalBlockEmission` key — plus Ender chest, soul torch/wall torch, soul fire, soul sand) keep sharing `passiveBlockEmission`, unchanged.
+
+  | Key | File | Default | Range |
+  | --- | --- | --- | --- |
+  | `obsidianPowder.obsidianEmission` | `dynamicatmosphere-server.toml` | 1 | 0-1,000,000 |
+  | `obsidianPowder.cryingObsidianEmission` | `dynamicatmosphere-server.toml` | 32 | 0-1,000,000 |
+
+  Reasoning: `obsidianEmission` is kept at the same order of magnitude as the existing shared passive default (1) since plain obsidian is only meant to be a faint ambient source. `cryingObsidianEmission` is set to 32 — the ticket's suggested "massively increased" starting point — putting it above the mob (1), portal-occupancy (2), and shared-passive (1) sources but still well below the pearl-impact (48) and portal-block (100) bursts, and consistent with the scale of the C1 Void Gas/Slime amplification above (defaults moved into the tens/hundreds range). Both keys use `RestartType.NONE` like the rest of server config.
+
 # 0.20.1-alpha.1
 
 Category: patch

@@ -20,7 +20,7 @@ not a claim of balance or measured performance.
 | Vapor | 4 blocks | 200 ticks | Minecraft fog/horizon | 1x |
 | Smoke | 4 blocks | 200 ticks | Very dark brown (0x1F160F) | 2x |
 | Dust | 4 blocks | 200 ticks | Brown | 1x |
-| Ender Gas | 4 blocks | 200 ticks | Purple | 40x |
+| Obsidian Powder | 4 blocks | 200 ticks | Purple | 40x |
 | Void Gas | 4 blocks | 200 ticks | Black | 4x |
 | Exhaust | 4 blocks | 200 ticks | Yellow | 1x |
 | Slime | 4 blocks | 200 ticks | Green | 4x |
@@ -54,11 +54,11 @@ the exact total stored Smoke mass; migrated chunks are saved in the new format.
   can place gravel in air, consuming 25% of current Dust on successful placement,
   rounded down with a minimum of 1 unit.
   Independently, a 1/64 processed-turn roll dissipates up to 40 Dust units.
-- **Ender Gas:** Endermen, endermites, the Ender Dragon, witches, shulkers, ender
+- **Obsidian Powder:** Endermen, endermites, the Ender Dragon, witches, shulkers, ender
   chests, portals/portal occupants, soul torches/fire/sand, Crying Obsidian, and ender-pearl use and
   impact are sources. Pearl use adds 24 and impact 48. Random full-moon bursts
   have been removed; only source-driven emissions remain.
-  Ender Gas never gates spawning. Overworld monsters, including Endermen,
+  Obsidian Powder never gates spawning. Overworld monsters, including Endermen,
   follow the Vapor (fog) spawn rule; Nether and End monster spawns follow
   vanilla rules.
 - **Void Gas:** hostile mob deaths add 40, sampled netherrack adds 2, and a
@@ -156,7 +156,7 @@ enough room; it never creates pressure overflow.
 Let V be Minecraft's effective client view distance in blocks:
 - Vapor and Smoke: base cells through V/2, 2x through V, 4x through 2V; nothing beyond.
 - Void Gas and Slime: base cells through V, 2x through 2V; nothing beyond.
-- Dust, Exhaust, and Ender Gas: base cells through V/4 only; nothing beyond.
+- Dust, Exhaust, and Obsidian Powder: base cells through V/4 only; nothing beyond.
 
 Coarse volumes recursively average eight children, including empty volumes.
 Parent/child coverage never overlaps; aligned boundary volumes may remain finer.
@@ -171,7 +171,7 @@ shortcut. Aggregation, cutoffs, and thickness-integrated density remain unchange
 Mixed-color slices share back-to-front ordering and bounded GPU batches.
 Vapor uses current Minecraft fog RGB; the other six use their listed colors.
 Void Gas and Slime use 4x optical density and Smoke 2x before thickness-integrated
-alpha; Ender Gas uses 40x. Density does not change stored fullness, capacity, or
+alpha; Obsidian Powder uses 40x. Density does not change stored fullness, capacity, or
 gameplay. Vapor-only frames retain their constant-color unsorted path. No measured
 FPS improvement is claimed.
 
@@ -191,7 +191,7 @@ and frustum. Delta sync is every 20 ticks and full snapshots every 200.
 ## Create Fans and Configuration
 
 Fans affect cells up to 4x4x4, which now covers every material: Vapor, Smoke,
-Dust, Exhaust, Ender Gas, Void Gas, and Slime. Void Gas and Slime previously used
+Dust, Exhaust, Obsidian Powder, Void Gas, and Slime. Void Gas and Slime previously used
 larger cells and were unaffected; they are fan-transportable as of `0.20.0-alpha.1`.
 
 With Create installed, positive-RPM Encased Fans first draw evenly from their five
@@ -213,7 +213,7 @@ downward barriers still bound transfer. At 256 RPM, each pass requests up to 256
 of intake and 256 units of output per supported material.
 
 Portal sections are palette-filtered and scanned for every portal block, emitting
-on both faces. `enderGas.portalBlockEmission` defaults to 100 per block per producer
+on both faces. `obsidianPowder.portalBlockEmission` defaults to 100 per block per producer
 pass; zero disables it. `runtime.simulationSkipChance` defaults to 0.75 for all
 seven materials, replacing the old Vapor-only setting.
 
@@ -235,7 +235,7 @@ single-player instance. **Protocol 10 requires both sides to update together;
 earlier protocols are incompatible.** No extra graphics dependency is required.
 World identity, scoped snapshots, and chunk freshness distinguish live state from
 visual history. Vapor and Smoke world data and the Vapor cache are retained.
-Dust, Ender Gas, Exhaust, Void Gas, and Slime data saved before `0.20.0-alpha.1`
+Dust, Obsidian Powder, Exhaust, Void Gas, and Slime data saved before `0.20.0-alpha.1`
 is discarded on load and starts empty in already-saved chunks, accumulating
 normally from there; no manual world reset is needed.
 

@@ -52,22 +52,22 @@ class MaterialCapacityCacheTest {
     }
 
     @Test
-    void dustAndEnderKeepSeparateCachesDespiteSharingCellCoordinates() {
+    void dustAndObsidianPowderKeepSeparateCachesDespiteSharingCellCoordinates() {
         var dust = new MaterialCapacityCache(AtmosphereMaterial.DUST, -64, 320);
-        var ender = new MaterialCapacityCache(AtmosphereMaterial.ENDER_GAS, -64, 320);
+        var obsidian = new MaterialCapacityCache(AtmosphereMaterial.OBSIDIAN_POWDER, -64, 320);
         dust.put(7, 32, 7, 500, false);
-        ender.put(7, 32, 7, 1000, false);
+        obsidian.put(7, 32, 7, 1000, false);
 
         dust.blockChanged(31, 128, 31, true, false, false, false);
-        ender.blockChanged(31, 128, 31, true, false, false, false);
+        obsidian.blockChanged(31, 128, 31, true, false, false, false);
 
         assertEquals(-1, dust.get(7, 32, 7));
-        assertEquals(-1, ender.get(7, 32, 7));
+        assertEquals(-1, obsidian.get(7, 32, 7));
     }
 
     @Test
     void bedrockChangeInvalidatesWithoutAirCapacityChange() {
-        var cache = new MaterialCapacityCache(AtmosphereMaterial.ENDER_GAS, -64, 320);
+        var cache = new MaterialCapacityCache(AtmosphereMaterial.OBSIDIAN_POWDER, -64, 320);
         cache.put(0, 0, 0, 0, false);
 
         cache.blockChanged(0, 0, 0, false, false, false, true);

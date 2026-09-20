@@ -26,22 +26,22 @@ import net.neoforged.neoforge.event.entity.ProjectileImpactEvent;
 import net.neoforged.neoforge.event.tick.EntityTickEvent;
 
 /**
- * Bounded Ender Gas producers. Passive blocks and palette-filtered portal sections
+ * Bounded Obsidian Powder producers. Passive blocks and palette-filtered portal sections
  * are checked only from the loaded-chunk producer schedule; no chunks are requested.
  *
  * <p>Conservative MVP amounts: listed mobs 1/40 ticks, portal occupancy 2/20
- * ticks, passive source sample 1, pearl use 24, pearl impact 48, and 100 per portal
- * block per scheduled producer pass. Random sky bursts are not produced.</p>
+ * ticks, shared passive source sample 1, plain obsidian 1, crying obsidian 32,
+ * pearl use 24, pearl impact 48, and 100 per portal block per scheduled producer
+ * pass. Random sky bursts are not produced.</p>
  */
-public final class EnderGasGameplay {
+public final class ObsidianPowderGameplay {
     private static final Set<ResourceLocation> PASSIVE_SOURCE_IDS = Set.of(
         ResourceLocation.withDefaultNamespace("nether_portal"),
         ResourceLocation.withDefaultNamespace("ender_chest"),
         ResourceLocation.withDefaultNamespace("soul_torch"),
         ResourceLocation.withDefaultNamespace("soul_wall_torch"),
         ResourceLocation.withDefaultNamespace("soul_fire"),
-        ResourceLocation.withDefaultNamespace("soul_sand"),
-        ResourceLocation.withDefaultNamespace("crying_obsidian")
+        ResourceLocation.withDefaultNamespace("soul_sand")
     );
     static final int MOB_AMOUNT = 1;
     static final int PORTAL_OCCUPANT_AMOUNT = 2;
@@ -66,10 +66,20 @@ public final class EnderGasGameplay {
         return PASSIVE_SOURCE_IDS.contains(id);
     }
 
+    /** Which config key, if any, a sampled passive block reads its emission amount from. */
+    enum PassiveEmissionKey { CRYING_OBSIDIAN, OBSIDIAN, SHARED, NONE }
+
+    static PassiveEmissionKey passiveEmissionKey(BlockState state) {
+        if (state.is(Blocks.CRYING_OBSIDIAN)) return PassiveEmissionKey.CRYING_OBSIDIAN;
+        if (state.is(Blocks.OBSIDIAN)) return PassiveEmissionKey.OBSIDIAN;
+        if (isPassiveSource(state) && !state.is(Blocks.NETHER_PORTAL)) return PassiveEmissionKey.SHARED;
+        return PassiveEmissionKey.NONE;
+    }
+
     public void onEntityTick(EntityTickEvent.Post event) {
         Entity entity = event.getEntity();
         if (!(entity.level() instanceof ServerLevel level)) return;
-        DynamicAtmosphereServerConfig.EnderGas config = DynamicAtmosphereServerConfig.snapshot().enderGas();
+        DynamicAtmosphereServerConfig.ObsidianPowder config = DynamicAtmosphereServerConfig.snapshot().obsidianPowder();
         long tick = level.getGameTime();
         int amount = 0;
         if (isEnderMob(entity) && Math.floorMod(tick + entity.getId(), config.mobIntervalTicks()) == 0) {
@@ -80,28 +90,38 @@ public final class EnderGasGameplay {
             amount += config.portalOccupantEmission();
         }
         if (amount > 0) {
-            DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.ENDER_GAS, entity.blockPosition(), amount);
+            DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.OBSIDIAN_POWDER, entity.blockPosition(), amount);
         }
     }
 
-    /** Called by the bounded producer schedule for a position it already selected in a loaded chunk. */
+    /**
+     * Called by the bounded producer schedule for a position it already selected in a loaded chunk.
+     * Crying obsidian and plain obsidian each read their own config key; neither shares
+     * {@code passiveBlockEmission} with the rest of the passive set.
+     */
     public void onPassiveBlockSample(ServerLevel level, BlockPos pos, BlockState state) {
-        if (isPassiveSource(state) && !state.is(Blocks.NETHER_PORTAL)) {
-            DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.ENDER_GAS, pos,
-                DynamicAtmosphereServerConfig.snapshot().enderGas().passiveBlockEmission());
-        }
+        DynamicAtmosphereServerConfig.ObsidianPowder config = DynamicAtmosphereServerConfig.snapshot().obsidianPowder();
+        PassiveEmissionKey key = passiveEmissionKey(state);
+        if (key == PassiveEmissionKey.NONE) return;
+        int amount = switch (key) {
+            case CRYING_OBSIDIAN -> config.cryingObsidianEmission();
+            case OBSIDIAN -> config.obsidianEmission();
+            case SHARED -> config.passiveBlockEmission();
+            case NONE -> throw new AssertionError();
+        };
+        DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.OBSIDIAN_POWDER, pos, amount);
     }
 
     /** Called once for each loaded chunk selected by the bounded producer schedule. */
     public void onLoadedChunkProducerCheck(ServerLevel level, LevelChunk chunk) {
-        DynamicAtmosphereServerConfig.EnderGas config = DynamicAtmosphereServerConfig.snapshot().enderGas();
+        DynamicAtmosphereServerConfig.ObsidianPowder config = DynamicAtmosphereServerConfig.snapshot().obsidianPowder();
         emitPortals(level, chunk, config.portalBlockEmission());
     }
 
     public void onEntityJoin(EntityJoinLevelEvent event) {
         if (event.getEntity() instanceof ThrownEnderpearl pearl && event.getLevel() instanceof ServerLevel level) {
-            DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.ENDER_GAS,
-                pearl.blockPosition(), DynamicAtmosphereServerConfig.snapshot().enderGas().pearlUseEmission());
+            DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.OBSIDIAN_POWDER,
+                pearl.blockPosition(), DynamicAtmosphereServerConfig.snapshot().obsidianPowder().pearlUseEmission());
         }
     }
 
@@ -110,16 +130,16 @@ public final class EnderGasGameplay {
             || !(pearl.level() instanceof ServerLevel level) || !impactedPearls.add(pearl.getUUID())) {
             return;
         }
-        DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.ENDER_GAS,
+        DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.OBSIDIAN_POWDER,
             BlockPos.containing(event.getRayTraceResult().getLocation()),
-            DynamicAtmosphereServerConfig.snapshot().enderGas().pearlImpactEmission());
+            DynamicAtmosphereServerConfig.snapshot().obsidianPowder().pearlImpactEmission());
     }
 
     public void onEntityLeave(EntityLeaveLevelEvent event) {
         if (event.getEntity() instanceof ThrownEnderpearl) impactedPearls.remove(event.getEntity().getUUID());
     }
 
-    private EnderGasGameplay() { }
+    private ObsidianPowderGameplay() { }
 
     static Direction portalNormal(Direction.Axis axis) {
         return axis == Direction.Axis.X ? Direction.NORTH : Direction.EAST;
@@ -139,13 +159,13 @@ public final class EnderGasGameplay {
                 var pos = new BlockPos(chunk.getPos().getMinBlockX() + x, baseY + y, chunk.getPos().getMinBlockZ() + z);
                 Direction normal = portalNormal(state.getValue(NetherPortalBlock.AXIS));
                 // Emit on portal faces, where neighboring air provides capacity.
-                DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.ENDER_GAS,
+                DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.OBSIDIAN_POWDER,
                     pos.relative(normal), amount / 2);
-                DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.ENDER_GAS,
+                DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.OBSIDIAN_POWDER,
                     pos.relative(normal.getOpposite()), amount - amount / 2);
             }
         }
     }
 
-    public static EnderGasGameplay create() { return new EnderGasGameplay(); }
+    public static ObsidianPowderGameplay create() { return new ObsidianPowderGameplay(); }
 }

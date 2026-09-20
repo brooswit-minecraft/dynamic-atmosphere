@@ -26,8 +26,8 @@ public final class DynamicAtmosphereClientConfig {
     private static final DoubleOption EXHAUST_DENSITY;
     private static final DoubleOption SLIME_REACH;
     private static final DoubleOption SLIME_DENSITY;
-    private static final DoubleOption ENDER_GAS_REACH;
-    private static final DoubleOption ENDER_GAS_DENSITY;
+    private static final DoubleOption OBSIDIAN_POWDER_REACH;
+    private static final DoubleOption OBSIDIAN_POWDER_DENSITY;
 
     private static final IntOption CELL_BUDGET;
     private static volatile Snapshot cached;
@@ -55,8 +55,8 @@ public final class DynamicAtmosphereClientConfig {
         EXHAUST_DENSITY = decimal(builder, "exhaustOpticalDensity", 1, 0, 1000);
         SLIME_REACH = decimal(builder, "slimeReachMultiplier", 2, 0.25, 4);
         SLIME_DENSITY = decimal(builder, "slimeOpticalDensity", 4, 0, 1000);
-        ENDER_GAS_REACH = decimal(builder, "enderGasReachMultiplier", 0.25, 0.25, 4);
-        ENDER_GAS_DENSITY = decimal(builder, "enderGasOpticalDensity", 40, 0, 1000);
+        OBSIDIAN_POWDER_REACH = decimal(builder, "obsidianPowderReachMultiplier", 0.25, 0.25, 4);
+        OBSIDIAN_POWDER_DENSITY = decimal(builder, "obsidianPowderOpticalDensity", 40, 0, 1000);
         builder.pop();
 
         builder.push("allocation");
@@ -88,7 +88,7 @@ public final class DynamicAtmosphereClientConfig {
             new Material(VOID_GAS_REACH.get(), VOID_GAS_DENSITY.get()),
             new Material(EXHAUST_REACH.get(), EXHAUST_DENSITY.get()),
             new Material(SLIME_REACH.get(), SLIME_DENSITY.get()),
-            new Material(ENDER_GAS_REACH.get(), ENDER_GAS_DENSITY.get()),
+            new Material(OBSIDIAN_POWDER_REACH.get(), OBSIDIAN_POWDER_DENSITY.get()),
             new Allocation(CELL_BUDGET.get())
         );
     }
@@ -156,7 +156,7 @@ public final class DynamicAtmosphereClientConfig {
     public record Snapshot(boolean enabled, int slicesPerBaseCell, int transitionTicks,
                            int selectionWorkPerTick, int slicesPerBatch, Material vapor, Material smoke,
                            Material dust, Material voidGas, Material exhaust, Material slime,
-                           Material enderGas, Allocation allocation) { }
+                           Material obsidianPowder, Allocation allocation) { }
     public record Material(double reachMultiplier, double opticalDensity) { }
     public record Allocation(int cellBudget) { }
 
