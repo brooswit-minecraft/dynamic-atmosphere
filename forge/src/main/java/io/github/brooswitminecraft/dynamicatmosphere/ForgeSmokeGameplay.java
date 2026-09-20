@@ -38,6 +38,21 @@ public final class ForgeSmokeGameplay {
         if (vapor > 0) enqueue(level, pos, vapor, false);
     }
 
+    /**
+     * Direct lava-removal Smoke emission for a conversion whose actual lava-removal position is decided by
+     * this mod rather than diffed from a single {@code LevelChunk.setBlockState} call — namely
+     * {@code LavaWaterMagmaGameplay}'s {@code FluidPlaceBlockEvent} listener (ATMO-35), which always runs
+     * synchronously inside a {@code FlowingFluid.tick} scope, where {@link ForgeSmokeSources#transition}'s own
+     * before/after diff is unconditionally suppressed by {@link AtmosphereFluidTransport#active()}. That
+     * suppression exists to silence routine fluid-tick noise; it does not apply here, since this call site
+     * already knows lava was actually removed at {@code pos}.
+     */
+    public static void lavaRemoved(ServerLevel level, BlockPos pos) {
+        if (!level.getServer().isSameThread()) return;
+        int smoke = SmokeProducerRules.transition(true, false, false, true, false, false);
+        if (smoke > 0) enqueue(level, pos, smoke, true);
+    }
+
     public static void explosionBurst(Level level, BlockPos pos) {
         if (level instanceof ServerLevel server && server.getServer().isSameThread()) {
             enqueue(server, pos, SmokeProducerRules.explosionBurst(true), true);

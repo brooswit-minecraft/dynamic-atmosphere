@@ -1,3 +1,11 @@
+# 0.21.0-alpha.1
+
+Category: minor
+
+- Lava touching water no longer makes obsidian, cobblestone or stone — it makes magma, and the water is consumed too.
+- Automated stone/cobble/obsidian generation stops working, because the water source is now consumed rather than persisting.
+- These conversions emit smoke. That is deliberate — it marks a conversion from a distance — not a bug.
+
 # 0.20.1-alpha.1
 
 Category: patch
