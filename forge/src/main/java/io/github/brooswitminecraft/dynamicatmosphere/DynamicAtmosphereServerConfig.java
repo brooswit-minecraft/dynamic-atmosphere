@@ -102,6 +102,8 @@ public final class DynamicAtmosphereServerConfig {
     private static final DoubleOption CREATE_FAN_RPM_COEFFICIENT;
     private static final IntOption CREATE_FAN_INTERVAL;
     private static final IntOption CREATE_FAN_CHUNK_BUDGET;
+
+    private static final DoubleOption MAGMA_BREAK_LAVA_CHANCE;
     private static volatile Snapshot cached;
 
     static {
@@ -225,6 +227,11 @@ public final class DynamicAtmosphereServerConfig {
         CREATE_FAN_INTERVAL = integer(builder, "createFanIntervalTicks", 100, 1, 72000);
         CREATE_FAN_CHUNK_BUDGET = integer(builder, "maxFanChunksPerTick", 32, 1, 10000);
         builder.pop();
+
+        builder.push("magma");
+        // Chance a removed magma block leaves a lava source; read fresh each roll, no restart needed.
+        MAGMA_BREAK_LAVA_CHANCE = decimal(builder, "breakLavaChance", 0.1, 0, 1);
+        builder.pop();
         SPEC = builder.build();
         cached = readSnapshot();
     }
@@ -271,7 +278,8 @@ public final class DynamicAtmosphereServerConfig {
                 ENDER_PORTAL_INTERVAL.get(), ENDER_PORTAL_BLOCK.get()),
             new PlantGrowth(PLANT_CHANCE.get(), PLANT_COST.get()),
             new Integrations(CREATE_FAN_RPM_COEFFICIENT.get(), CREATE_FAN_INTERVAL.get(), CREATE_FAN_CHUNK_BUDGET.get()),
-            new HeavyGas(HEAVY_GAS_DISSIPATION_FACTOR.get())
+            new HeavyGas(HEAVY_GAS_DISSIPATION_FACTOR.get()),
+            new Magma(MAGMA_BREAK_LAVA_CHANCE.get())
         );
     }
 
@@ -315,7 +323,7 @@ public final class DynamicAtmosphereServerConfig {
 
     public record Snapshot(RuntimeTuning runtime, Vapor vapor, Smoke smoke, Dust dust, VoidGas voidGas,
                            Exhaust exhaust, Slime slime, EnderGas enderGas, PlantGrowth plantGrowth,
-                           Integrations integrations, HeavyGas heavyGas) { }
+                           Integrations integrations, HeavyGas heavyGas, Magma magma) { }
     public record RuntimeTuning(int syncIntervalTicks, int fullSnapshotIntervalTicks,
                                 int simulationIntervalTicks, int producerIntervalTicks,
                                 int maxChunkImportsPerTick, int maxProducerChunksPerTick,
@@ -361,6 +369,7 @@ public final class DynamicAtmosphereServerConfig {
                                int maxFanChunksPerTick) { }
     /** Shared by Void Gas, Ender Gas and Slime: their dissipation chance is Smoke's own divided by this. */
     public record HeavyGas(double dissipationFactor) { }
+    public record Magma(double breakLavaChance) { }
 
     private DynamicAtmosphereServerConfig() { }
 }
