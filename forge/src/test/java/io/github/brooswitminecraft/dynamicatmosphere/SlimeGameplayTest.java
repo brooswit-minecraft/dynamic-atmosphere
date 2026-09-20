@@ -8,12 +8,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SlimeGameplayTest {
     @Test
-    void undergroundProductionRequiresSlimeChunkAndExactIndependentRoll() {
+    void undergroundProductionRequiresSlimeChunkAndFiresUnconditionallyOtherwise() {
+        assertEquals(1, SlimeGameplay.UNDERGROUND_CHANCE_DENOMINATOR);
         assertTrue(SlimeGameplay.undergroundEmission(true, 0));
         assertFalse(SlimeGameplay.undergroundEmission(false, 0));
-        for (int roll = 1; roll < SlimeGameplay.UNDERGROUND_CHANCE_DENOMINATOR; roll++) {
-            assertFalse(SlimeGameplay.undergroundEmission(true, roll));
-        }
     }
 
     @Test

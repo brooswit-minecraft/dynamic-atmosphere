@@ -16,11 +16,9 @@ class VoidGasGameplayTest {
     }
 
     @Test
-    void bottomProducerUsesOneExactOutcomeOfEight() {
+    void bottomProducerFiresUnconditionally() {
+        assertEquals(1, VoidGasGameplay.BOTTOM_CHANCE_DENOMINATOR);
         assertTrue(VoidGasGameplay.bottomEmission(0));
-        for (int roll = 1; roll < VoidGasGameplay.BOTTOM_CHANCE_DENOMINATOR; roll++) {
-            assertFalse(VoidGasGameplay.bottomEmission(roll));
-        }
     }
 
     @Test
