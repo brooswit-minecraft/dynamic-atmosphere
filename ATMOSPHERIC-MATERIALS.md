@@ -13,15 +13,25 @@ do not guarantee wall-clock completion under backlog. Entity and block event
 producers remain event-driven. Producer and effect queries use loaded data only
 and never force chunks to load.
 
-| Material | Color | Base cell | Render reach and LOD | Optical density |
+| Material | Color | Base cell | LOD tiers | Optical density |
 | --- | --- | --- | --- | --- |
 | Vapor | Current fog color | 4x4x4 | 1x to V/2, 2x to V, 4x to 2V | 1x |
 | Smoke | Very dark brown (0x1F160F) | 4x4x4 | 1x to V/2, 2x to V, 4x to 2V | 2x |
-| Dust | Brown | 4x4x4 | Base cells to V/4 | 1x |
+| Dust | Brown | 4x4x4 | Base cells only | 1x |
 | Void Gas | Black | 4x4x4 | 1x to V, 2x to 2V | 4x |
-| Exhaust | Yellow | 4x4x4 | Base cells to V/4 | 1x |
+| Exhaust | Yellow | 4x4x4 | Base cells only | 1x |
 | Slime | Green | 4x4x4 | 1x to V, 2x to 2V | 4x |
-| Ender Gas | Purple | 4x4x4 | Base cells to V/4 | 40x |
+| Ender Gas | Purple | 4x4x4 | Base cells only | 40x |
+
+All seven materials now share one render distance and one fade: full opacity
+out to `client.rendering.fadeStartFraction * maxDistance` (defaults 0.75 and
+`2 * V`), fading smoothly to fully transparent at `maxDistance`, nothing
+rendered beyond. There is no longer a per-material reach multiplier; the LOD
+tiers above describe volume size inside that shared cutoff, not the cutoff
+itself. The cull (and the fade) ignore the Y axis — a bounded horizontal
+radius, unbounded vertically within the world's build range — so material
+directly above or below the camera is neither culled nor coarsened by
+distance regardless of height.
 
 Optical density affects rendering only. It never multiplies stored amounts,
 capacity, production, damage, or effect thresholds. Material identities never
