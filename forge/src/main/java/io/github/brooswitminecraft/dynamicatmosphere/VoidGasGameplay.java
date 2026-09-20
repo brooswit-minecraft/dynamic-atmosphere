@@ -21,8 +21,9 @@ import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
  * intended for the existing bounded producer schedule; this class never walks
  * the loaded world or requests a chunk.
  *
- * <p>Conservative MVP defaults: hostile deaths emit 40, sampled Netherrack
- * emits 2, and the independent bottom-of-world 1/8 check emits 8. Above 75%
+ * <p>Amplified defaults (ATMO-24 C1): hostile deaths emit 320, sampled
+ * Netherrack emits 16, and the independent bottom-of-world check — now
+ * unconditional (denominator 1) — emits 64. Above 75%
  * fullness, one 1/32 roll may create one zombie for 25% of cell capacity, with
  * at most eight vanilla-checked positions. Between 10% and 25% fullness, one
  * existing eligible villager can receive three bread and become willing at a
@@ -30,10 +31,10 @@ import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
  * villagers or forces a breeding partner, bed, or successful birth.</p>
  */
 public final class VoidGasGameplay {
-    static final int HOSTILE_DEATH_AMOUNT = 40;
-    static final int NETHERRACK_AMOUNT = 2;
-    static final int BOTTOM_AMOUNT = 8;
-    static final int BOTTOM_CHANCE_DENOMINATOR = 8;
+    static final int HOSTILE_DEATH_AMOUNT = 320;
+    static final int NETHERRACK_AMOUNT = 16;
+    static final int BOTTOM_AMOUNT = 64;
+    static final int BOTTOM_CHANCE_DENOMINATOR = 1;
     static final int HIGH_SPAWN_CHANCE_DENOMINATOR = 32;
     static final int SPAWN_ATTEMPTS = 8;
     static final int MAX_VILLAGER_CANDIDATES = 64;
