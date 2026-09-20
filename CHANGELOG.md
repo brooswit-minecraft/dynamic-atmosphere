@@ -1,10 +1,13 @@
-# 0.21.0-alpha.1
-
-Category: minor
-
 - Lava touching water no longer makes obsidian, cobblestone or stone — it makes magma, and the water is consumed too.
 - Automated stone/cobble/obsidian generation stops working, because the water source is now consumed rather than persisting.
 - These conversions emit smoke. That is deliberate — it marks a conversion from a distance — not a bug.
+
+# 0.20.2-alpha.1
+
+Category: patch
+
+- Release notes now carry a `Category: patch|minor|breaking` marker; a release fails fast if it is missing or invalid, instead of shipping a category-less build.
+- Every published release now sends a `repository_dispatch` to the Sickos repository, once Modrinth confirms the upload through an authenticated read-back. The dispatch is skipped with a warning when no dispatch credential is configured (no credential is configured as of 0.20.2-alpha.1), and consuming it requires a receiving workflow on Sickos's default branch.
 
 # 0.20.1-alpha.1
 

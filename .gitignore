@@ -8,6 +8,7 @@ build/
 run/
 runs/
 .neoforge/
+forge/logs/
 
 # IDE
 .idea/
@@ -23,3 +24,7 @@ bin/
 # OS
 .DS_Store
 Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
