@@ -1,3 +1,10 @@
+# 0.20.2-alpha.1
+
+Category: patch
+
+- Release notes now carry a `Category: patch|minor|breaking` marker; a release fails fast if it is missing or invalid, instead of shipping a category-less build.
+- Every published release now notifies the Sickos modpack via a `repository_dispatch`, once Modrinth confirms the upload through an authenticated read-back.
+
 # 0.20.1-alpha.1
 
 Category: patch
