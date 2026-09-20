@@ -1,6 +1,6 @@
 # Dynamic Atmosphere
 
-**0.19.0-alpha.1** for Minecraft **1.21.1 / NeoForge**, with seven server-owned,
+**0.20.1-alpha.1** for Minecraft **1.21.1 / NeoForge**, with seven server-owned,
 chunk-persisted atmospheric materials and translucent client volumes.
 
 **Destructive pressure is enabled by default and can damage terrain and builds,
@@ -230,12 +230,14 @@ client and server.
 
 ## Installation
 
-Install **0.19.0-alpha.1 on both server and client**, or in a NeoForge 1.21.1
+Install **0.20.1-alpha.1 on both server and client**, or in a NeoForge 1.21.1
 single-player instance. **Protocol 10 requires both sides to update together;
 earlier protocols are incompatible.** No extra graphics dependency is required.
 World identity, scoped snapshots, and chunk freshness distinguish live state from
-visual history. Existing world/material data and Vapor cache are retained;
-there is no world reset or cleanup.
+visual history. Vapor and Smoke world data and the Vapor cache are retained.
+Dust, Ender Gas, Exhaust, Void Gas, and Slime data saved before `0.20.0-alpha.1`
+is discarded on load and starts empty in already-saved chunks, accumulating
+normally from there; no manual world reset is needed.
 
 Operators have `/dynamicatmosphere status` and `/dynamicatmosphere demo`.
 Exact terrain-aware transport, balance tuning, and performance tuning remain
