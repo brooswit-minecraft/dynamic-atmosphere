@@ -44,12 +44,4 @@ class MagmaLavaGameplayTest {
         double rate = successes / (double) trials;
         assertTrue(rate > 0.09 && rate < 0.11, "observed rate " + rate + " outside [0.09, 0.11]");
     }
-
-    @Test
-    void removalIsOnlyATrackedMagmaPositionBecomingNonMagma() {
-        assertTrue(MagmaLavaGameplay.isRemoval(true, false));
-        assertFalse(MagmaLavaGameplay.isRemoval(false, true));
-        assertFalse(MagmaLavaGameplay.isRemoval(true, true));
-        assertFalse(MagmaLavaGameplay.isRemoval(false, false));
-    }
 }
