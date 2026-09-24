@@ -21,7 +21,7 @@ and never force chunks to load.
 | Void Gas | Black | 4x4x4 | 1x to V, 2x to 2V | 4x |
 | Exhaust | Yellow | 4x4x4 | Base cells to V/4 | 1x |
 | Slime | Green | 4x4x4 | 1x to V, 2x to 2V | 4x |
-| Ender Gas | Purple | 4x4x4 | Base cells to V/4 | 40x |
+| Obsidian Powder | Purple | 4x4x4 | Base cells to V/4 | 40x |
 
 Optical density affects rendering only. It never multiplies stored amounts,
 capacity, production, damage, or effect thresholds. Material identities never
@@ -116,14 +116,16 @@ Loaded vanilla slime chunks can produce Slime below Y=40. High-density processed
 cells can attempt one vanilla-checked slime spawn after bounded position checks and
 a finite material debit.
 
-### Ender Gas
+### Obsidian Powder
 
 Endermen, endermites, the Ender Dragon, witches, shulkers, Nether portals and
-occupants, Ender chests, soul torches, soul fire, soul sand, Crying Obsidian, and
-Ender pearl use/impact produce Ender Gas. Full-moon loaded-chunk checks retain an
-independent 1/256 chance of an 8,000-unit burst. Ender Gas never gates spawning;
-Endermen still emit it, but their spawns follow the same Vapor (fog) rule as
-every other Overworld monster — see the Vapor section above.
+occupants, Ender chests, soul torches, soul fire, soul sand, and Ender pearl
+use/impact produce Obsidian Powder, sharing the passive-block key where applicable.
+Plain Obsidian is a new, separate passive source on its own key. Crying Obsidian is
+no longer part of the shared passive key: it now emits far more on its own,
+distinct key. Obsidian Powder never gates spawning; Endermen still emit it, but
+their spawns follow the same Vapor (fog) rule as every other Overworld monster —
+see the Vapor section above.
 
 ## Configuration
 
@@ -147,5 +149,5 @@ requires confirmed blocked overflow and a fresh search; unknown boundaries and
 exhausted budgets do not authorize terrain destruction. Back up worlds: this alpha
 can place or remove blocks, alter villagers, damage entities, spawn mobs, and break
 eligible terrain under pressure. Updating to the uniform 4x4x4 cell size discards
-saved Dust, Ender Gas, Exhaust, Void Gas, and Slime atmosphere; Vapor and Smoke
+saved Dust, Obsidian Powder, Exhaust, Void Gas, and Slime atmosphere; Vapor and Smoke
 were already 4x4x4 and keep their data. Downgrading does not undo world mutations.

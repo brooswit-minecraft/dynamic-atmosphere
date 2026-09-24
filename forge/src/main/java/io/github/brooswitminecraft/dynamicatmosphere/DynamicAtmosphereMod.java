@@ -62,11 +62,11 @@ public class DynamicAtmosphereMod {
         NeoForge.EVENT_BUS.addListener(EventPriority.LOWEST, dust::onBlockBreak);
         NeoForge.EVENT_BUS.addListener(EventPriority.LOWEST, dust::onBlockPlace);
         NeoForge.EVENT_BUS.addListener(dust::onEntityLeave);
-        EnderGasGameplay enderGas = prototype.enderGasGameplay();
-        NeoForge.EVENT_BUS.addListener(enderGas::onEntityTick);
-        NeoForge.EVENT_BUS.addListener(EventPriority.LOWEST, enderGas::onEntityJoin);
-        NeoForge.EVENT_BUS.addListener(EventPriority.LOWEST, enderGas::onProjectileImpact);
-        NeoForge.EVENT_BUS.addListener(enderGas::onEntityLeave);
+        ObsidianPowderGameplay obsidianPowder = prototype.obsidianPowderGameplay();
+        NeoForge.EVENT_BUS.addListener(obsidianPowder::onEntityTick);
+        NeoForge.EVENT_BUS.addListener(EventPriority.LOWEST, obsidianPowder::onEntityJoin);
+        NeoForge.EVENT_BUS.addListener(EventPriority.LOWEST, obsidianPowder::onProjectileImpact);
+        NeoForge.EVENT_BUS.addListener(obsidianPowder::onEntityLeave);
         NeoForge.EVENT_BUS.addListener(prototype.voidGasGameplay()::onLivingDeath);
         NeoForge.EVENT_BUS.addListener(prototype.exhaustGameplay()::onEntityTick);
         NeoForge.EVENT_BUS.addListener(prototype.exhaustGameplay()::onLivingDamage);

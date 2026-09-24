@@ -1,4 +1,4 @@
-# Dust and Ender Gas Gameplay Defaults
+# Dust and Obsidian Powder Gameplay Defaults
 
 These are the configurable implementation defaults for the combined
 `0.16.1-alpha.1` release. Both materials use the shared 200-tick simulation and
@@ -26,22 +26,25 @@ chunk to load.
   of one; failure consumes nothing.
 - An independent 1/64 processed-turn roll dissipates up to 40 Dust.
 
-## Ender Gas
+## Obsidian Powder
 
-Ender Gas uses 4x4x4 server cells and a client optical density of 40. The density
+Obsidian Powder uses 4x4x4 server cells and a client optical density of 40. The density
 is visual only and does not alter amounts, capacity, fullness, or gameplay gates.
-Dust and Ender Gas render only their base-cell LOD through V/4. Like all materials,
+Dust and Obsidian Powder render only their base-cell LOD through V/4. Like all materials,
 their geometry uses `baseCellSize / slicesPerBaseCell` slice spacing rather than a
 distant one-slice shortcut, while retaining thickness-integrated optical density.
 
 - Endermen, endermites, Ender Dragons, witches, and shulkers emit 1 unit every
   40 ticks. Any entity actively occupying a Nether portal emits 2 every 20 ticks.
-- A sampled Nether portal, Ender chest, soul torch or wall torch, soul fire, soul
-  sand, or Crying Obsidian emits 1 unit.
+- A sampled Nether portal, Ender chest, soul torch or wall torch, soul fire, or soul
+  sand emits 1 unit (`obsidianPowder.passiveBlockEmission`).
+- A sampled plain Obsidian block emits 1 unit on its own key
+  (`obsidianPowder.obsidianEmission`), separate from the shared passive-block key above.
+- A sampled Crying Obsidian block emits 32 units on its own key
+  (`obsidianPowder.cryingObsidianEmission`) — deliberately far above the shared passive
+  default, and no longer folded into it.
 - A successfully spawned Ender pearl emits 24 units; its first impact emits 48.
-- During a full-moon night, every bounded loaded-chunk producer check makes an
-  independent 1/256 roll. Success emits 8,000 units at a sampled surface position.
-- Ender Gas never gates spawning. Endermen still emit it as described above, but
+- Obsidian Powder never gates spawning. Endermen still emit it as described above, but
   their natural/chunk-generation spawns follow the same Overworld-only Vapor
   (fog) rule as every other monster; Nether and End spawns follow vanilla rules.
 
@@ -50,10 +53,10 @@ distant one-slice shortcut, while retaining thickness-integrated optical density
 These producer amounts, chances, intervals, and Dust effects are exposed in the
 world's `serverconfig/dynamicatmosphere-server.toml`. The shared simulation and
 producer intervals are under `runtime`; material-specific settings are under
-`dust` and `enderGas`. Server values are read through reloadable snapshots and
+`dust` and `obsidianPowder`. Server values are read through reloadable snapshots and
 apply after NeoForge reloads the server config.
 
-Ender Gas reach and optical density are client settings in
+Obsidian Powder reach and optical density are client settings in
 `<game-directory>/config/dynamicatmosphere-client.toml`. Client presentation
 settings hot-reload. Only client `allocation.cellBudget` requires a game restart.
 Cell sizes, persisted formats, and the network protocol are structural and are not

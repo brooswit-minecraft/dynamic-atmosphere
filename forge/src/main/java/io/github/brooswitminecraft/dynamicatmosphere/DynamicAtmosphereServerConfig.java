@@ -95,6 +95,8 @@ public final class DynamicAtmosphereServerConfig {
     private static final IntOption ENDER_PEARL_IMPACT;
     private static final IntOption ENDER_MOB_INTERVAL;
     private static final IntOption ENDER_PORTAL_INTERVAL;
+    private static final IntOption OBSIDIAN_EMISSION;
+    private static final IntOption CRYING_OBSIDIAN_EMISSION;
 
     private static final DoubleOption PLANT_CHANCE;
     private static final IntOption PLANT_COST;
@@ -198,13 +200,13 @@ public final class DynamicAtmosphereServerConfig {
         builder.pop();
 
         builder.push("heavyGas");
-        // Shared by Void Gas, Ender Gas and Slime: their dissipation chance is Smoke's own
+        // Shared by Void Gas, Obsidian Powder and Slime: their dissipation chance is Smoke's own
         // dissipationChance() divided by this factor, keeping Smoke's dissipationAmount() as maxLoss.
         // 1 means "dissipate exactly as fast as Smoke"; a factor must stay finite and greater than zero.
         HEAVY_GAS_DISSIPATION_FACTOR = decimal(builder, "dissipationFactor", 12.0, 0.001, 1_000.0);
         builder.pop();
 
-        builder.push("enderGas");
+        builder.push("obsidianPowder");
         ENDER_MOB = integer(builder, "mobEmission", 1, 0, 1_000_000);
         ENDER_PORTAL = integer(builder, "portalOccupantEmission", 2, 0, 1_000_000);
         ENDER_PORTAL_BLOCK = integer(builder, "portalBlockEmission", 100, 0, 1_000_000);
@@ -213,6 +215,10 @@ public final class DynamicAtmosphereServerConfig {
         ENDER_PEARL_IMPACT = integer(builder, "pearlImpactEmission", 48, 0, 1_000_000);
         ENDER_MOB_INTERVAL = integer(builder, "mobIntervalTicks", 40, 1, 72000);
         ENDER_PORTAL_INTERVAL = integer(builder, "portalIntervalTicks", 20, 1, 72000);
+        // Plain obsidian is a new, separate passive source; it does not share passiveBlockEmission.
+        OBSIDIAN_EMISSION = integer(builder, "obsidianEmission", 1, 0, 1_000_000);
+        // Crying obsidian was folded into passiveBlockEmission; it now has its own, much larger default.
+        CRYING_OBSIDIAN_EMISSION = integer(builder, "cryingObsidianEmission", 32, 0, 1_000_000);
         builder.pop();
 
         builder.push("plantGrowth");
@@ -266,9 +272,10 @@ public final class DynamicAtmosphereServerConfig {
                 EXHAUST_MAX_DAMAGE.get(), EXHAUST_MIN_COST.get(), EXHAUST_MAX_COST.get()),
             new Slime(SLIME_UNDERGROUND.get(), SLIME_UNDERGROUND_DENOMINATOR.get(),
                 SLIME_SPAWN_DENOMINATOR.get(), SLIME_SPAWN_ATTEMPTS.get()),
-            new EnderGas(ENDER_MOB.get(), ENDER_PORTAL.get(), ENDER_PASSIVE.get(), ENDER_PEARL_USE.get(),
+            new ObsidianPowder(ENDER_MOB.get(), ENDER_PORTAL.get(), ENDER_PASSIVE.get(), ENDER_PEARL_USE.get(),
                 ENDER_PEARL_IMPACT.get(), ENDER_MOB_INTERVAL.get(),
-                ENDER_PORTAL_INTERVAL.get(), ENDER_PORTAL_BLOCK.get()),
+                ENDER_PORTAL_INTERVAL.get(), ENDER_PORTAL_BLOCK.get(),
+                OBSIDIAN_EMISSION.get(), CRYING_OBSIDIAN_EMISSION.get()),
             new PlantGrowth(PLANT_CHANCE.get(), PLANT_COST.get()),
             new Integrations(CREATE_FAN_RPM_COEFFICIENT.get(), CREATE_FAN_INTERVAL.get(), CREATE_FAN_CHUNK_BUDGET.get()),
             new HeavyGas(HEAVY_GAS_DISSIPATION_FACTOR.get())
@@ -314,7 +321,7 @@ public final class DynamicAtmosphereServerConfig {
     }
 
     public record Snapshot(RuntimeTuning runtime, Vapor vapor, Smoke smoke, Dust dust, VoidGas voidGas,
-                           Exhaust exhaust, Slime slime, EnderGas enderGas, PlantGrowth plantGrowth,
+                           Exhaust exhaust, Slime slime, ObsidianPowder obsidianPowder, PlantGrowth plantGrowth,
                            Integrations integrations, HeavyGas heavyGas) { }
     public record RuntimeTuning(int syncIntervalTicks, int fullSnapshotIntervalTicks,
                                 int simulationIntervalTicks, int producerIntervalTicks,
@@ -352,14 +359,14 @@ public final class DynamicAtmosphereServerConfig {
                           double suffocationMaxCostFraction) { }
     public record Slime(int undergroundEmission, int undergroundChanceDenominator,
                         int spawnChanceDenominator, int spawnAttempts) { }
-    public record EnderGas(int mobEmission, int portalOccupantEmission, int passiveBlockEmission,
+    public record ObsidianPowder(int mobEmission, int portalOccupantEmission, int passiveBlockEmission,
                            int pearlUseEmission, int pearlImpactEmission,
                            int mobIntervalTicks, int portalIntervalTicks,
-                           int portalBlockEmission) { }
+                           int portalBlockEmission, int obsidianEmission, int cryingObsidianEmission) { }
     public record PlantGrowth(double chance, int cost) { }
     public record Integrations(double createFanTransportPerRpm, int createFanIntervalTicks,
                                int maxFanChunksPerTick) { }
-    /** Shared by Void Gas, Ender Gas and Slime: their dissipation chance is Smoke's own divided by this. */
+    /** Shared by Void Gas, Obsidian Powder and Slime: their dissipation chance is Smoke's own divided by this. */
     public record HeavyGas(double dissipationFactor) { }
 
     private DynamicAtmosphereServerConfig() { }
