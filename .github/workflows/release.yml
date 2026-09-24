@@ -31,6 +31,14 @@ jobs:
           version=$(cat version.txt)
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$ ]]
           echo "value=$version" >> "$GITHUB_OUTPUT"
+      # Runs before the build and before any GitHub release / Modrinth publication,
+      # so a bad or missing Category marker ships nothing. See
+      # docs/release-dispatch-contract.md for the marker contract.
+      - name: Validate CHANGELOG Category marker
+        id: category
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: python3 scripts/changelog.py validate >> "$GITHUB_OUTPUT"
       - name: Build and test
         env:
           VERSION: ${{ steps.version.outputs.value }}
@@ -41,7 +49,12 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.value }}
         run: python3 scripts/smoke-server.py "forge/build/libs/dynamicatmosphere-$VERSION.jar" --verify-smoke
+      - name: Generate release notes
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: python3 scripts/changelog.py notes --out "$RUNNER_TEMP/release-notes.md"
       - name: Publish immutable GitHub release
+        id: gh_release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.value }}
@@ -57,8 +70,9 @@ jobs:
             cp "$RUNNER_TEMP/existing/$(basename "$jar")" "$jar"
           else
             gh release create "v$VERSION" "$jar" --target "$GITHUB_SHA" \
-              --title "Dynamic Atmosphere $VERSION" --notes-file CHANGELOG.md --prerelease
+              --title "Dynamic Atmosphere $VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" --prerelease
           fi
+          echo "url=https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION" >> "$GITHUB_OUTPUT"
       - uses: oven-sh/setup-bun@v2
       - name: Sync Modrinth description
         env:
@@ -96,3 +110,71 @@ jobs:
           MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
           PROJECT_ID: ${{ vars.MODRINTH_PROJECT_ID }}
         run: python3 scripts/sync-modrinth-settings.py
+      # "The publish step exited 0" is not sufficient: this authenticates (the
+      # project is not anonymously visible, see docs/release-dispatch-contract.md)
+      # and looks the version up by the jar's sha512, retrying with a short
+      # bounded backoff, since a freshly published version can take a moment to
+      # appear. Runs unconditionally - including when Publish Modrinth version
+      # above was skipped because the version already existed - because a
+      # re-run must independently re-confirm the artifact before anything
+      # downstream (the sickos payload) trusts it.
+      - name: Verify Modrinth publish (authenticated read-back)
+        id: readback
+        env:
+          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
+          PROJECT_ID: ${{ vars.MODRINTH_PROJECT_ID }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          python3 scripts/verify-modrinth-publish.py \
+            "forge/build/libs/dynamicatmosphere-$VERSION.jar" >> "$GITHUB_OUTPUT"
+      # secrets.* cannot be tested directly in a step `if:`, so presence is
+      # routed through this step's outputs instead.
+      - name: Determine sickos dispatch credential
+        id: dispatch_cred
+        env:
+          HAS_PAT: ${{ secrets.SICKOS_DISPATCH_TOKEN != '' }}
+          HAS_APP_KEY: ${{ secrets.SICKOS_DISPATCH_APP_PRIVATE_KEY != '' }}
+          HAS_APP_ID: ${{ vars.SICKOS_DISPATCH_APP_ID != '' }}
+        run: |
+          echo "has_pat=$HAS_PAT" >> "$GITHUB_OUTPUT"
+          if [[ "$HAS_APP_KEY" == "true" && "$HAS_APP_ID" == "true" ]]; then
+            echo "has_app=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_app=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Mint sickos dispatch app token
+        id: mint_app_token
+        if: steps.dispatch_cred.outputs.has_pat != 'true' && steps.dispatch_cred.outputs.has_app == 'true'
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.SICKOS_DISPATCH_APP_ID }}
+          private-key: ${{ secrets.SICKOS_DISPATCH_APP_PRIVATE_KEY }}
+          owner: brooswit-minecraft
+          repositories: sickos
+      # Writes the exact payload as a workflow artifact on every release run,
+      # before and independently of sending, so any run's payload can be
+      # inspected. Dispatches only when this run newly published the version
+      # (never on a re-run that found it already on Modrinth); a missing
+      # credential skips with a loud warning and never fails the release. See
+      # docs/release-dispatch-contract.md for the full contract.
+      - name: Build dynamic-atmosphere-released payload and dispatch to sickos
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+          CATEGORY: ${{ steps.category.outputs.category }}
+          GITHUB_RELEASE_URL: ${{ steps.gh_release.outputs.url }}
+          MODRINTH_VERSION_ID: ${{ steps.readback.outputs.modrinth_version_id }}
+          SHA1: ${{ steps.readback.outputs.sha1 }}
+          SHA512: ${{ steps.readback.outputs.sha512 }}
+          DOWNLOAD_URL: ${{ steps.readback.outputs.download_url }}
+          FILE_NAME: ${{ steps.readback.outputs.file_name }}
+          MODRINTH_PRE_PUBLISH_EXISTS: ${{ steps.modrinth.outputs.exists }}
+          SICKOS_DISPATCH_TOKEN: ${{ secrets.SICKOS_DISPATCH_TOKEN }}
+          SICKOS_DISPATCH_APP_TOKEN: ${{ steps.mint_app_token.outputs.token }}
+        run: python3 scripts/dispatch-sickos.py dynamic-atmosphere-released.json
+      - name: Upload dynamic-atmosphere-released payload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dynamic-atmosphere-released
+          path: dynamic-atmosphere-released.json
+          if-no-files-found: warn
