@@ -70,6 +70,12 @@ public class DynamicAtmosphereMod {
         NeoForge.EVENT_BUS.addListener(prototype.voidGasGameplay()::onLivingDeath);
         NeoForge.EVENT_BUS.addListener(prototype.exhaustGameplay()::onEntityTick);
         NeoForge.EVENT_BUS.addListener(prototype.exhaustGameplay()::onLivingDamage);
+        MagmaLavaGameplay magmaLava = MagmaLavaGameplay.create();
+        NeoForge.EVENT_BUS.addListener(magmaLava::onChunkLoad);
+        NeoForge.EVENT_BUS.addListener(magmaLava::onChunkUnload);
+        NeoForge.EVENT_BUS.addListener(magmaLava::onPistonPre);
+        NeoForge.EVENT_BUS.addListener(magmaLava::onPistonPost);
+        NeoForge.EVENT_BUS.addListener(magmaLava::onNeighborNotify);
         LOGGER.info("[{}] bounded atmospheric grid enabled", MODID);
     }
 

@@ -415,6 +415,17 @@ and requires a game restart. Structural cell sizes, storage formats, and network
 protocol are intentionally not configurable and change only with a matching mod
 update on both sides.
 
+## Lava and Magma
+
+Removing a magma block, by any actor or mechanism (player, explosion, piston,
+mob, or an automated machine), independently rolls a chance to leave a lava
+source (`Blocks.LAVA` at level 0, never flowing) at the removed position.
+`magma.breakLavaChance` controls the odds (default `0.1`, range `0.0`-`1.0`)
+and, like the rest of server config, is read fresh on each roll: a config
+reload takes effect without a restart. Placing magma, or a magma block
+replaced by another magma block, never rolls; only a tracked magma position
+genuinely becoming non-magma does.
+
 ## Development
 
 Set `JAVA_HOME` to a JDK 21 installation, then run:
@@ -442,6 +453,15 @@ version; it is a **live publish**, not a dry run. Existing artifacts are never
 overwritten. An existing Modrinth version is reused only if its hash and metadata
 match; a mismatch fails rather than replacing a release.
 
+The version section in `CHANGELOG.md` being released must declare exactly one
+`Category: patch|minor|breaking` marker; the release fails before anything is
+built or published if it is missing, invalid, or duplicated, and a `breaking`
+category additionally requires a non-empty `## Migration` subsection. After an
+authenticated Modrinth read-back confirms the published version, CI notifies
+the Sickos modpack with a `repository_dispatch`. The full cross-repo contract
+(payload keys, credential paths, idempotency, manual re-send recovery) is in
+[`docs/release-dispatch-contract.md`](docs/release-dispatch-contract.md).
+
 Repository configuration:
 
 - Secret `MODRINTH_TOKEN` with project/version write permission.
@@ -451,6 +471,11 @@ Repository configuration:
 - `modrinth/project.json`: this release's Modrinth environment and submission policy.
   CI applies the environment only to the version in `version.txt`, preserving
   older releases' compatibility metadata.
+- Optional secret `SICKOS_DISPATCH_TOKEN`, or optional secret
+  `SICKOS_DISPATCH_APP_PRIVATE_KEY` + variable `SICKOS_DISPATCH_APP_ID`, for
+  the sickos dispatch above. Neither is required: with no credential
+  configured, the dispatch is skipped with a warning and the release still
+  ships. See `docs/release-dispatch-contract.md`.
 
 Pre-release versions use the alpha channel. While this project is 0.x, use a
 minor bump for added capability or incompatible changes, a patch for compatible
