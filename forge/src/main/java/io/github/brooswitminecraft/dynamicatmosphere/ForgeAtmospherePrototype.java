@@ -12,6 +12,7 @@ import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ChunkTrackingView;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.FluidTags;
@@ -61,6 +62,7 @@ final class ForgeAtmospherePrototype {
     }
 
     private static final int DEMO_PARTICLE_CAP = 24;
+    private static final int UNKNOWN_VIEW_RADIUS = -1;
     private static final int[][] DEMO_CELL_OFFSETS = {
         {0, 0, 0}, {1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}
     };
@@ -1159,6 +1161,18 @@ final class ForgeAtmospherePrototype {
         return false;
     }
 
+    /**
+     * The tracking view's own radius, used only to tell a real view-distance change apart from the tracked-chunk
+     * set sliding because the player crossed a chunk boundary. {@code ChunkTrackingView.EMPTY} (pre-subscription)
+     * has no radius to report; its sentinel never collides with a real {@code Positioned} radius, which is always
+     * non-negative.
+     */
+    private static int viewRadiusOf(ChunkTrackingView view) {
+        return view instanceof ChunkTrackingView.Positioned positioned
+            ? positioned.viewDistance()
+            : UNKNOWN_VIEW_RADIUS;
+    }
+
     private void syncPlayers(MinecraftServer server, boolean forceSnapshot) {
         List<ServerPlayer> players = server.getPlayerList().getPlayers();
         var capacities = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer>();
@@ -1182,7 +1196,8 @@ final class ForgeAtmospherePrototype {
         var authoritativeChunks = new ArrayList<AtmosphereSyncPlanner.Chunk>();
         // Use Minecraft's subscription, including changes to client/server view distance.
         // ensureImported only reads already loaded chunks and retains its per-tick budget.
-        player.getChunkTrackingView().forEach(chunk -> {
+        var trackingView = player.getChunkTrackingView();
+        trackingView.forEach(chunk -> {
             ChunkState state = ensureImported(player.serverLevel(), chunk.x, chunk.z);
             if (state == null || !state.readable) {
                 return;
@@ -1205,7 +1220,7 @@ final class ForgeAtmospherePrototype {
         }
 
         for (AtmosphereSyncPlanner.Update<ResourceKey<Level>> update
-            : syncPlanner.plan(player.getUUID(), dimension, authoritativeChunks, visible)) {
+            : syncPlanner.plan(player.getUUID(), dimension, viewRadiusOf(trackingView), authoritativeChunks, visible)) {
             List<AtmosphereGridPayload.Chunk> chunks = update.authoritativeChunks().stream()
                 .map(chunk -> new AtmosphereGridPayload.Chunk(chunk.x(), chunk.z()))
                 .toList();
@@ -1232,7 +1247,8 @@ final class ForgeAtmospherePrototype {
         ResourceKey<Level> dimension = player.serverLevel().dimension();
         var scope = new ArrayList<SmokeSyncPlanner.Chunk>();
         var visible = new ArrayList<SmokeSyncPlanner.Cell>();
-        player.getChunkTrackingView().forEach(chunk -> {
+        var trackingView = player.getChunkTrackingView();
+        trackingView.forEach(chunk -> {
             ChunkState state = ensureImported(player.serverLevel(), chunk.x, chunk.z);
             if (state == null || !state.smokeReadable) return;
             scope.add(new SmokeSyncPlanner.Chunk(chunk.x, chunk.z));
@@ -1247,7 +1263,7 @@ final class ForgeAtmospherePrototype {
             }
         });
 
-        for (var update : smokeSyncPlanner.plan(player.getUUID(), dimension, scope, visible)) {
+        for (var update : smokeSyncPlanner.plan(player.getUUID(), dimension, viewRadiusOf(trackingView), scope, visible)) {
             List<SmokeGridPayload.Chunk> payloadChunks = update.authoritativeChunks().stream()
                 .map(chunk -> new SmokeGridPayload.Chunk(chunk.x(), chunk.z())).toList();
             List<SmokeGridPayload.Cell> payloadCells = update.cells().stream()
@@ -1281,7 +1297,8 @@ final class ForgeAtmospherePrototype {
         ResourceKey<Level> dimension = player.serverLevel().dimension();
         var scope = new ArrayList<SmokeSyncPlanner.Chunk>();
         var visible = new ArrayList<SmokeSyncPlanner.Cell>();
-        player.getChunkTrackingView().forEach(chunk -> {
+        var trackingView = player.getChunkTrackingView();
+        trackingView.forEach(chunk -> {
             ChunkState state = ensureImported(player.serverLevel(), chunk.x, chunk.z);
             if (state == null || !state.materialReadable.contains(material)) return;
             scope.add(new SmokeSyncPlanner.Chunk(chunk.x, chunk.z));
@@ -1296,7 +1313,7 @@ final class ForgeAtmospherePrototype {
             }
         });
 
-        for (var update : planner.plan(player.getUUID(), dimension, scope, visible)) {
+        for (var update : planner.plan(player.getUUID(), dimension, viewRadiusOf(trackingView), scope, visible)) {
             List<MaterialGridPayload.Chunk> payloadChunks = update.authoritativeChunks().stream()
                 .map(chunk -> new MaterialGridPayload.Chunk(chunk.x(), chunk.z())).toList();
             List<MaterialGridPayload.Cell> payloadCells = update.cells().stream()
