@@ -21,8 +21,11 @@ final class SmokeSyncPlanner<P, D> {
         }
     }
 
+    /** Used by callers that don't track view-distance changes; never matches a real change. */
+    static final int UNKNOWN_VIEW_RADIUS = -1;
+
     private record Coordinate(int x, int y, int z) { }
-    private record PlayerView<D>(D dimension, Set<Chunk> chunks, Map<Coordinate, Cell> cells) { }
+    private record PlayerView<D>(D dimension, int viewRadius, Set<Chunk> chunks, Map<Coordinate, Cell> cells) { }
 
     private final int batchSize;
     private final IntUnaryOperator chunkCoordinate;
@@ -39,10 +42,19 @@ final class SmokeSyncPlanner<P, D> {
     }
 
     List<Update<D>> plan(P player, D dimension, List<Chunk> authoritativeChunks, List<Cell> visibleCells) {
+        return plan(player, dimension, UNKNOWN_VIEW_RADIUS, authoritativeChunks, visibleCells);
+    }
+
+    /**
+     * {@code viewRadius} is the chunk-tracking view's own radius (e.g. {@code ChunkTrackingView.Positioned
+     * .viewDistance()}), used ONLY to tell a real view-distance change apart from the tracked-chunk set merely
+     * sliding as the player crosses a chunk boundary — never inferred from the chunk/cell set size.
+     */
+    List<Update<D>> plan(P player, D dimension, int viewRadius, List<Chunk> authoritativeChunks, List<Cell> visibleCells) {
         List<Chunk> scope = List.copyOf(new LinkedHashSet<>(authoritativeChunks));
         Set<Chunk> currentChunks = Set.copyOf(scope);
         Map<Coordinate, Cell> current = index(visibleCells);
-        PlayerView<D> previous = views.put(player, new PlayerView<>(dimension, currentChunks, current));
+        PlayerView<D> previous = views.put(player, new PlayerView<>(dimension, viewRadius, currentChunks, current));
         var updates = new ArrayList<Update<D>>();
 
         if (previous == null || !previous.dimension().equals(dimension)) {
@@ -50,14 +62,14 @@ final class SmokeSyncPlanner<P, D> {
             addBatches(updates, dimension, true, scope, visibleCells);
             return updates;
         }
-        if (!previous.chunks().equals(currentChunks)) {
+        if (previous.viewRadius() != viewRadius) {
             addBatches(updates, dimension, true, scope, visibleCells);
             return updates;
         }
 
         var delta = new ArrayList<Cell>();
         for (Coordinate old : previous.cells().keySet()) {
-            if (!current.containsKey(old) && currentChunks.contains(chunkOf(old))) {
+            if (!current.containsKey(old)) {
                 delta.add(new Cell(old.x(), old.y(), old.z(), 0, 0));
             }
         }
@@ -101,8 +113,4 @@ final class SmokeSyncPlanner<P, D> {
     }
 
     private int batchCount(int size) { return (size + batchSize - 1) / batchSize; }
-
-    private Chunk chunkOf(Coordinate cell) {
-        return new Chunk(chunkCoordinate.applyAsInt(cell.x()), chunkCoordinate.applyAsInt(cell.z()));
-    }
 }

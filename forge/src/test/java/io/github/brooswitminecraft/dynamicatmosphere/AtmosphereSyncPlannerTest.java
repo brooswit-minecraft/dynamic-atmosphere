@@ -159,43 +159,96 @@ class AtmosphereSyncPlannerTest {
     }
 
     @Test
-    void trackedChunkMembershipChangeForcesScopedSnapshotIncludingEmptyChunks() {
+    void trackedChunkMembershipGainAtSameViewRadiusIsDeltaIncludingNewChunkCells() {
         AtmosphereSyncPlanner<String, String> planner = new AtmosphereSyncPlanner<>(512);
         var oldChunk = new AtmosphereSyncPlanner.Chunk(0, 0);
-        var freshEmptyChunk = new AtmosphereSyncPlanner.Chunk(1, 0);
+        var gainedChunk = new AtmosphereSyncPlanner.Chunk(1, 0);
         var oldCell = new AtmosphereSyncPlanner.Cell(0, 0, 0, 250, 1000);
-        planner.plan("player", "overworld", List.of(oldChunk), List.of(oldCell));
+        var gainedCell = new AtmosphereSyncPlanner.Cell(16, 0, 0, 400, 1000);
+        planner.plan("player", "overworld", 8, List.of(oldChunk), List.of(oldCell));
 
-        List<AtmosphereSyncPlanner.Update<String>> snapshot = planner.plan(
-            "player", "overworld", List.of(oldChunk, freshEmptyChunk), List.of());
+        List<AtmosphereSyncPlanner.Update<String>> updates = planner.plan(
+            "player", "overworld", 8, List.of(oldChunk, gainedChunk), List.of(oldCell, gainedCell));
 
-        assertEquals(1, snapshot.size());
-        assertTrue(snapshot.getFirst().reset());
-        assertTrue(snapshot.getFirst().snapshotEnd());
-        assertEquals(List.of(oldChunk, freshEmptyChunk), snapshot.getFirst().authoritativeChunks());
-        assertTrue(snapshot.getFirst().cells().isEmpty());
+        assertEquals(1, updates.size());
+        assertFalse(updates.getFirst().reset());
+        assertFalse(updates.getFirst().snapshotEnd());
+        assertEquals(List.of(gainedCell), updates.getFirst().cells());
     }
 
     @Test
-    void leavingTrackedChunksPreservesTheirCachedCells() {
+    void leavingTrackedChunksAtSameViewRadiusIsDeltaThatZerosTheirCells() {
         AtmosphereSyncPlanner<String, String> planner = new AtmosphereSyncPlanner<>(512);
         var retainedChunk = new AtmosphereSyncPlanner.Chunk(0, 0);
         var departedChunk = new AtmosphereSyncPlanner.Chunk(4, 0);
         var retainedCell = new AtmosphereSyncPlanner.Cell(0, 0, 0, 250, 1000);
         var departedCell = new AtmosphereSyncPlanner.Cell(16, 0, 0, 500, 1000);
-        planner.plan("player", "overworld", List.of(retainedChunk, departedChunk),
+        planner.plan("player", "overworld", 8, List.of(retainedChunk, departedChunk),
             List.of(retainedCell, departedCell));
 
-        List<AtmosphereSyncPlanner.Update<String>> snapshot = planner.plan(
-            "player", "overworld", List.of(retainedChunk), List.of(retainedCell));
+        List<AtmosphereSyncPlanner.Update<String>> updates = planner.plan(
+            "player", "overworld", 8, List.of(retainedChunk), List.of(retainedCell));
 
-        assertEquals(1, snapshot.size());
-        assertTrue(snapshot.getFirst().reset());
-        assertTrue(snapshot.getFirst().snapshotEnd());
-        assertEquals(List.of(retainedChunk), snapshot.getFirst().authoritativeChunks());
-        assertEquals(List.of(retainedCell), snapshot.getFirst().cells());
-        assertTrue(snapshot.stream().flatMap(update -> update.cells().stream())
-            .noneMatch(cell -> cell.x() == departedCell.x() && cell.amount() == 0));
+        assertEquals(1, updates.size());
+        assertFalse(updates.getFirst().reset());
+        assertFalse(updates.getFirst().snapshotEnd());
+        assertEquals(List.of(new AtmosphereSyncPlanner.Cell(
+            departedCell.x(), departedCell.y(), departedCell.z(), 0, 0)), updates.getFirst().cells());
+    }
+
+    @Test
+    void oneRingStepBoundaryCrossingAtSameViewRadiusIsDeltaWithOnlyGainedAndLostChunkCells() {
+        AtmosphereSyncPlanner<String, String> planner = new AtmosphereSyncPlanner<>(512);
+        var retainedChunk = new AtmosphereSyncPlanner.Chunk(0, 0);
+        var lostChunk = new AtmosphereSyncPlanner.Chunk(-1, 0);
+        var gainedChunk = new AtmosphereSyncPlanner.Chunk(1, 0);
+        var retainedCell = new AtmosphereSyncPlanner.Cell(0, 0, 0, 250, 1000);
+        var lostCell = new AtmosphereSyncPlanner.Cell(-16, 0, 0, 300, 1000);
+        var gainedCell = new AtmosphereSyncPlanner.Cell(16, 0, 0, 400, 1000);
+        planner.plan("player", "overworld", 8, List.of(retainedChunk, lostChunk),
+            List.of(retainedCell, lostCell));
+
+        List<AtmosphereSyncPlanner.Update<String>> updates = planner.plan(
+            "player", "overworld", 8, List.of(retainedChunk, gainedChunk), List.of(retainedCell, gainedCell));
+
+        assertEquals(1, updates.size());
+        assertFalse(updates.getFirst().reset());
+        assertEquals(List.of(
+            new AtmosphereSyncPlanner.Cell(lostCell.x(), lostCell.y(), lostCell.z(), 0, 0),
+            gainedCell
+        ), updates.getFirst().cells());
+    }
+
+    @Test
+    void viewDistanceChangeAtSameChunkSetForcesFullResetSnapshot() {
+        AtmosphereSyncPlanner<String, String> planner = new AtmosphereSyncPlanner<>(512);
+        var chunk = new AtmosphereSyncPlanner.Chunk(0, 0);
+        var cell = new AtmosphereSyncPlanner.Cell(0, 0, 0, 250, 1000);
+        planner.plan("player", "overworld", 8, List.of(chunk), List.of(cell));
+
+        List<AtmosphereSyncPlanner.Update<String>> updates = planner.plan(
+            "player", "overworld", 16, List.of(chunk), List.of(cell));
+
+        assertEquals(1, updates.size());
+        assertTrue(updates.getFirst().reset());
+        assertTrue(updates.getFirst().snapshotEnd());
+        assertEquals(List.of(chunk), updates.getFirst().authoritativeChunks());
+        assertEquals(List.of(cell), updates.getFirst().cells());
+    }
+
+    @Test
+    void dimensionChangeStillForcesFullResetSnapshotRegardlessOfViewRadius() {
+        AtmosphereSyncPlanner<String, String> planner = new AtmosphereSyncPlanner<>(512);
+        var cell = new AtmosphereSyncPlanner.Cell(0, 0, 0, 250, 1000);
+        planner.plan("player", "overworld", 8, List.of(new AtmosphereSyncPlanner.Chunk(0, 0)), List.of(cell));
+
+        List<AtmosphereSyncPlanner.Update<String>> updates = planner.plan(
+            "player", "nether", 8, List.of(new AtmosphereSyncPlanner.Chunk(0, 0)), List.of(cell));
+
+        assertEquals(2, updates.size());
+        assertTrue(updates.get(0).reset());
+        assertTrue(updates.get(1).reset());
+        assertEquals("nether", updates.get(1).dimension());
     }
 
     @Test
