@@ -119,7 +119,7 @@ public final class DynamicAtmosphereServerConfig {
 
         builder.push("vapor");
         VAPOR_PRODUCER_CHANCE = decimal(builder, "producerChance", 0.10, 0, 1);
-        RAIN_CLOUD_HEIGHT = integer(builder, "rainCloudHeight", 192, -2048, 2048);
+        RAIN_CLOUD_HEIGHT = integer(builder, "rainCloudHeight", 256, -2048, 2048);
         HIGH_TERRAIN_ABOVE_SEA = integer(builder, "highTerrainBlocksAboveSeaLevel", 24, 0, 2048);
         HIGH_TERRAIN = integer(builder, "highTerrainEmission", 40, 0, 1_000_000);
         RAIN_CLOUD = integer(builder, "rainCloudEmission", 320, 0, 1_000_000);
