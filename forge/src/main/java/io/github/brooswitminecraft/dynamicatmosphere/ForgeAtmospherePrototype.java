@@ -1108,17 +1108,16 @@ final class ForgeAtmospherePrototype {
             emitSource(level, emittedSources, frozenSource, cellKey(level, frozenSurface.above()), tuning().vapor().snowIceEmission());
         }
 
-        BlockPos cloud = new BlockPos(x, tuning().vapor().rainCloudHeight(), z);
-        if (!level.dimensionType().ultraWarm()
-            && !level.dimensionType().hasCeiling()
-            && level.isInWorldBounds(cloud)
-            && chunk.getBlockState(cloud).isAir()
-            && level.isRainingAt(cloud)) {
+        var rainSampling = RainCloudSampling.forLanding(
+            landing.getY(), tuning().vapor().rainCloudHeight());
+        BlockPos cloud = new BlockPos(x, rainSampling.cloudY(), z);
+        if (RainCloudSampling.isEligible(
+            level.dimensionType().ultraWarm(), level.dimensionType().hasCeiling(),
+            level.isInWorldBounds(cloud), chunk.getBlockState(cloud).isAir(), level.isRainingAt(cloud))) {
             var rain = AtmosphereSourceStrength.splitRain(
                 tuning().vapor().rainCloudEmission(), level.random.nextInt(tuning().vapor().rainCloudEmission() + 1));
-            int upperY = Math.max(landing.getY(), tuning().vapor().rainCloudHeight());
             BlockPos airborne = new BlockPos(x,
-                landing.getY() + level.random.nextInt(upperY - landing.getY() + 1), z);
+                landing.getY() + level.random.nextInt(rainSampling.airborneUpperY() - landing.getY() + 1), z);
             SourceKey rainSource = new SourceKey(SourceKind.RAIN_CLOUD, level.dimension(), airborne);
             SourceKey groundSource = new SourceKey(SourceKind.RAIN_GROUND, level.dimension(), landing);
             boolean emittedGround = rain.ground() > 0
