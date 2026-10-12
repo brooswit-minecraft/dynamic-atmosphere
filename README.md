@@ -344,6 +344,21 @@ history belonging to another scope.
 
 Operators can run `/dynamicatmosphere status` to inspect runtime counters and
 `/dynamicatmosphere demo` as a player to add material nearby for visual testing.
+`/dynamicatmosphere delete-material-data` is a temporary permission-level-2
+administrative/console command. It only prints a warning until the operator runs
+the literal `/dynamicatmosphere delete-material-data confirm`; confirmation
+permanently deletes Vapor, Smoke, and every additional material currently held in
+the mod's loaded runtime chunks and clears their in-memory schedules, sync state,
+and capacity caches. Its result lists affected cells by dimension and material and
+reports unreadable loaded payloads it skipped.
+
+It intentionally does **not** scan or delete unloaded chunk attachments. NeoForge
+only exposes an attachment through an already-loaded `ChunkAccess`; the supported
+API does not enumerate unloaded persisted chunks. The command therefore never
+force-loads chunks and never edits raw region files, because either approach could
+alter unrelated data or overwrite corrupt/unknown attachment payloads. Operators
+who need a complete offline purge must use a future supported persistence migration
+tool rather than treating this temporary loaded-state command as a world-wide reset.
 
 ## Destructive Pressure
 
