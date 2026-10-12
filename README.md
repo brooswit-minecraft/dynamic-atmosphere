@@ -356,9 +356,17 @@ It intentionally does **not** scan or delete unloaded chunk attachments. NeoForg
 only exposes an attachment through an already-loaded `ChunkAccess`; the supported
 API does not enumerate unloaded persisted chunks. The command therefore never
 force-loads chunks and never edits raw region files, because either approach could
-alter unrelated data or overwrite corrupt/unknown attachment payloads. Operators
-who need a complete offline purge must use a future supported persistence migration
-tool rather than treating this temporary loaded-state command as a world-wide reset.
+alter unrelated data or overwrite corrupt/unknown attachment payloads.
+
+Follow-up proposal — owner: the Dynamic Atmosphere persistence maintainers. Before
+offering a whole-world purge, add a NeoForge-supported offline migration API that
+enumerates serialized chunk attachment compounds without creating `LevelChunk`s,
+validates each of the three Dynamic Atmosphere payloads, and atomically rewrites
+only a validated Dynamic Atmosphere attachment key. Its contract must leave every
+other chunk tag/attachment byte-for-byte intact, skip and report malformed or
+unknown payloads, never generate/load a chunk, and be covered by disposable
+region fixtures. Until that API exists, a complete offline purge is unsupported;
+this temporary command must remain loaded-state-only.
 
 ## Destructive Pressure
 

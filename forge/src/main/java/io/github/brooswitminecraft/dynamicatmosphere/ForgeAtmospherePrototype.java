@@ -335,12 +335,12 @@ final class ForgeAtmospherePrototype {
 
     private void registerCommands(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(Commands.literal("dynamicatmosphere")
-            .requires(source -> source.hasPermission(2))
+            .requires(source -> source.hasPermission(AtmosphericDumpSafety.REQUIRED_PERMISSION_LEVEL))
             .then(Commands.literal("status").executes(context -> status(context.getSource())))
             .then(Commands.literal("demo").executes(context -> demo(context.getSource())))
             .then(Commands.literal("delete-material-data")
                 .executes(context -> explainDeleteMaterialData(context.getSource()))
-                .then(Commands.literal("confirm")
+                .then(Commands.literal(AtmosphericDumpSafety.CONFIRM_LITERAL)
                     .executes(context -> deleteLoadedMaterialData(context.getSource()))))
             .then(Commands.literal("smoke")
                 .then(Commands.literal("status").executes(context -> smokeStatus(context.getSource())))));
@@ -352,10 +352,7 @@ final class ForgeAtmospherePrototype {
      * world merely because a console operator pasted the command root.
      */
     private int explainDeleteMaterialData(CommandSourceStack source) {
-        source.sendSuccess(() -> Component.literal(
-            "WARNING: this permanently deletes loaded Dynamic Atmosphere material data. "
-                + "Run /dynamicatmosphere delete-material-data confirm to proceed. "
-                + "Unloaded chunk attachments are not touched."), false);
+        source.sendSuccess(() -> Component.literal(AtmosphericDumpSafety.confirmationMessage()), false);
         return 0;
     }
 
@@ -367,6 +364,7 @@ final class ForgeAtmospherePrototype {
      */
     private int deleteLoadedMaterialData(CommandSourceStack source) {
         var report = new LinkedHashMap<ResourceKey<Level>, DumpReport>();
+        var loaded = new ArrayList<Map.Entry<ChunkKey, ChunkState>>();
         for (var entry : chunks.entrySet()) {
             ChunkKey key = entry.getKey();
             ChunkState state = entry.getValue();
@@ -374,9 +372,14 @@ final class ForgeAtmospherePrototype {
             if (level == null || level.getChunkSource().getChunkNow(key.x(), key.z()) != state.chunk) {
                 continue;
             }
+            loaded.add(entry);
+        }
+        AtmosphericDumpSafety.cleanLoadedOnly(loaded, entry -> {
+            ChunkKey key = entry.getKey();
+            ChunkState state = entry.getValue();
             DumpReport dimension = report.computeIfAbsent(key.dimension(), ignored -> new DumpReport());
             clearLoadedChunk(state, dimension);
-        }
+        });
 
         pendingLoads.clear();
         producerSchedule.clear();
@@ -443,7 +446,7 @@ final class ForgeAtmospherePrototype {
         ForgeMaterialCapacity.clear(state.chunk);
     }
 
-    private static String formatDumpReport(Map<ResourceKey<Level>, DumpReport> report) {
+    static String formatDumpReport(Map<ResourceKey<Level>, DumpReport> report) {
         if (report.isEmpty()) return "no loaded Dynamic Atmosphere chunks";
         return report.entrySet().stream()
             .sorted(Map.Entry.comparingByKey(Comparator.comparing(key -> key.location().toString())))
@@ -1765,11 +1768,11 @@ final class ForgeAtmospherePrototype {
     private record ChunkKey(ResourceKey<Level> dimension, int x, int z) {
     }
 
-    private static final class DumpReport {
-        private int vapor;
-        private int smoke;
-        private int unreadable;
-        private final Map<AtmosphereMaterial, Integer> materials = new EnumMap<>(AtmosphereMaterial.class);
+    static final class DumpReport {
+        int vapor;
+        int smoke;
+        int unreadable;
+        final Map<AtmosphereMaterial, Integer> materials = new EnumMap<>(AtmosphereMaterial.class);
     }
 
     private static final class ChunkState {

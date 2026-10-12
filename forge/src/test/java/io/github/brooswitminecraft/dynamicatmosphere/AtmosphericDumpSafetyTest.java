@@ -1,0 +1,92 @@
+package io.github.brooswitminecraft.dynamicatmosphere;
+
+import org.junit.jupiter.api.Test;
+import net.minecraft.world.level.Level;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/** Disposable-fixture tests for the command's access/confirmation/scope contract. */
+class AtmosphericDumpSafetyTest {
+    @Test
+    void confirmationIsExplicitlyDestructiveAndRequiresTheLiteralConfirmStep() {
+        assertTrue(AtmosphericDumpSafety.confirmationMessage().contains("permanently deletes"));
+        assertTrue(AtmosphericDumpSafety.confirmationMessage().contains(" confirm"));
+        assertTrue(AtmosphericDumpSafety.confirmationMessage().contains("Unloaded chunk attachments are not touched"));
+    }
+
+    @Test
+    void permissionLevelTwoAndConsoleEquivalentAreAllowedButLowerLevelsAreRejected() {
+        assertFalse(AtmosphericDumpSafety.mayExecute(1));
+        assertTrue(AtmosphericDumpSafety.mayExecute(2));
+        assertTrue(AtmosphericDumpSafety.mayExecute(4));
+    }
+
+    @Test
+    void operationScopeContainsOnlyExplicitLoadedFixturesAndNeverDiscoversAnUnloadedFixture() {
+        List<String> loaded = new ArrayList<>(List.of("overworld:loaded-a", "the_nether:loaded-b"));
+        String persistedButUnloaded = "overworld:persisted-unloaded";
+
+        List<String> targets = AtmosphericDumpSafety.loadedTargets(loaded);
+
+        assertEquals(List.of("overworld:loaded-a", "the_nether:loaded-b"), targets);
+        assertFalse(targets.contains(persistedButUnloaded));
+        loaded.clear();
+        assertEquals(2, targets.size(), "the disposable operation snapshot cannot load more targets later");
+    }
+
+    @Test
+    void cleanupDeletesAllLoadedFixtureCategoriesButLeavesPersistedUnloadedFixtureUntouched() {
+        Fixture loaded = new Fixture("overworld:loaded", 3, 2, 7);
+        Fixture unloaded = new Fixture("overworld:persisted-unloaded", 11, 13, 17);
+
+        AtmosphericDumpSafety.cleanLoadedOnly(List.of(loaded), Fixture::deleteAllAtmosphereData);
+
+        assertEquals(0, loaded.vapor);
+        assertEquals(0, loaded.smoke);
+        assertEquals(0, loaded.materials);
+        assertEquals(11, unloaded.vapor, "unloaded persistence must not be loaded or rewritten");
+        assertEquals(13, unloaded.smoke);
+        assertEquals(17, unloaded.materials);
+    }
+
+    @Test
+    void reportIncludesDimensionEveryCategoryAndUnreadableSkips() {
+        ForgeAtmospherePrototype.DumpReport report = new ForgeAtmospherePrototype.DumpReport();
+        report.vapor = 3;
+        report.smoke = 2;
+        report.materials.put(AtmosphereMaterial.DUST, 7);
+        report.unreadable = 1;
+
+        String text = ForgeAtmospherePrototype.formatDumpReport(Map.of(Level.OVERWORLD, report));
+
+        assertTrue(text.contains("minecraft:overworld"));
+        assertTrue(text.contains("vapor=3"));
+        assertTrue(text.contains("smoke=2"));
+        assertTrue(text.contains("DUST=7"));
+        assertTrue(text.contains("unreadableSkipped=1"));
+    }
+
+    private static final class Fixture {
+        private final String id;
+        private int vapor;
+        private int smoke;
+        private int materials;
+
+        private Fixture(String id, int vapor, int smoke, int materials) {
+            this.id = id;
+            this.vapor = vapor;
+            this.smoke = smoke;
+            this.materials = materials;
+        }
+
+        private void deleteAllAtmosphereData() {
+            vapor = smoke = materials = 0;
+        }
+    }
+}
