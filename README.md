@@ -372,7 +372,7 @@ pressure implementation still requires build and server/client verification.
 
 ## Lava, Ice, and Obsidian
 
-`0.21.0-alpha.1` adds an ice ladder that lava degrades one rung at a time via
+The next minor release adds an ice ladder that lava degrades one rung at a time via
 NeoForge's `FluidInteractionRegistry`, each rung paying out a different
 lava-side result:
 
