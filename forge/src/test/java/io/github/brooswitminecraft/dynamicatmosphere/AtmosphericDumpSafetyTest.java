@@ -1,5 +1,8 @@
 package io.github.brooswitminecraft.dynamicatmosphere;
 
+import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.tree.CommandNode;
+import net.minecraft.commands.CommandSourceStack;
 import org.junit.jupiter.api.Test;
 import net.minecraft.world.level.Level;
 
@@ -25,6 +28,21 @@ class AtmosphericDumpSafetyTest {
         assertFalse(AtmosphericDumpSafety.mayExecute(1));
         assertTrue(AtmosphericDumpSafety.mayExecute(2));
         assertTrue(AtmosphericDumpSafety.mayExecute(4));
+    }
+
+    @Test
+    void productionCommandTreeWiresTheDeleteWarningAndLiteralConfirmation() {
+        var dispatcher = new CommandDispatcher<CommandSourceStack>();
+        new ForgeAtmospherePrototype().registerCommands(dispatcher);
+
+        CommandNode<CommandSourceStack> root = dispatcher.getRoot().getChild("dynamicatmosphere");
+        assertTrue(root != null, "the production root command must be registered");
+        var delete = root.getChild("delete-material-data");
+        assertTrue(delete != null, "the destructive command must be under /dynamicatmosphere");
+        assertTrue(delete.getCommand() != null, "the unconfirmed invocation must show the warning");
+        var confirm = delete.getChild(AtmosphericDumpSafety.CONFIRM_LITERAL);
+        assertTrue(confirm != null, "the literal confirmation must be required by the production command tree");
+        assertTrue(confirm.getCommand() != null, "only the confirm leaf may execute deletion");
     }
 
     @Test

@@ -333,7 +333,9 @@ final class ForgeAtmospherePrototype {
         materialSyncPlanners.values().forEach(SmokeSyncPlanner::clear);
     }
 
-    private void registerCommands(CommandDispatcher<CommandSourceStack> dispatcher) {
+    // Package-visible so the disposable command-tree fixture tests cover the
+    // actual Brigadier wiring, rather than a parallel helper representation.
+    void registerCommands(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(Commands.literal("dynamicatmosphere")
             .requires(source -> source.hasPermission(AtmosphericDumpSafety.REQUIRED_PERMISSION_LEVEL))
             .then(Commands.literal("status").executes(context -> status(context.getSource())))
