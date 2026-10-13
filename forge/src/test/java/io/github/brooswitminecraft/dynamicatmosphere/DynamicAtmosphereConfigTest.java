@@ -20,6 +20,8 @@ class DynamicAtmosphereConfigTest {
         assertEquals(0.75, first.runtime().simulationSkipChance());
         assertEquals(100, first.enderGas().portalBlockEmission());
         assertEquals(256, first.vapor().rainCloudHeight());
+        assertEquals(0.75, first.verticalMovement().emptyTowardCloudlineChance());
+        assertEquals(0.25, first.verticalMovement().fullTowardCloudlineChance());
         assertEquals(24, first.vapor().highTerrainBlocksAboveSeaLevel());
         assertEquals(200, first.runtime().simulationIntervalTicks());
         assertEquals(300, first.runtime().producerIntervalTicks());
