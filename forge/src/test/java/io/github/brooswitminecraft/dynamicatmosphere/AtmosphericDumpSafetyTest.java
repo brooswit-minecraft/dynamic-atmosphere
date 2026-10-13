@@ -74,6 +74,18 @@ class AtmosphericDumpSafetyTest {
     }
 
     @Test
+    void productionRuntimeCleanupSeamClearsEveryScheduledOrSyncedWorkQueue() {
+        List<String> cleared = new ArrayList<>();
+        AtmosphericDumpSafety.clearRuntimeState(
+            () -> cleared.add("pending-loads"), () -> cleared.add("vapor-producers"),
+            () -> cleared.add("fans"), () -> cleared.add("smoke-producers"),
+            () -> cleared.add("material-producers"), () -> cleared.add("vapor-sync"),
+            () -> cleared.add("smoke-sync"), () -> cleared.add("material-sync"));
+        assertEquals(List.of("pending-loads", "vapor-producers", "fans", "smoke-producers",
+            "material-producers", "vapor-sync", "smoke-sync", "material-sync"), cleared);
+    }
+
+    @Test
     void reportIncludesDimensionEveryCategoryAndUnreadableSkips() {
         ForgeAtmospherePrototype.DumpReport report = new ForgeAtmospherePrototype.DumpReport();
         report.vapor = 3;

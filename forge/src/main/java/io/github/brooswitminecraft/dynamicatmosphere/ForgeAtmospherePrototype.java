@@ -383,14 +383,15 @@ final class ForgeAtmospherePrototype {
             clearLoadedChunk(state, dimension);
         });
 
-        pendingLoads.clear();
-        producerSchedule.clear();
-        fanSchedule.clear();
-        smokeProducerSchedule.clear();
-        materialProducerSchedules.values().forEach(AtmosphereProducerSchedule::clear);
-        syncPlanner.clear();
-        smokeSyncPlanner.clear();
-        materialSyncPlanners.values().forEach(SmokeSyncPlanner::clear);
+        AtmosphericDumpSafety.clearRuntimeState(
+            pendingLoads::clear,
+            producerSchedule::clear,
+            fanSchedule::clear,
+            smokeProducerSchedule::clear,
+            () -> materialProducerSchedules.values().forEach(AtmosphereProducerSchedule::clear),
+            syncPlanner::clear,
+            smokeSyncPlanner::clear,
+            () -> materialSyncPlanners.values().forEach(SmokeSyncPlanner::clear));
 
         source.sendSuccess(() -> Component.literal(
             "Deleted loaded Dynamic Atmosphere data only: " + formatDumpReport(report)

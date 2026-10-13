@@ -33,5 +33,10 @@ final class AtmosphericDumpSafety {
         loadedTargets(loadedTargets).forEach(cleanup);
     }
 
+    /** Clears transient work only after the loaded attachment cleanup has completed. */
+    static void clearRuntimeState(Runnable... clearers) {
+        for (Runnable clearer : clearers) clearer.run();
+    }
+
     private AtmosphericDumpSafety() { }
 }
