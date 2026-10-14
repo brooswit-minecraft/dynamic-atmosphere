@@ -415,6 +415,17 @@ and requires a game restart. Structural cell sizes, storage formats, and network
 protocol are intentionally not configurable and change only with a matching mod
 update on both sides.
 
+## Lava and Magma
+
+Removing a magma block, by any actor or mechanism (player, explosion, piston,
+mob, or an automated machine), independently rolls a chance to leave a lava
+source (`Blocks.LAVA` at level 0, never flowing) at the removed position.
+`magma.breakLavaChance` controls the odds (default `0.1`, range `0.0`-`1.0`)
+and, like the rest of server config, is read fresh on each roll: a config
+reload takes effect without a restart. Placing magma, or a magma block
+replaced by another magma block, never rolls; only a tracked magma position
+genuinely becoming non-magma does.
+
 ## Development
 
 Set `JAVA_HOME` to a JDK 21 installation, then run:
