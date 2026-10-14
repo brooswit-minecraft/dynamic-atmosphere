@@ -251,6 +251,21 @@ The coarse transport model and these numerical defaults remain open to tuning.
 trades, place gravel/mud/water, damage living entities, and spawn mobs. Back up
 worlds. Updating does not clear existing material or undo previous world changes.**
 
+### Lava and Water: Magma Instead of Obsidian, Cobblestone, or Stone
+
+Lava touching water no longer makes obsidian, cobblestone or stone — it makes
+magma, and the water is consumed too. This replaces all three vanilla lava+water
+contact cases: water reaching a lava source or flowing lava (the water neighbor
+is cleared and the lava's own position becomes magma), and lava spreading down
+into water (only the water's position becomes magma; the lava source above
+survives untouched, its own downward spread simply blocked, same as vanilla).
+
+Automated stone/cobble/obsidian generation stops working, because the water
+source is now consumed rather than persisting. These conversions emit smoke.
+That is deliberate — it marks a conversion from a distance — not a bug. Only
+the first two cases emit it; lava spreading into water removes no lava fluid,
+so it stays silent.
+
 ## Distance-Based Rendering
 
 Vapor and Smoke use three levels of detail (LOD), with no rendering beyond 2V.
