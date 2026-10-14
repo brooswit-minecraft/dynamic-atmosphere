@@ -402,51 +402,38 @@ final class ForgeAtmospherePrototype {
     }
 
     private void clearLoadedChunk(ChunkState state, DumpReport report) {
-        if (state.readable) {
-            int cells = state.cells.size();
-            try {
+        AtmosphericDumpSafety.cleanLoadedChunk(new AtmosphericDumpSafety.LoadedChunkTarget() {
+            public boolean vaporReadable() { return state.readable; }
+            public int deleteVapor() {
+                int cells = state.cells.size();
                 ForgeAtmosphereStorage.write(state.chunk, List.of());
                 state.cells.keySet().forEach(grid::remove);
                 state.cells.clear();
-                report.vapor += cells;
-            } catch (IllegalStateException exception) {
-                report.unreadable++;
+                return cells;
             }
-        } else {
-            report.unreadable++;
-        }
-        if (state.smokeReadable) {
-            int cells = state.smokeCells.size();
-            try {
+            public boolean smokeReadable() { return state.smokeReadable; }
+            public int deleteSmoke() {
+                int cells = state.smokeCells.size();
                 ForgeSmokeStorage.write(state.chunk, List.of());
                 state.smokeCells.keySet().forEach(smokeGrid::remove);
                 state.smokeCells.clear();
-                report.smoke += cells;
-            } catch (IllegalStateException exception) {
-                report.unreadable++;
+                return cells;
             }
-        } else {
-            report.unreadable++;
-        }
-        for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
-            var cells = state.materialCells.get(material);
-            if (!state.materialReadable.contains(material)) {
-                report.unreadable++;
-                continue;
-            }
-            int count = cells.size();
-            try {
+            public boolean materialReadable(AtmosphereMaterial material) { return state.materialReadable.contains(material); }
+            public int deleteMaterial(AtmosphereMaterial material) {
+                var cells = state.materialCells.get(material);
+                int count = cells.size();
                 ForgeMaterialStorage.write(state.chunk, material, List.of());
                 cells.keySet().forEach(materialGrids.get(material)::remove);
                 cells.clear();
-                report.materials.merge(material, count, Integer::sum);
-            } catch (IllegalStateException exception) {
-                report.unreadable++;
+                return count;
             }
-        }
-        ForgeAtmosphereCapacity.clear(state.chunk);
-        ForgeSmokeCapacity.clear(state.chunk);
-        ForgeMaterialCapacity.clear(state.chunk);
+            public void clearCapacities() {
+                ForgeAtmosphereCapacity.clear(state.chunk);
+                ForgeSmokeCapacity.clear(state.chunk);
+                ForgeMaterialCapacity.clear(state.chunk);
+            }
+        }, report);
     }
 
     static String formatDumpReport(Map<ResourceKey<Level>, DumpReport> report) {

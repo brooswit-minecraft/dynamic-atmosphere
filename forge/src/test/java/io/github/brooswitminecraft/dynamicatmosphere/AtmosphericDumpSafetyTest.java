@@ -74,6 +74,17 @@ class AtmosphericDumpSafetyTest {
     }
 
     @Test
+    void productionCleanupSeamDeletesReadableCategoriesSkipsUnreadableAndClearsCapacity() {
+        CleanupFixture fixture = new CleanupFixture();
+        ForgeAtmospherePrototype.DumpReport report = new ForgeAtmospherePrototype.DumpReport();
+        AtmosphericDumpSafety.cleanLoadedChunk(fixture, report);
+        assertEquals(3, report.vapor); assertEquals(2, report.smoke);
+        assertEquals(7, report.materials.get(AtmosphereMaterial.DUST));
+        assertEquals(1, report.unreadable); assertTrue(fixture.capacityCleared);
+        assertFalse(fixture.unloadedTouched);
+    }
+
+    @Test
     void productionRuntimeCleanupSeamClearsEveryScheduledOrSyncedWorkQueue() {
         List<String> cleared = new ArrayList<>();
         AtmosphericDumpSafety.clearRuntimeState(
@@ -118,5 +129,16 @@ class AtmosphericDumpSafetyTest {
         private void deleteAllAtmosphereData() {
             vapor = smoke = materials = 0;
         }
+    }
+
+    private static final class CleanupFixture implements AtmosphericDumpSafety.LoadedChunkTarget {
+        boolean capacityCleared, unloadedTouched;
+        public boolean vaporReadable() { return true; }
+        public int deleteVapor() { return 3; }
+        public boolean smokeReadable() { return true; }
+        public int deleteSmoke() { return 2; }
+        public boolean materialReadable(AtmosphereMaterial material) { return material != AtmosphereMaterial.ENDER_GAS; }
+        public int deleteMaterial(AtmosphereMaterial material) { return material == AtmosphereMaterial.DUST ? 7 : 0; }
+        public void clearCapacities() { capacityCleared = true; }
     }
 }

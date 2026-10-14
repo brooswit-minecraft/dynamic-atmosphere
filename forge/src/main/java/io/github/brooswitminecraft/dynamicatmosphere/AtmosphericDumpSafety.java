@@ -38,5 +38,32 @@ final class AtmosphericDumpSafety {
         for (Runnable clearer : clearers) clearer.run();
     }
 
+    interface LoadedChunkTarget {
+        boolean vaporReadable();
+        int deleteVapor();
+        boolean smokeReadable();
+        int deleteSmoke();
+        boolean materialReadable(AtmosphereMaterial material);
+        int deleteMaterial(AtmosphereMaterial material);
+        void clearCapacities();
+    }
+
+    static void cleanLoadedChunk(LoadedChunkTarget target, ForgeAtmospherePrototype.DumpReport report) {
+        if (target.vaporReadable()) report.vapor += delete(target::deleteVapor, report);
+        else report.unreadable++;
+        if (target.smokeReadable()) report.smoke += delete(target::deleteSmoke, report);
+        else report.unreadable++;
+        for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
+            if (!target.materialReadable(material)) { report.unreadable++; continue; }
+            int cells = delete(() -> target.deleteMaterial(material), report);
+            report.materials.merge(material, cells, Integer::sum);
+        }
+        target.clearCapacities();
+    }
+
+    private static int delete(java.util.function.IntSupplier action, ForgeAtmospherePrototype.DumpReport report) {
+        try { return action.getAsInt(); } catch (IllegalStateException exception) { report.unreadable++; return 0; }
+    }
+
     private AtmosphericDumpSafety() { }
 }
