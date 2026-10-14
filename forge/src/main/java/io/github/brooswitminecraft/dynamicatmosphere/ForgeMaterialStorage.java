@@ -17,7 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 
-/** Sparse chunk-owned persistence shared by Dust and Ender Gas. */
+/** Sparse chunk-owned persistence shared by Dust and Obsidian Powder. */
 public final class ForgeMaterialStorage {
     private record Snapshot(Map<AtmosphereMaterial, MaterialChunkData.StoredMaterial> materials) { }
 

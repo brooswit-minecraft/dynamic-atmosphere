@@ -11,7 +11,7 @@ class SmokeSyncPlannerTest {
     @Test
     void materialSpecificChunkMappingScopesOneBlockCellsCorrectly() {
         var planner = new SmokeSyncPlanner<String, String>(2,
-            AtmosphereMaterial.ENDER_GAS::chunkCoordinate);
+            AtmosphereMaterial.OBSIDIAN_POWDER::chunkCoordinate);
 
         planner.plan("player", "overworld", List.of(new SmokeSyncPlanner.Chunk(-1, 0)),
             List.of(new SmokeSyncPlanner.Cell(-1, 64, 0, 40, 1000)));

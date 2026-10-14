@@ -28,7 +28,7 @@ class MaterialGridPayloadTest {
         var chunks = Collections.nCopies(MaterialGridPayload.MAX_CHUNKS_PER_PAYLOAD + 1,
             new MaterialGridPayload.Chunk(0, 0));
         assertThrows(IllegalArgumentException.class, () -> new MaterialGridPayload(
-            AtmosphereMaterial.ENDER_GAS, ResourceLocation.withDefaultNamespace("overworld"),
+            AtmosphereMaterial.OBSIDIAN_POWDER, ResourceLocation.withDefaultNamespace("overworld"),
             UUID.randomUUID(), false, false, chunks, List.of()));
         assertThrows(IllegalArgumentException.class,
             () -> new MaterialGridPayload.Cell(0, 0, 0, -1, 1000));

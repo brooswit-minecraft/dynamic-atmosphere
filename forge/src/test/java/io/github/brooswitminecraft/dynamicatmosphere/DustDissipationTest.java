@@ -35,10 +35,10 @@ class DustDissipationTest {
     @Test
     void zeroUsesExistingDirtyRemovalAndOtherMaterialIsUntouched() {
         var dust = new AtmosphereGrid<String>();
-        var enderGas = new AtmosphereGrid<String>();
+        var obsidianPowder = new AtmosphereGrid<String>();
         var key = new AtmosphereGrid.CellKey<>("world", 0, 0, 0);
         dust.set(key, 7, 0, 1000);
-        enderGas.set(key, 7, 0, 1000);
+        obsidianPowder.set(key, 7, 0, 1000);
         dust.drainDirtyKeys();
 
         int remaining = dust.get(key).amount();
@@ -46,6 +46,6 @@ class DustDissipationTest {
 
         assertNull(dust.get(key));
         assertTrue(dust.drainDirtyKeys().contains(key));
-        assertEquals(7, enderGas.get(key).amount());
+        assertEquals(7, obsidianPowder.get(key).amount());
     }
 }
