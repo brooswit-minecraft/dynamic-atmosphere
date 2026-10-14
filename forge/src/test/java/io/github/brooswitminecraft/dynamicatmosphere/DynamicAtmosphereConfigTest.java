@@ -18,7 +18,7 @@ class DynamicAtmosphereConfigTest {
         assertEquals(10.0 / 256, first.smoke().villagerConversionChance());
         assertEquals(10.0 / 64, first.smoke().dissipationChance());
         assertEquals(0.75, first.runtime().simulationSkipChance());
-        assertEquals(100, first.enderGas().portalBlockEmission());
+        assertEquals(100, first.obsidianPowder().portalBlockEmission());
         assertEquals(192, first.vapor().rainCloudHeight());
         assertEquals(24, first.vapor().highTerrainBlocksAboveSeaLevel());
         assertEquals(200, first.runtime().simulationIntervalTicks());
@@ -39,7 +39,7 @@ class DynamicAtmosphereConfigTest {
         assertEquals(4096, first.selectionWorkPerTick());
         assertEquals(2, first.smoke().reachMultiplier());
         assertEquals(2, first.smoke().opticalDensity());
-        assertEquals(40, first.enderGas().opticalDensity());
+        assertEquals(40, first.obsidianPowder().opticalDensity());
         assertEquals(200_000, first.allocation().cellBudget());
     }
 
