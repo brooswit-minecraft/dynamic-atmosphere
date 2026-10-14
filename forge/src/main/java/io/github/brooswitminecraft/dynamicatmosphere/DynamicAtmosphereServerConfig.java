@@ -207,17 +207,26 @@ public final class DynamicAtmosphereServerConfig {
         builder.pop();
 
         builder.push("obsidianPowder");
+        // No worldRestart/gameRestart marker is applied in this section: NeoForge's default is RestartType.NONE.
+        builder.comment("Emission from Endermen, endermites, dragons, witches, and shulkers.");
         ENDER_MOB = integer(builder, "mobEmission", 1, 0, 1_000_000);
+        builder.comment("Emission for entities occupying a Nether portal.");
         ENDER_PORTAL = integer(builder, "portalOccupantEmission", 2, 0, 1_000_000);
+        builder.comment("Emission split across the two faces of each Nether portal block.");
         ENDER_PORTAL_BLOCK = integer(builder, "portalBlockEmission", 100, 0, 1_000_000);
+        builder.comment("Emission from the existing passive soul and Ender block sources.");
         OBSIDIAN_PASSIVE = integer(builder, "passiveBlockEmission", 1, 0, 1_000_000);
         builder.comment("Emission from plain obsidian blocks sampled by the passive producer.");
         OBSIDIAN_BLOCK = integer(builder, "obsidianBlockEmission", 1, 0, 1_000_000);
         builder.comment("Emission from crying obsidian blocks; deliberately much stronger than plain obsidian.");
         CRYING_OBSIDIAN = integer(builder, "cryingObsidianEmission", 1000, 0, 1_000_000);
+        builder.comment("Emission when an Ender pearl is spawned.");
         ENDER_PEARL_USE = integer(builder, "pearlUseEmission", 24, 0, 1_000_000);
+        builder.comment("Emission at the first impact of an Ender pearl.");
         ENDER_PEARL_IMPACT = integer(builder, "pearlImpactEmission", 48, 0, 1_000_000);
+        builder.comment("Ticks between mob emission checks.");
         ENDER_MOB_INTERVAL = integer(builder, "mobIntervalTicks", 40, 1, 72000);
+        builder.comment("Ticks between portal occupancy emission checks.");
         ENDER_PORTAL_INTERVAL = integer(builder, "portalIntervalTicks", 20, 1, 72000);
         builder.pop();
 
