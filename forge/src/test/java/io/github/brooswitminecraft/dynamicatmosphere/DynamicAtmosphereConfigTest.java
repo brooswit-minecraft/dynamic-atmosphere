@@ -1,8 +1,10 @@
 package io.github.brooswitminecraft.dynamicatmosphere;
 
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 class DynamicAtmosphereConfigTest {
@@ -37,10 +39,32 @@ class DynamicAtmosphereConfigTest {
         assertSame(first, second);
         assertEquals(4, first.slicesPerBaseCell());
         assertEquals(4096, first.selectionWorkPerTick());
-        assertEquals(2, first.smoke().reachMultiplier());
+        assertEquals(2, first.maxDistanceMultiplier());
+        assertEquals(0.75, first.fadeStartFraction());
         assertEquals(2, first.smoke().opticalDensity());
         assertEquals(40, first.enderGas().opticalDensity());
         assertEquals(200_000, first.allocation().cellBudget());
+    }
+
+    @Test
+    void oldPerMaterialReachKeysAreNoLongerDefined() {
+        var names = DynamicAtmosphereClientConfig.SPEC.getValues().valueMap().keySet().stream()
+            .map(Object::toString).collect(java.util.stream.Collectors.toSet());
+        for (String removed : List.of(
+            "vaporReachMultiplier", "smokeReachMultiplier", "dustReachMultiplier",
+            "voidGasReachMultiplier", "exhaustReachMultiplier", "slimeReachMultiplier",
+            "enderGasReachMultiplier")) {
+            assertFalse(names.stream().anyMatch(n -> n.toLowerCase(java.util.Locale.ROOT)
+                .contains(removed.toLowerCase(java.util.Locale.ROOT))), removed + " must no longer be defined");
+        }
+    }
+
+    @Test
+    void maxDistanceAndFadeStartAreValidatedInRange() {
+        assertEquals(2.0, DynamicAtmosphereClientConfig.validDouble(0.1, 2.0, 0.25, 4));
+        assertEquals(2.0, DynamicAtmosphereClientConfig.validDouble(5.0, 2.0, 0.25, 4));
+        assertEquals(0.75, DynamicAtmosphereClientConfig.validDouble(-1.0, 0.75, 0, 1));
+        assertEquals(0.75, DynamicAtmosphereClientConfig.validDouble(1.5, 0.75, 0, 1));
     }
 
     @Test

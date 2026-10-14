@@ -1,5 +1,6 @@
 package io.github.brooswitminecraft.dynamicatmosphere.client;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -93,7 +94,12 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
                               Consumer<List<AtmosphereVolumeGeometry.Slice>> consume) {
         int viewChunks = Minecraft.getInstance().options.getEffectiveRenderDistance();
         var tuning = material.tuning();
-        cache.setReachMultiplier(tuning.reachMultiplier());
+        var config = io.github.brooswitminecraft.dynamicatmosphere.DynamicAtmosphereClientConfig.snapshot();
+        double maxDistanceMultiplier = config.maxDistanceMultiplier();
+        double viewBlocks = Math.max(1, viewChunks) * 16.0;
+        double maxDistance = viewBlocks * maxDistanceMultiplier;
+        double fadeStart = maxDistance * config.fadeStartFraction();
+        cache.setReachMultiplier(maxDistanceMultiplier);
         cache.setView(camera.x(), camera.z(), viewChunks);
         var selection = cache.lodSelection(camera.x(), camera.y(), camera.z(), viewChunks);
         double tick = cache.renderTick(event.getPartialTick().getGameTimeDeltaPartialTick(false));
@@ -103,16 +109,29 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
                 boolean loaded = level.getChunkSource().hasChunk(
                     Math.floorDiv(cell.x, 16 / cell.baseCellSize), Math.floorDiv(cell.z, 16 / cell.baseCellSize));
                 if (!AtmosphereLodHierarchy.visibleWhenLoaded(cell, fallback, loaded)) continue;
-                if (!AtmosphereLodHierarchy.withinReach(cell, camera.x(), camera.y(), camera.z(), viewChunks, tuning.reachMultiplier())
+                if (!AtmosphereLodHierarchy.withinReach(cell, camera.x(), camera.z(), viewChunks, maxDistanceMultiplier)
                     || !event.getFrustum().isVisible(bounds(cell))) continue;
+                // Fade uses the same nearest-point horizontal metric as the cull above,
+                // ignoring Y, so vertical visibility is never affected by distance.
+                double horizontalDistance = Math.sqrt(
+                    AtmosphereLodHierarchy.horizontalDistanceSquared(cell, camera.x(), camera.z()));
+                float fade = AtmosphereVolumeGeometry.fadeMultiplier(horizontalDistance, fadeStart, maxDistance);
+                if (fade <= 0) continue;
                 var slices = AtmosphereVolumeGeometry.lodSlices(cell, cell.amount(tick), camera, forward,
                     tuning.opticalDensity());
+                // Farthest-corner check, horizontal only: decides whether any part of this
+                // cell's box can extend past the cylindrical reach and needs clipping.
                 double dx = Math.max(Math.abs(cell.blockX() - camera.x()), Math.abs(cell.blockX() + cell.size() - camera.x()));
-                double dy = Math.max(Math.abs(cell.blockY() - camera.y()), Math.abs(cell.blockY() + cell.size() - camera.y()));
                 double dz = Math.max(Math.abs(cell.blockZ() - camera.z()), Math.abs(cell.blockZ() + cell.size() - camera.z()));
-                double reach = Math.max(1, viewChunks) * 16.0 * tuning.reachMultiplier();
-                if (dx * dx + dy * dy + dz * dz > reach * reach) {
-                    slices = AtmosphereVolumeGeometry.clipToReach(slices, forward, reach);
+                if (dx * dx + dz * dz > maxDistance * maxDistance) {
+                    slices = AtmosphereVolumeGeometry.clipToReach(slices, maxDistance);
+                }
+                if (fade < 1) {
+                    var faded = new ArrayList<AtmosphereVolumeGeometry.Slice>(slices.size());
+                    for (var slice : slices) {
+                        faded.add(new AtmosphereVolumeGeometry.Slice(slice.depth(), slice.alpha() * fade, slice.vertices()));
+                    }
+                    slices = faded;
                 }
                 if (!slices.isEmpty()) {
                     if (cell.level > 0) renderedCoarseCount++;

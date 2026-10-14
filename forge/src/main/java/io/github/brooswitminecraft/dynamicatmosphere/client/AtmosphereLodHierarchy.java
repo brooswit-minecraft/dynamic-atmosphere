@@ -14,6 +14,11 @@ final class AtmosphereLodHierarchy {
     private double reachMultiplier;
     private static final int TRANSITION_TICKS = 10;
     private static final int VIEW_REGION_SIZE = 16;
+    // The cull is cylindrical: bounded horizontally, unbounded vertically within the
+    // world build range. Root search walks this whole (generous) vertical span instead
+    // of a distance-derived band; nextRoot() jumps via TreeMap.ceilingEntry, so the
+    // extra span costs nothing beyond the roots that actually exist.
+    private static final int VERTICAL_ROOT_SEARCH_BOUND = 1_000_000;
 
     private record Key(int x, int y, int z) { }
 
@@ -191,7 +196,7 @@ final class AtmosphereLodHierarchy {
         View view = View.of(x, y, z, chunks);
         if (build != null && !view.equals(build.view)) build = null;
         if (build == null && (!view.equals(selectedView) || selectedRevision != revision)) {
-            build = new Build(view, revision, x, y, z);
+            build = new Build(view, revision, x, z);
             double rootSize = baseCellSize << rootLevel;
             build.seed = root(new Key((int) Math.floor(x / rootSize), (int) Math.floor(y / rootSize),
                 (int) Math.floor(z / rootSize)));
@@ -226,7 +231,9 @@ final class AtmosphereLodHierarchy {
             }
             Volume node = build.pending.pop();
             if (node.count == 0) continue;
-            double distance = distanceSquared(node, build.x, build.y, build.z);
+            // Cylindrical cull: horizontal distance only, so a node far above/below the
+            // camera but horizontally close is never excluded by height.
+            double distance = horizontalDistanceSquared(node, build.x, build.z);
             double viewBlocks = Math.max(1, build.view.chunks()) * 16.0;
             // Query/render distance is padded for movement inside the cached view
             // region; the renderer applies the current camera's exact reach/frustum.
@@ -280,7 +287,7 @@ final class AtmosphereLodHierarchy {
     private final class Build {
         final View view;
         final long revision;
-        final double x, y, z;
+        final double x, z;
         final ArrayDeque<Volume> pending = new ArrayDeque<>();
         final List<Volume> volumes = new ArrayList<>();
         final List<Volume> fallbacks = new ArrayList<>();
@@ -291,26 +298,27 @@ final class AtmosphereLodHierarchy {
         boolean exhausted;
         Volume seed;
 
-        Build(View view, long revision, double x, double y, double z) {
+        Build(View view, long revision, double x, double z) {
             this.view = view;
             this.revision = revision;
             this.x = x;
-            this.y = y;
             this.z = z;
             double rootSize = baseCellSize << rootLevel;
             double radius = Math.max(1, view.chunks()) * 16.0 * reachMultiplier;
             cursorX = (int) Math.floor((view.x() * VIEW_REGION_SIZE - radius) / rootSize) - 1;
-            cursorY = minY = (int) Math.floor((view.y() * VIEW_REGION_SIZE - radius) / rootSize) - 1;
             cursorZ = minZ = (int) Math.floor((view.z() * VIEW_REGION_SIZE - radius) / rootSize) - 1;
             maxX = (int) Math.floor(((view.x() + 1) * VIEW_REGION_SIZE + radius) / rootSize);
-            maxY = (int) Math.floor(((view.y() + 1) * VIEW_REGION_SIZE + radius) / rootSize);
             maxZ = (int) Math.floor(((view.z() + 1) * VIEW_REGION_SIZE + radius) / rootSize);
+            // Vertical search is unbounded (within a generous fixed span), not derived
+            // from radius: the cull is cylindrical, so height must never exclude a root.
+            cursorY = minY = -VERTICAL_ROOT_SEARCH_BOUND;
+            maxY = VERTICAL_ROOT_SEARCH_BOUND;
         }
     }
 
-    static double distanceSquared(Volume volume, double x, double y, double z) {
+    /** Nearest-point squared distance from (x, z) to volume's horizontal (X/Z) footprint, ignoring Y. */
+    static double horizontalDistanceSquared(Volume volume, double x, double z) {
         return square(gap(x, volume.blockX(), volume.size()))
-            + square(gap(y, volume.blockY(), volume.size()))
             + square(gap(z, volume.blockZ(), volume.size()));
     }
 
@@ -318,12 +326,13 @@ final class AtmosphereLodHierarchy {
         return fallback ? !loaded : volume.size() >= 16 || loaded;
     }
 
-    static boolean withinReach(Volume volume, double x, double y, double z, int viewChunks) {
-        return withinReach(volume, x, y, z, viewChunks, 2);
+    static boolean withinReach(Volume volume, double x, double z, int viewChunks) {
+        return withinReach(volume, x, z, viewChunks, 2);
     }
 
-    static boolean withinReach(Volume volume, double x, double y, double z, int viewChunks, double reach) {
-        return distanceSquared(volume, x, y, z) <= square(Math.max(1, viewChunks) * 16.0 * reach);
+    /** Horizontal only: the cull is cylindrical, so height never gates reach. */
+    static boolean withinReach(Volume volume, double x, double z, int viewChunks, double reach) {
+        return horizontalDistanceSquared(volume, x, z) <= square(Math.max(1, viewChunks) * 16.0 * reach);
     }
 
     private static double gap(double camera, double min, int size) { return Math.max(0, Math.max(min - camera, camera - min - size)); }

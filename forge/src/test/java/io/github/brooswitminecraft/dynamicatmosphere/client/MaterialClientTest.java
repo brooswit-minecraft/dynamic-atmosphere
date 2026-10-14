@@ -6,6 +6,10 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class MaterialClientTest {
+    /** Uniform now: every material shares this multiplier, so tests read it once here. */
+    private static final double UNIFORM_MAX_DISTANCE_MULTIPLIER =
+        io.github.brooswitminecraft.dynamicatmosphere.DynamicAtmosphereClientConfig.snapshot().maxDistanceMultiplier();
+
     /**
      * Cross-checks all three per-material cell-size catalogs by NAME (the way
      * {@code AtmosphereClient} matches materials with {@code valueOf(name())}):
@@ -208,8 +212,9 @@ class MaterialClientTest {
 
     @Test
     void quarterViewIsInclusiveBaseOnlyWithoutCoarseOrUnloadedFallback() {
+        double reachBlocks = UNIFORM_MAX_DISTANCE_MULTIPLIER * 128;
         for (var material : List.of(AtmosphereRenderMaterial.DUST, AtmosphereRenderMaterial.ENDER_GAS)) {
-            for (double distance : new double[] {31.999, 32, 32.001}) {
+            for (double distance : new double[] {reachBlocks - 0.001, reachBlocks, reachBlocks + 0.001}) {
                 var cache = material.newCache();
                 cache.changeDimension(DIMENSION);
                 cache.restore(List.of(update(0, 1000)));
@@ -219,8 +224,8 @@ class MaterialClientTest {
                 var volume = selection.volumes().getFirst();
                 assertEquals(material.cellSize, volume.size());
                 assertEquals(0, volume.level);
-                assertEquals(distance <= 32,
-                    AtmosphereLodHierarchy.withinReach(volume, -distance, 0, 0, 8, material.reach));
+                assertEquals(distance <= reachBlocks,
+                    AtmosphereLodHierarchy.withinReach(volume, -distance, 0, 8, UNIFORM_MAX_DISTANCE_MULTIPLIER));
                 assertFalse(AtmosphereLodHierarchy.visibleWhenLoaded(volume, false, false));
                 assertEquals(List.of(update(0, 1000)), cache.exportUpdates());
             }
@@ -230,7 +235,7 @@ class MaterialClientTest {
     @Test
     void baseOnlySelectionRemainsWorkBoundedWithoutOversizedPreview() {
         for (var material : List.of(AtmosphereRenderMaterial.DUST, AtmosphereRenderMaterial.ENDER_GAS)) {
-            var lod = new AtmosphereLodHierarchy(material.cellSize, 0, material.reach);
+            var lod = new AtmosphereLodHierarchy(material.cellSize, 0, UNIFORM_MAX_DISTANCE_MULTIPLIER);
             for (int x = -10; x <= 10; x++) for (int y = -10; y <= 10; y++) for (int z = -10; z <= 10; z++) {
                 lod.put(new AtmosphereClientCache.Cell(x, y, z), 1000, 1000, 0, 0);
             }
@@ -242,16 +247,16 @@ class MaterialClientTest {
     }
 
     @Test
-    void quarterViewBoundaryGeometryIsClippedWithoutTouchingVaporReach() {
-        var forward = new AtmosphereVolumeGeometry.Point(0, 0, 1);
+    void quarterViewBoundaryGeometryIsClippedUsingItsOwnExplicitReachArgument() {
         var crossing = new AtmosphereVolumeGeometry.Slice(31.5, 0.2f, List.of(
             new AtmosphereVolumeGeometry.Point(-8, -8, 31.5), new AtmosphereVolumeGeometry.Point(8, -8, 31.5),
             new AtmosphereVolumeGeometry.Point(8, 8, 31.5), new AtmosphereVolumeGeometry.Point(-8, 8, 31.5)));
-        var clipped = AtmosphereVolumeGeometry.clipToReach(List.of(crossing), forward, 32);
+        var clipped = AtmosphereVolumeGeometry.clipToReach(List.of(crossing), 32);
         assertEquals(1, clipped.size());
-        assertTrue(clipped.getFirst().vertices().stream().allMatch(p -> p.dot(p) <= 32 * 32 + 1e-8));
-        assertEquals(2, AtmosphereRenderMaterial.VAPOR.reach);
-        assertEquals(2, AtmosphereRenderMaterial.SMOKE.reach);
+        // Cylindrical: only x/z (horizontal) must stay within reach; this slice's own
+        // y span (+-8) is left untouched by the clip, unlike the old spherical check.
+        assertTrue(clipped.getFirst().vertices().stream()
+            .allMatch(p -> p.x() * p.x() + p.z() * p.z() <= 32 * 32 + 1e-8));
     }
 
     @Test
@@ -311,15 +316,16 @@ class MaterialClientTest {
 
     @Test
     void allSevenRenderCutoffsAreInclusiveAndDoNotDiscardStoredCells() {
+        double reach = UNIFORM_MAX_DISTANCE_MULTIPLIER * 128;
         for (var material : AtmosphereRenderMaterial.values()) {
-            double reach = material.reach * 128;
             for (double distance : new double[] {reach - 0.001, reach, reach + 0.001}) {
                 var cache = material.newCache();
                 cache.changeDimension(DIMENSION);
                 cache.restore(List.of(update(0, 1000)));
                 var selection = cache.lodSelection(-distance, 0, 0, 8);
                 var volume = selection.volumes().getFirst();
-                assertEquals(distance <= reach, AtmosphereLodHierarchy.withinReach(volume, -distance, 0, 0, 8, material.reach));
+                assertEquals(distance <= reach,
+                    AtmosphereLodHierarchy.withinReach(volume, -distance, 0, 8, UNIFORM_MAX_DISTANCE_MULTIPLIER));
                 assertEquals(List.of(update(0, 1000)), cache.exportUpdates());
                 if (material.rootLevel == 0) {
                     assertEquals(material.cellSize, volume.size());
@@ -333,7 +339,7 @@ class MaterialClientTest {
     void voidGasAndSlimeStayBaseThroughViewThenDoubleThroughTwoView() {
         for (var material : List.of(AtmosphereRenderMaterial.VOID_GAS, AtmosphereRenderMaterial.SLIME)) {
             for (double distance : new double[] {63.999, 64, 64.001, 127.999, 128, 128.001, 256}) {
-                var lod = new AtmosphereLodHierarchy(material.cellSize, material.rootLevel, material.reach);
+                var lod = new AtmosphereLodHierarchy(material.cellSize, material.rootLevel, UNIFORM_MAX_DISTANCE_MULTIPLIER);
                 lod.put(new AtmosphereClientCache.Cell(0, 0, 0), 1000, 1000, 0, 0);
                 var selection = lod.select(-distance, 0, 0, 8, 0);
                 assertEquals(1, selection.volumes().size());

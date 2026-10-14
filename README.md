@@ -269,17 +269,41 @@ render distance from the viewer:
 | `V < d <= 2V` | 16x16x16 blocks | 16x16x16 blocks |
 | `d > 2V` | Not rendered | Not rendered |
 
-Void Gas and Slime use base cells through V and 2x cells through 2V, with nothing
-beyond. Dust, Exhaust, and Ender Gas use base cells only through V/4, with nothing
-beyond. These cutoffs include cached fallback geometry and preserve stored cache data.
-These distance cutoffs (V/4, V, 2V) are unaffected by `0.20.0-alpha.1`'s uniform
-cell size: reach is `viewBlocks * reachMultiplier`, a distance that does not
-depend on cell size, and no material's reach multiplier changed. What changed is
-the volume size of each LOD tier inside those same cutoffs: Void Gas and Slime's
-tiers are now 4 then 8 blocks, down from 8 then 16 (Void Gas) and 16 then 32
-(Slime); Dust, Exhaust, and Ender Gas's base tier is now 4 blocks, up from 2 —
-finer for Void Gas/Slime, coarser for Dust/Exhaust/Ender Gas. Re-tuning these
-tiers for the new base size is a follow-up, not required for correctness.
+Void Gas and Slime use base cells through V and 2x cells through 2V. All seven
+materials now share the same max render distance: `client.rendering.maxDistanceMultiplier`
+(default 2.0) multiplies the player's effective render distance to get one
+`maxDistance` used by every material — the seven per-material `*ReachMultiplier`
+keys from `0.20.x` (Vapor/Smoke/Void Gas/Slime at 2.0, Dust/Exhaust/Ender Gas at
+0.25) are gone. Dust, Exhaust, and Ender Gas therefore now render out to the same
+`2 * V` distance as the other materials, 8x farther than their old `V/4` cutoff;
+they still use base cells only (no coarser LOD tier), so this is a real increase
+in worst-case rendered cell count at range for those three, not just a visual
+change.
+
+Instead of a hard cutoff, visibility now fades: full opacity out to
+`fadeStartFraction * maxDistance` (default 0.75, so `1.5 * V` at the default
+`maxDistanceMultiplier`), falling smoothly and continuously to fully transparent
+at `maxDistance`, with nothing rendered beyond. The fade is computed by a small
+pure function (`AtmosphereVolumeGeometry.fadeMultiplier`) applied to slice alpha.
+
+Both the fade and the cull are **horizontal-only**: distance ignores the Y axis
+entirely (`sqrt(dx^2 + dz^2)` from the camera to the nearest point of a cell's
+horizontal footprint), so the cull is a cylinder — bounded horizontal radius,
+unbounded vertically within the world's build range — rather than the old sphere
+that included Y. A cell directly above or below the camera, arbitrarily far
+vertically, is neither culled nor coarsened by height, matching this material's
+gameplay intent of gas billowing upward "as far as it can." LOD tier
+detail-level thresholds (which distance band gets 4/8/16-block volumes) use this
+same horizontal metric now too, for one consistent distance concept throughout
+selection instead of two. This cylindrical-cull interpretation of "unaffected
+vertical visibility" was inferred by epic ATMO-22's research from the stated
+goal and has not been separately confirmed.
+
+These cutoffs include cached fallback geometry and preserve stored cache data.
+What changed from `0.20.0-alpha.1`'s uniform cell size is unaffected here: Void
+Gas and Slime's LOD tiers are still 4 then 8 blocks, down from 8 then 16 (Void
+Gas) and 16 then 32 (Slime); Dust, Exhaust, and Ender Gas's base tier is still 4
+blocks, up from 2.
 
 Each coarser volume recursively averages eight children, counting empty volumes
 in that average rather than averaging only occupied children. Coverage does not
@@ -290,9 +314,10 @@ requires user verification, and no measured FPS improvement is claimed here.
 Every rendered LOD uses camera-facing slices spaced at
 `baseCellSize / slicesPerBaseCell`, including aggregated distant volumes. A 2x or
 4x volume therefore receives proportionally more slices across its larger depth;
-there is no distant one-slice optimization. Aggregation, hard distance cutoffs,
-non-overlapping parent selection, and thickness-integrated optical density remain
-unchanged, preserving visual detail and total density through the far bands.
+there is no distant one-slice optimization. Aggregation, the hard cutoff at max
+distance (now preceded by a fade rather than reached abruptly), non-overlapping
+parent selection, and thickness-integrated optical density remain unchanged,
+preserving visual detail and total density through the far bands.
 
 Bands use aligned parent decisions, so boundary-crossing volumes can remain finer.
 Selection is cached in 16-block camera regions and queries only nearby cached
@@ -300,7 +325,8 @@ roots, with at most 4,096 selection work units per client tick. Rotation does no
 rebuild it. While a new view is being refined, aligned 16-block Vapor or 32-block
 Smoke volumes provide temporary coverage; Vapor's unloaded near chunks use 16-block
 fallbacks. Fallbacks never overlap their detailed descendants, and boundary
-geometry is clipped at each material's reach. Shorter render reach does not delete cached data.
+geometry is clipped at the shared max distance (cylindrically: horizontal only).
+A shorter `maxDistanceMultiplier` does not delete cached data.
 
 Vapor near, far, and fallback volumes use Minecraft's current
 fog/horizon color, sampled once per render frame. There is no local light-based
@@ -411,7 +437,7 @@ Vapor-only `vapor.skipChance` setting; producer cadence is independent.
 Server gameplay, cadence, work-budget, and fan settings live in
 `config/dynamicatmosphere-server.toml` on the current dedicated server; older
 installations may use `<world>/serverconfig/dynamicatmosphere-server.toml`. Client rendering,
-reach, optical density, and allocation settings live in
+max distance/fade, optical density, and allocation settings live in
 `config/dynamicatmosphere-client.toml` under the game directory. Runtime code
 reads immutable configuration snapshots; NeoForge config reloads replace those
 snapshots, so exposed server settings and client presentation settings apply

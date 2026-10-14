@@ -13,20 +13,15 @@ public final class DynamicAtmosphereClientConfig {
     private static final IntOption TRANSITION_TICKS;
     private static final IntOption SELECTION_WORK;
     private static final IntOption SLICES_PER_BATCH;
+    private static final DoubleOption MAX_DISTANCE_MULTIPLIER;
+    private static final DoubleOption FADE_START_FRACTION;
 
-    private static final DoubleOption VAPOR_REACH;
     private static final DoubleOption VAPOR_DENSITY;
-    private static final DoubleOption SMOKE_REACH;
     private static final DoubleOption SMOKE_DENSITY;
-    private static final DoubleOption DUST_REACH;
     private static final DoubleOption DUST_DENSITY;
-    private static final DoubleOption VOID_GAS_REACH;
     private static final DoubleOption VOID_GAS_DENSITY;
-    private static final DoubleOption EXHAUST_REACH;
     private static final DoubleOption EXHAUST_DENSITY;
-    private static final DoubleOption SLIME_REACH;
     private static final DoubleOption SLIME_DENSITY;
-    private static final DoubleOption ENDER_GAS_REACH;
     private static final DoubleOption ENDER_GAS_DENSITY;
 
     private static final IntOption CELL_BUDGET;
@@ -40,22 +35,23 @@ public final class DynamicAtmosphereClientConfig {
         TRANSITION_TICKS = integer(builder, "transitionTicks", 10, 0, 1200);
         SELECTION_WORK = integer(builder, "selectionWorkPerTick", 4096, 1, 1_000_000);
         SLICES_PER_BATCH = integer(builder, "slicesPerBatch", 4096, 1, 1_000_000);
+        // Uniform max visible distance, shared by every material (replaces the seven
+        // per-material *ReachMultiplier keys removed in ATMO-28/ATMO-39). Default 2.0
+        // matches Vapor/Smoke/Void Gas/Slime's prior multiplier; Dust/Exhaust/Ender Gas
+        // move from 0.25 to 2.0, rendering substantially farther (see PR body/CHANGELOG).
+        MAX_DISTANCE_MULTIPLIER = decimal(builder, "maxDistanceMultiplier", 2, 0.25, 4);
+        // Fraction of maxDistanceMultiplier's distance at which the horizontal fade
+        // begins; opacity is full below this fraction, falls to zero at max distance.
+        FADE_START_FRACTION = decimal(builder, "fadeStartFraction", 0.75, 0, 1);
         builder.pop();
 
         builder.push("materials");
-        VAPOR_REACH = decimal(builder, "vaporReachMultiplier", 2, 0.25, 4);
         VAPOR_DENSITY = decimal(builder, "vaporOpticalDensity", 1, 0, 1000);
-        SMOKE_REACH = decimal(builder, "smokeReachMultiplier", 2, 0.25, 4);
         SMOKE_DENSITY = decimal(builder, "smokeOpticalDensity", 2, 0, 1000);
-        DUST_REACH = decimal(builder, "dustReachMultiplier", 0.25, 0.25, 4);
         DUST_DENSITY = decimal(builder, "dustOpticalDensity", 1, 0, 1000);
-        VOID_GAS_REACH = decimal(builder, "voidGasReachMultiplier", 2, 0.25, 4);
         VOID_GAS_DENSITY = decimal(builder, "voidGasOpticalDensity", 4, 0, 1000);
-        EXHAUST_REACH = decimal(builder, "exhaustReachMultiplier", 0.25, 0.25, 4);
         EXHAUST_DENSITY = decimal(builder, "exhaustOpticalDensity", 1, 0, 1000);
-        SLIME_REACH = decimal(builder, "slimeReachMultiplier", 2, 0.25, 4);
         SLIME_DENSITY = decimal(builder, "slimeOpticalDensity", 4, 0, 1000);
-        ENDER_GAS_REACH = decimal(builder, "enderGasReachMultiplier", 0.25, 0.25, 4);
         ENDER_GAS_DENSITY = decimal(builder, "enderGasOpticalDensity", 40, 0, 1000);
         builder.pop();
 
@@ -81,14 +77,14 @@ public final class DynamicAtmosphereClientConfig {
     private static Snapshot readSnapshot() {
         return new Snapshot(
             ENABLED.get(), SLICES_PER_BASE_CELL.get(), TRANSITION_TICKS.get(), SELECTION_WORK.get(),
-            SLICES_PER_BATCH.get(),
-            new Material(VAPOR_REACH.get(), VAPOR_DENSITY.get()),
-            new Material(SMOKE_REACH.get(), SMOKE_DENSITY.get()),
-            new Material(DUST_REACH.get(), DUST_DENSITY.get()),
-            new Material(VOID_GAS_REACH.get(), VOID_GAS_DENSITY.get()),
-            new Material(EXHAUST_REACH.get(), EXHAUST_DENSITY.get()),
-            new Material(SLIME_REACH.get(), SLIME_DENSITY.get()),
-            new Material(ENDER_GAS_REACH.get(), ENDER_GAS_DENSITY.get()),
+            SLICES_PER_BATCH.get(), MAX_DISTANCE_MULTIPLIER.get(), FADE_START_FRACTION.get(),
+            new Material(VAPOR_DENSITY.get()),
+            new Material(SMOKE_DENSITY.get()),
+            new Material(DUST_DENSITY.get()),
+            new Material(VOID_GAS_DENSITY.get()),
+            new Material(EXHAUST_DENSITY.get()),
+            new Material(SLIME_DENSITY.get()),
+            new Material(ENDER_GAS_DENSITY.get()),
             new Allocation(CELL_BUDGET.get())
         );
     }
@@ -154,10 +150,12 @@ public final class DynamicAtmosphereClientConfig {
     }
 
     public record Snapshot(boolean enabled, int slicesPerBaseCell, int transitionTicks,
-                           int selectionWorkPerTick, int slicesPerBatch, Material vapor, Material smoke,
+                           int selectionWorkPerTick, int slicesPerBatch,
+                           double maxDistanceMultiplier, double fadeStartFraction,
+                           Material vapor, Material smoke,
                            Material dust, Material voidGas, Material exhaust, Material slime,
                            Material enderGas, Allocation allocation) { }
-    public record Material(double reachMultiplier, double opticalDensity) { }
+    public record Material(double opticalDensity) { }
     public record Allocation(int cellBudget) { }
 
     private DynamicAtmosphereClientConfig() { }
