@@ -89,6 +89,20 @@ Fluid transport during vanilla/Flowing Fluids fluid ticks does not emit removal
 material. The fluid-tick scope includes Flowing Fluids 1.0.6's injected movement
 and always clears on return or exception. Direct bucket/removal, block replacement,
 and scheduled atmospheric evaporation outside transport still emit by humidity.
+
+### Fill-biased vertical movement
+
+Every atmosphere cell (Vapor, Smoke, and all named material grids) chooses a vertical
+distribution direction on each selected simulation turn after fan transport has run.
+With fill fraction `f = clamp(amount / capacity, 0, 1)`, the chance of choosing the
+direction toward the configured rain cloudline is
+`emptyTowardCloudlineChance + f * (fullTowardCloudlineChance - emptyTowardCloudlineChance)`.
+The downward chance is its complement. Defaults are 75% toward the cloudline when
+empty and 25% when full, deliberately leaving horizontal spreading available while
+making sparse cells buoyant and dense cells sink. Both endpoints are configurable in
+the server `verticalMovement` section. At or above the cloudline, “toward the
+cloudline” is downward, so both outcomes collapse to downward. Existing downward
+barriers still apply.
 This fix does not delete accumulated atmosphere or reset worlds; existing material
 and simulation backlog remain.
 
