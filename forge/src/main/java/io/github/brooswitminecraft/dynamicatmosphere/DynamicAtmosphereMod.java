@@ -56,6 +56,7 @@ public class DynamicAtmosphereMod {
         NeoForge.EVENT_BUS.addListener(prototype::onServerStopped);
         NeoForge.EVENT_BUS.addListener(VaporHostileSpawnGate::onSpawnPlacementCheck);
         NeoForge.EVENT_BUS.addListener(VaporOverheadTerrain::onTagsUpdated);
+        NeoForge.EVENT_BUS.addListener(LavaWaterMagmaGameplay::onFluidPlaceBlock);
         DustGameplay dust = prototype.dustGameplay();
         NeoForge.EVENT_BUS.addListener(dust::onEntityTick);
         NeoForge.EVENT_BUS.addListener(dust::onLivingDamage);
