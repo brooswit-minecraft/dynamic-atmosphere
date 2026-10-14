@@ -4,7 +4,7 @@ import io
 import json
 from pathlib import Path
 import unittest
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
 spec = importlib.util.spec_from_file_location(
     "verify_modrinth_publish", Path(__file__).with_name("verify-modrinth-publish.py")
@@ -71,6 +71,64 @@ class VerifyTest(unittest.TestCase):
         )
         self.assertEqual(result["modrinth_version_id"], "modrinth-version-id")
         self.assertEqual(len(sleeps), 2)
+
+    def test_retries_through_503_then_succeeds(self):
+        calls = {"n": 0}
+
+        def fetch(request, timeout):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise HTTPError(request.full_url, 503, "busy", hdrs=None, fp=None)
+            return _FakeResponse(_record())
+
+        sleeps = []
+        result = verify_modrinth_publish.verify(
+            "proj1", "0.20.0-alpha.1", ARTIFACT, "token", fetch=fetch, sleep=sleeps.append,
+        )
+        self.assertEqual(result["modrinth_version_id"], "modrinth-version-id")
+        self.assertEqual(len(sleeps), 1)
+
+    def test_retries_network_failure_then_succeeds(self):
+        calls = {"n": 0}
+
+        def fetch(request, timeout):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise URLError("temporary DNS failure")
+            return _FakeResponse(_record())
+
+        result = verify_modrinth_publish.verify(
+            "proj1", "0.20.0-alpha.1", ARTIFACT, "token", fetch=fetch, sleep=lambda s: None,
+        )
+        self.assertEqual(result["modrinth_version_id"], "modrinth-version-id")
+
+    def test_exhausted_503_retries_emit_error(self):
+        calls = {"n": 0}
+
+        def fetch(request, timeout):
+            calls["n"] += 1
+            raise HTTPError(request.full_url, 503, "busy", hdrs=None, fp=None)
+
+        with self.assertRaisesRegex(SystemExit, r"::error::Modrinth read-back failed after 3 attempts"):
+            verify_modrinth_publish.verify(
+                "proj1", "0.20.0-alpha.1", ARTIFACT, "token",
+                attempts=3, fetch=fetch, sleep=lambda s: None,
+            )
+        self.assertEqual(calls["n"], 3)
+
+    def test_authentication_failures_are_not_retried(self):
+        calls = {"n": 0}
+
+        def fetch(request, timeout):
+            calls["n"] += 1
+            raise HTTPError(request.full_url, 403, "forbidden", hdrs=None, fp=None)
+
+        with self.assertRaises(HTTPError):
+            verify_modrinth_publish.verify(
+                "proj1", "0.20.0-alpha.1", ARTIFACT, "token",
+                attempts=3, fetch=fetch, sleep=lambda s: None,
+            )
+        self.assertEqual(calls["n"], 1)
 
     def test_wrong_project_rejected(self):
         fetch = lambda request, timeout: _FakeResponse(_record(project_id="other-project"))
