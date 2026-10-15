@@ -3,8 +3,10 @@
 Category: minor
 
 - Lava touching water no longer makes obsidian, cobblestone or stone — it makes magma, and the water is consumed too.
+- Obsidian isn't removed from the game by this change — it has moved sideways: lava against packed ice or blue ice now pays out obsidian there instead, in place of the obsidian water+lava used to make.
 - Automated stone/cobble/obsidian generation stops working, because the water source is now consumed rather than persisting.
-- These conversions emit smoke. That is deliberate — it marks a conversion from a distance — not a bug.
+- Five of these conversions emit DA's existing lava-removal smoke (water-on-source, water-on-flowing-lava, and all three ice rungs); lava spreading down into water does not, since no lava fluid is actually removed in that case. That split is deliberate — smoke marks a lava removal from a distance — not a bug.
+- Blue ice still remains basalt, not obsidian, when lava has soul soil beneath it — the existing basalt-generator precedence is unchanged.
 - Breaking a magma block, by any actor or mechanism (player, explosion, piston, mob, or an automated machine), now independently rolls a `magma.breakLavaChance` chance (default `0.1`) to leave a lava source at the removed position. Placing magma, or replacing magma with magma, never rolls. Config-backed and reloadable at runtime; see README's "Lava and Magma" section.
 
 # 0.20.2-alpha.1

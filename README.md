@@ -266,6 +266,10 @@ That is deliberate — it marks a conversion from a distance — not a bug. Only
 the first two cases emit it; lava spreading into water removes no lava fluid,
 so it stays silent.
 
+Obsidian isn't removed from the game by this change — it has moved sideways.
+See "Lava, Ice, and Obsidian" below: lava against packed ice or blue ice now
+pays out obsidian there, in place of the obsidian water+lava used to make.
+
 ## Distance-Based Rendering
 
 Vapor and Smoke use three levels of detail (LOD), with no rendering beyond 2V.

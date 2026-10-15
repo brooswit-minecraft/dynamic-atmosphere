@@ -9,6 +9,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -29,10 +30,21 @@ import java.util.Set;
  * flags regardless of cause (player break, explosion, piston, mob, or a
  * Create-style machine), which a player-only hook like
  * {@link BlockEvent.BreakEvent} does not.</p>
+ *
+ * <p>The roll's own write is deferred to {@link ServerTickEvent.Post}, not
+ * applied immediately in {@code onNeighborNotify}: a piston push notifies at
+ * its vacated origin mid-animation, then overwrites that same position again
+ * later in the SAME tick once the piston structure resolver settles (to
+ * {@code piston_head} or air) — an immediate write there is clobbered by that
+ * later same-tick write every time (confirmed live: the roll fired and set
+ * lava, then the piston's own settle silently replaced it). Writing at the
+ * tick's end instead means our write is the last one standing, for a piston
+ * push and any other transient multi-step same-tick resolution.</p>
  */
 public final class MagmaLavaGameplay {
 
     private final Map<ChunkKey, Set<BlockPos>> magmaByChunk = new HashMap<>();
+    private final Map<ResourceKey<Level>, Set<BlockPos>> pendingLava = new HashMap<>();
 
     private record ChunkKey(ResourceKey<Level> dimension, ChunkPos chunk) { }
 
@@ -95,10 +107,25 @@ public final class MagmaLavaGameplay {
 
         DynamicAtmosphereServerConfig.Magma config = DynamicAtmosphereServerConfig.snapshot().magma();
         if (rollsLava(config.breakLavaChance(), level.random.nextDouble())) {
-            // Removing pos from `tracked` above, before this write, is what keeps the
-            // NeighborNotifyEvent this triggers from being mistaken for another removal.
-            level.setBlockAndUpdate(pos, Blocks.LAVA.defaultBlockState());
+            // Deferred to tick-end (see class doc): writing here would be clobbered by a
+            // same-tick follow-up write, e.g. a piston settling into its final resting block.
+            pendingLava.computeIfAbsent(level.dimension(), ignored -> new HashSet<>()).add(pos.immutable());
         }
+    }
+
+    public void onServerTick(ServerTickEvent.Post event) {
+        if (pendingLava.isEmpty()) return;
+        for (Map.Entry<ResourceKey<Level>, Set<BlockPos>> entry : pendingLava.entrySet()) {
+            ServerLevel level = event.getServer().getLevel(entry.getKey());
+            if (level == null) continue;
+            for (BlockPos pos : entry.getValue()) {
+                // Skip only if magma genuinely came back (e.g. a machine replaced it within
+                // the same tick); any other current state still gets overwritten with lava.
+                if (level.getBlockState(pos).is(Blocks.MAGMA_BLOCK)) continue;
+                level.setBlockAndUpdate(pos, Blocks.LAVA.defaultBlockState());
+            }
+        }
+        pendingLava.clear();
     }
 
     private void scanChunk(ServerLevel level, LevelChunk chunk) {

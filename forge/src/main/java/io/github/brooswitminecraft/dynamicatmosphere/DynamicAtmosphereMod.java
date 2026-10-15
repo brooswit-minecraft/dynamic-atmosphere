@@ -80,6 +80,7 @@ public class DynamicAtmosphereMod {
         NeoForge.EVENT_BUS.addListener(magmaLava::onChunkLoad);
         NeoForge.EVENT_BUS.addListener(magmaLava::onChunkUnload);
         NeoForge.EVENT_BUS.addListener(magmaLava::onNeighborNotify);
+        NeoForge.EVENT_BUS.addListener(magmaLava::onServerTick);
         LOGGER.info("[{}] bounded atmospheric grid enabled", MODID);
     }
 
