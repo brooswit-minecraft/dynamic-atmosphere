@@ -129,6 +129,82 @@ class BuildReleaseNotesTest(unittest.TestCase):
         self.assertNotIn("\r", notes)
         self.assertIn("## Migration", notes)
 
+    def test_fenced_headings_do_not_end_section_or_migration(self):
+        fixture = """# 1.2.3
+
+Category: breaking
+
+## Migration
+
+```sh
+# 9.9.9
+## Fake heading
+```
+
+Keep this migration text.
+
+## Details
+
+More section text.
+"""
+        section = changelog.extract_section(fixture, "1.2.3")
+        self.assertIn("Keep this migration text.", section)
+        self.assertIn("## Details", section)
+        self.assertIn("# 9.9.9", section)
+        self.assertIn("## Fake heading", changelog._migration_body(section))
+        notes = changelog.build_release_notes(section, "breaking")
+        self.assertIn("Keep this migration text.", notes)
+
+    def test_tilde_fenced_headings_do_not_count_as_sections(self):
+        fixture = """# 1.2.3
+
+Category: patch
+
+~~~bash
+# 9.9.9
+## Fake heading
+~~~
+
+Release text.
+
+# 1.2.2
+
+Older release.
+"""
+        section = changelog.extract_section(fixture, "1.2.3")
+        self.assertIn("Release text.", section)
+        self.assertIn("# 9.9.9", section)
+        self.assertNotIn("Older release.", section)
+
+    def test_info_string_fence_inside_open_fence_does_not_close_it(self):
+        # A closing fence may only be followed by whitespace; ```python inside
+        # an open fence is content, so the later # heading stays masked.
+        fixture = """# 1.2.3
+
+Category: patch
+
+```markdown
+```python
+# 9.9.9
+## Fake heading
+```
+
+Release text.
+
+# 1.2.2
+
+Older release.
+"""
+        section = changelog.extract_section(fixture, "1.2.3")
+        self.assertIn("# 9.9.9", section)
+        self.assertIn("Release text.", section)
+        self.assertNotIn("Older release.", section)
+
+        trailing_space = fixture.replace("```markdown\n```python", "```markdown\n```python").replace("## Fake heading\n```", "## Fake heading\n```  ")
+        section = changelog.extract_section(trailing_space, "1.2.3")
+        self.assertNotIn("Older release.", section)
+        self.assertIn("Release text.", section)
+
 
 class RealChangelogTest(unittest.TestCase):
     """Catches a missing/invalid marker on a PR before it can fail a release on main."""

@@ -18,6 +18,31 @@ _TOP_HEADING = re.compile(r"^# (.+?)\s*$", re.MULTILINE)
 _CATEGORY_LINE = re.compile(r"^Category:[ \t]*(\S*)[ \t]*$", re.MULTILINE)
 _MIGRATION_HEADING = re.compile(r"^## Migration[ \t]*$", re.MULTILINE)
 _ANY_HEADING = re.compile(r"^#{1,2} ", re.MULTILINE)
+_FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})(.*)$")
+
+
+def _without_fenced_code(text):
+    """Mask fenced code while preserving offsets for heading regex matches."""
+    lines = text.splitlines(keepends=True)
+    masked = []
+    fence_char = None
+    fence_length = 0
+    for line in lines:
+        fence = _FENCE.match(line)
+        if fence is not None:
+            marker = fence.group(1)
+            if fence_char is None:
+                fence_char = marker[0]
+                fence_length = len(marker)
+            elif marker[0] == fence_char and len(marker) >= fence_length and not fence.group(2).strip():
+                fence_char = None
+                fence_length = 0
+            masked.append("".join("\n" if char == "\n" else "\r" if char == "\r" else " " for char in line))
+        elif fence_char is not None:
+            masked.append("".join("\n" if char == "\n" else "\r" if char == "\r" else " " for char in line))
+        else:
+            masked.append(line)
+    return "".join(masked)
 
 
 def extract_section(changelog_text, version):
@@ -28,22 +53,23 @@ def extract_section(changelog_text, version):
     body) should only ever see LF.
     """
     changelog_text = changelog_text.replace("\r\n", "\n").replace("\r", "\n")
+    searchable_text = _without_fenced_code(changelog_text)
     match = None
-    for candidate in _TOP_HEADING.finditer(changelog_text):
+    for candidate in _TOP_HEADING.finditer(searchable_text):
         if candidate.group(1) == version:
             match = candidate
             break
     if match is None:
         raise ValueError(f"No CHANGELOG.md section found for version {version!r}.")
     start = match.start()
-    next_heading = _TOP_HEADING.search(changelog_text, match.end())
+    next_heading = _TOP_HEADING.search(searchable_text, match.end())
     end = next_heading.start() if next_heading else len(changelog_text)
     return changelog_text[start:end].rstrip("\n")
 
 
 def parse_category(section_text):
     """Return the section's Category value, enforcing exactly one valid marker."""
-    matches = _CATEGORY_LINE.findall(section_text)
+    matches = _CATEGORY_LINE.findall(_without_fenced_code(section_text))
     if not matches:
         raise ValueError("Missing `Category:` marker in the released version's section.")
     if len(matches) > 1:
@@ -60,10 +86,11 @@ def parse_category(section_text):
 
 
 def _migration_body(section_text):
-    heading = _MIGRATION_HEADING.search(section_text)
+    searchable_text = _without_fenced_code(section_text)
+    heading = _MIGRATION_HEADING.search(searchable_text)
     if heading is None:
         return None
-    next_heading = _ANY_HEADING.search(section_text, heading.end())
+    next_heading = _ANY_HEADING.search(searchable_text, heading.end())
     end = next_heading.start() if next_heading else len(section_text)
     return section_text[heading.end():end]
 
