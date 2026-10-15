@@ -2,8 +2,16 @@
 
 ## Mod-only publication
 
-Automatic releases triggered by `version.txt` or `modrinth/**` changes publish
-only the individual mod. Manual `workflow_dispatch` releases also default to
+Pushes to main publish only when new changelog fragments exist since the latest
+reachable DA alpha release tag. The highest `bump:` level determines the next
+version (for example, a minor fragment after `0.21.0-alpha.1` produces
+`0.22.0-alpha.1`). CI generates and validates the Category/Migration notes;
+tracked version and changelog files remain unchanged. With no new fragments,
+automatic runs do nothing. A retry at the tagged commit, or a manual run with
+no new fragments, reuses the original GitHub release jar and its saved notes.
+Tags from newer commits are not considered when retrying an older run.
+
+Automatic releases publish only the individual mod. Manual runs also default to
 `release_mode: mod-only`. This mode keeps the build, tests, server smoke check, immutable
 GitHub artifact and authenticated Modrinth artifact read-back. It skips project
 description/settings/review synchronization and all Sickos dispatch steps.

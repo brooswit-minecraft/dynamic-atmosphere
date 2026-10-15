@@ -139,4 +139,27 @@ class AtmosphereVolumeGeometryTest {
         assertEquals(-Math.expm1(-0.6 / 8), AtmosphereVolumeGeometry.sliceAlpha(1000, 0.5), 1.0e-7);
         assertEquals(-Math.expm1(-0.6), AtmosphereVolumeGeometry.sliceAlpha(1000, 4), 1.0e-7);
     }
+
+    @Test
+    void fadeIsFullBelowStartZeroAtAndBeyondMaxAndStrictlyDecreasingBetween() {
+        double fadeStart = 75, maxDistance = 100;
+        assertEquals(1, AtmosphereVolumeGeometry.fadeMultiplier(0, fadeStart, maxDistance));
+        assertEquals(1, AtmosphereVolumeGeometry.fadeMultiplier(fadeStart, fadeStart, maxDistance));
+        assertEquals(0, AtmosphereVolumeGeometry.fadeMultiplier(maxDistance, fadeStart, maxDistance));
+        assertEquals(0, AtmosphereVolumeGeometry.fadeMultiplier(maxDistance + 50, fadeStart, maxDistance));
+        assertEquals(0.5, AtmosphereVolumeGeometry.fadeMultiplier(87.5, fadeStart, maxDistance), 1e-9);
+        double previous = 1;
+        for (double d = fadeStart; d <= maxDistance; d += 1) {
+            double fade = AtmosphereVolumeGeometry.fadeMultiplier(d, fadeStart, maxDistance);
+            assertTrue(fade <= previous, "fade must be monotone non-increasing with distance");
+            previous = fade;
+        }
+    }
+
+    @Test
+    void fadeFallsBackToAHardCutoffWhenTheBandIsDegenerate() {
+        assertEquals(1, AtmosphereVolumeGeometry.fadeMultiplier(50, 100, 100));
+        assertEquals(0, AtmosphereVolumeGeometry.fadeMultiplier(100, 100, 100));
+        assertEquals(0, AtmosphereVolumeGeometry.fadeMultiplier(150, 100, 100));
+    }
 }
