@@ -1,3 +1,11 @@
+# 0.20.3-alpha.2
+
+Category: minor
+
+- Add configurable continuous fill-biased vertical movement for Vapor, Smoke and material grids, preserving horizontal spreading, fans and downward barriers (MINECRAFT-79).
+- Handle transient Modrinth read-back failures with bounded retries and extract CHANGELOG sections correctly around fenced code (MINECRAFT-80).
+- Publish automatic releases as individual mod artifacts without changing Modrinth project settings or dispatching a Sickos modpack update. Manual releases default to the same boundary.
+
 # 0.20.3-alpha.1
 
 Category: patch

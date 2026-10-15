@@ -1,5 +1,21 @@
 # Release / sickos dispatch contract
 
+## Mod-only publication
+
+Automatic releases triggered by `version.txt` or `modrinth/**` changes publish
+only the individual mod. Manual `workflow_dispatch` releases also default to
+`release_mode: mod-only`. This mode keeps the build, tests, server smoke check, immutable
+GitHub artifact and authenticated Modrinth artifact read-back. It skips project
+description/settings/review synchronization and all Sickos dispatch steps.
+Existing credentials and repository settings are not changed.
+
+Only an explicitly authorized manual run with `release_mode: integrated` uses the
+integrated path described below, including project metadata synchronization and
+the downstream Sickos dispatch. That path may update and release the modpack;
+do not select it while a modpack hold is in force. A mod-only publication does
+not queue a later pack update, and retrying an already-published version does
+not dispatch it automatically.
+
 This is the durable record of the cross-repo interface between this repo's
 `release.yml` and the `brooswit-minecraft/sickos` modpack, agreed between the
 two repo leads (ATMO-14 / SICKOS-70). Confluence doc creation is currently
