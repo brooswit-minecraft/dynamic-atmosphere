@@ -5,6 +5,12 @@ on:
     branches: [main]
     paths: [version.txt, 'modrinth/**']
   workflow_dispatch:
+    inputs:
+      release_mode:
+        description: 'Publish only this mod; skip project metadata/review changes and Sickos dispatch.'
+        type: choice
+        options: [mod-only, integrated]
+        default: mod-only
 
 permissions:
   contents: write
@@ -16,6 +22,11 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      # Automatic releases and manual runs without an explicit opt-in must
+      # never update the modpack or change project moderation/listing settings.
+      # Explicit manual release_mode=integrated retains the integrated release path.
+      MOD_ONLY: ${{ github.event_name != 'workflow_dispatch' || inputs.release_mode != 'integrated' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -75,6 +86,7 @@ jobs:
           echo "url=https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION" >> "$GITHUB_OUTPUT"
       - uses: oven-sh/setup-bun@v2
       - name: Sync Modrinth description
+        if: env.MOD_ONLY != 'true'
         env:
           MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
           PROJECT_ID: ${{ vars.MODRINTH_PROJECT_ID }}
@@ -106,6 +118,7 @@ jobs:
             --version "$VERSION" --changelog-file CHANGELOG.md \
             --game-version 1.21.1 --loader neoforge --channel alpha
       - name: Sync current Modrinth environment and review state
+        if: env.MOD_ONLY != 'true'
         env:
           MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
           PROJECT_ID: ${{ vars.MODRINTH_PROJECT_ID }}
@@ -130,6 +143,7 @@ jobs:
       # secrets.* cannot be tested directly in a step `if:`, so presence is
       # routed through this step's outputs instead.
       - name: Determine sickos dispatch credential
+        if: env.MOD_ONLY != 'true'
         id: dispatch_cred
         env:
           HAS_PAT: ${{ secrets.SICKOS_DISPATCH_TOKEN != '' }}
@@ -144,7 +158,7 @@ jobs:
           fi
       - name: Mint sickos dispatch app token
         id: mint_app_token
-        if: steps.dispatch_cred.outputs.has_pat != 'true' && steps.dispatch_cred.outputs.has_app == 'true'
+        if: env.MOD_ONLY != 'true' && steps.dispatch_cred.outputs.has_pat != 'true' && steps.dispatch_cred.outputs.has_app == 'true'
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ vars.SICKOS_DISPATCH_APP_ID }}
@@ -158,6 +172,7 @@ jobs:
       # credential skips with a loud warning and never fails the release. See
       # docs/release-dispatch-contract.md for the full contract.
       - name: Build dynamic-atmosphere-released payload and dispatch to sickos
+        if: env.MOD_ONLY != 'true'
         env:
           VERSION: ${{ steps.version.outputs.value }}
           CATEGORY: ${{ steps.category.outputs.category }}
@@ -172,9 +187,13 @@ jobs:
           SICKOS_DISPATCH_APP_TOKEN: ${{ steps.mint_app_token.outputs.token }}
         run: python3 scripts/dispatch-sickos.py dynamic-atmosphere-released.json
       - name: Upload dynamic-atmosphere-released payload artifact
-        if: always()
+        if: always() && env.MOD_ONLY != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: dynamic-atmosphere-released
           path: dynamic-atmosphere-released.json
           if-no-files-found: warn
+      - name: Record mod-only publication boundary
+        if: env.MOD_ONLY == 'true'
+        run: |
+          echo 'Mod-only release: GitHub and Modrinth artifacts verified; project metadata/review synchronization and Sickos dispatch skipped. No modpack update requested.' >> "$GITHUB_STEP_SUMMARY"

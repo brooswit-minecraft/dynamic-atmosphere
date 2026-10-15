@@ -38,6 +38,13 @@ public final class ForgeSmokeGameplay {
         if (vapor > 0) enqueue(level, pos, vapor, false);
     }
 
+    /** Emits Smoke for an explicit lava-removal conversion during a fluid tick. */
+    public static void lavaRemoved(ServerLevel level, BlockPos pos) {
+        if (!level.getServer().isSameThread()) return;
+        int smoke = SmokeProducerRules.transition(true, false, false, true, false, false);
+        if (smoke > 0) enqueue(level, pos, smoke, true);
+    }
+
     public static void explosionBurst(Level level, BlockPos pos) {
         if (level instanceof ServerLevel server && server.getServer().isSameThread()) {
             enqueue(server, pos, SmokeProducerRules.explosionBurst(true), true);

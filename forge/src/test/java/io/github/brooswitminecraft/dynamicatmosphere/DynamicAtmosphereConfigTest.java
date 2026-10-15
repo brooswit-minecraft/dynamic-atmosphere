@@ -31,6 +31,7 @@ class DynamicAtmosphereConfigTest {
         assertEquals(100, first.integrations().createFanIntervalTicks());
         assertEquals(32, first.integrations().maxFanChunksPerTick());
         assertEquals(12.0, first.heavyGas().dissipationFactor());
+        assertEquals(0.1, first.magma().breakLavaChance());
     }
 
     @Test
