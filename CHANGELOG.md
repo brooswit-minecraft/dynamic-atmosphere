@@ -1,3 +1,11 @@
+# 0.20.3-alpha.1
+
+Category: patch
+
+- Keep the previous detailed atmosphere frontier visible while rebuilding after ordinary chunk-boundary crossings; teleport-sized moves still use a coarse preview.
+- Include the merged delta-only chunk-boundary synchronization fixes for Vapor, Smoke, and material grids.
+- Default rain-cloud sampling to world Y=256 while preserving configured heights and high-terrain emission bounds.
+
 # 0.20.2-alpha.1
 
 Category: patch
