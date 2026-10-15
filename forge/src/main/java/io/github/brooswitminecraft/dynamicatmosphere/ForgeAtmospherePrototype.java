@@ -600,12 +600,15 @@ final class ForgeAtmospherePrototype {
 
     private void advanceSimulation(MinecraftServer server) {
         var capacities = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer>();
+        var verticalDirections = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, FillBiasedVerticalMovement.Direction>();
         ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacityAt = key ->
             capacities.computeIfAbsent(key, candidate -> capacityAt(server.getLevel(candidate.dimension()), candidate));
         BiPredicate<AtmosphereGrid.CellKey<ResourceKey<Level>>,
             AtmosphereGrid.CellKey<ResourceKey<Level>>> canTransfer =
-                (source, destination) -> canTransferDown(server, source, destination, false);
+                (source, destination) -> canTransferDown(server, source, destination, false)
+                    && allowsVerticalMovement(source, destination, verticalDirections);
         var spread = grid.spread(serverTicks, capacityAt, key -> {
+            rememberVerticalMovement(server, grid, key, AtmosphereGrid.CELL_SIZE, capacityAt, verticalDirections);
             growPlants(server.getLevel(key.dimension()), grid, key, AtmosphereGrid.CELL_SIZE, capacityAt);
             capacities.clear();
             if (condense(server.getLevel(key.dimension()), key, capacityAt.applyAsInt(key))) capacities.clear();
@@ -683,13 +686,16 @@ final class ForgeAtmospherePrototype {
 
     private void advanceSmokeSimulation(MinecraftServer server) {
         var capacities = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer>();
+        var verticalDirections = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, FillBiasedVerticalMovement.Direction>();
         ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacityAt = key ->
             capacities.computeIfAbsent(key,
                 candidate -> smokeCapacityAt(server.getLevel(candidate.dimension()), candidate));
         BiPredicate<AtmosphereGrid.CellKey<ResourceKey<Level>>,
             AtmosphereGrid.CellKey<ResourceKey<Level>>> canTransfer =
-                (source, destination) -> canTransferDown(server, source, destination, true);
+                (source, destination) -> canTransferDown(server, source, destination, true)
+                    && allowsVerticalMovement(source, destination, verticalDirections);
         var spread = smokeGrid.spread(serverTicks, capacityAt, key -> {
+            rememberVerticalMovement(server, smokeGrid, key, SmokeGridLayout.CELL_SIZE, capacityAt, verticalDirections);
             ServerLevel level = server.getLevel(key.dimension());
             var cell = smokeGrid.get(key);
             if (level == null || cell == null) return;
@@ -713,14 +719,17 @@ final class ForgeAtmospherePrototype {
     private void advanceMaterialSimulations(MinecraftServer server) {
         for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
             var capacities = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer>();
+            var verticalDirections = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, FillBiasedVerticalMovement.Direction>();
             ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacityAt = key ->
                 capacities.computeIfAbsent(key,
                     candidate -> materialCapacityAt(server.getLevel(candidate.dimension()), material, candidate));
             AtmosphereGrid<ResourceKey<Level>> materialGrid = materialGrids.get(material);
             BiPredicate<AtmosphereGrid.CellKey<ResourceKey<Level>>,
                 AtmosphereGrid.CellKey<ResourceKey<Level>>> canTransfer =
-                    (source, destination) -> canMaterialTransferDown(server, material, source, destination);
+                    (source, destination) -> canMaterialTransferDown(server, material, source, destination)
+                        && allowsVerticalMovement(source, destination, verticalDirections);
             var spread = materialGrid.spread(serverTicks, capacityAt, key -> {
+                rememberVerticalMovement(server, materialGrid, key, material.cellSize(), capacityAt, verticalDirections);
                 ServerLevel cellLevel = server.getLevel(key.dimension());
                 if (cellLevel == null) return;
                 BlockPos origin = materialCellOrigin(material, key);
@@ -1471,6 +1480,36 @@ final class ForgeAtmospherePrototype {
             material.chunkCoordinate(source.z())));
         return state != null
             && ForgeMaterialCapacity.get(state.chunk, material).downwardBarrier(source.x(), source.y(), source.z()) == 0;
+    }
+
+    private void rememberVerticalMovement(
+        MinecraftServer server,
+        AtmosphereGrid<ResourceKey<Level>> target,
+        AtmosphereGrid.CellKey<ResourceKey<Level>> key,
+        int cellSize,
+        ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacityAt,
+        Map<AtmosphereGrid.CellKey<ResourceKey<Level>>, FillBiasedVerticalMovement.Direction> directions
+    ) {
+        ServerLevel level = server.getLevel(key.dimension());
+        var cell = target.get(key);
+        int capacity = capacityAt.applyAsInt(key);
+        if (level == null || cell == null || capacity <= 0) return;
+        var movement = tuning().verticalMovement();
+        int cloudlineCell = Math.floorDiv(tuning().vapor().rainCloudHeight(), cellSize);
+        directions.put(key, FillBiasedVerticalMovement.choose(key.y(), cloudlineCell, cell.amount(), capacity,
+            movement.emptyTowardCloudlineChance(), movement.fullTowardCloudlineChance(), level.random::nextDouble));
+    }
+
+    private static boolean allowsVerticalMovement(
+        AtmosphereGrid.CellKey<ResourceKey<Level>> source,
+        AtmosphereGrid.CellKey<ResourceKey<Level>> destination,
+        Map<AtmosphereGrid.CellKey<ResourceKey<Level>>, FillBiasedVerticalMovement.Direction> directions
+    ) {
+        var direction = directions.get(source);
+        if (direction == null || destination.y() == source.y()) return true;
+        return destination.y() > source.y()
+            ? direction == FillBiasedVerticalMovement.Direction.UP
+            : direction == FillBiasedVerticalMovement.Direction.DOWN;
     }
 
     private void importPendingChunks(MinecraftServer server) {
