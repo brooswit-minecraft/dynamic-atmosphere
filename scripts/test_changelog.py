@@ -176,6 +176,35 @@ Older release.
         self.assertIn("# 9.9.9", section)
         self.assertNotIn("Older release.", section)
 
+    def test_info_string_fence_inside_open_fence_does_not_close_it(self):
+        # A closing fence may only be followed by whitespace; ```python inside
+        # an open fence is content, so the later # heading stays masked.
+        fixture = """# 1.2.3
+
+Category: patch
+
+```markdown
+```python
+# 9.9.9
+## Fake heading
+```
+
+Release text.
+
+# 1.2.2
+
+Older release.
+"""
+        section = changelog.extract_section(fixture, "1.2.3")
+        self.assertIn("# 9.9.9", section)
+        self.assertIn("Release text.", section)
+        self.assertNotIn("Older release.", section)
+
+        trailing_space = fixture.replace("```markdown\n```python", "```markdown\n```python").replace("## Fake heading\n```", "## Fake heading\n```  ")
+        section = changelog.extract_section(trailing_space, "1.2.3")
+        self.assertNotIn("Older release.", section)
+        self.assertIn("Release text.", section)
+
 
 class RealChangelogTest(unittest.TestCase):
     """Catches a missing/invalid marker on a PR before it can fail a release on main."""

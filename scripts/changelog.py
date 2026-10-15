@@ -18,7 +18,7 @@ _TOP_HEADING = re.compile(r"^# (.+?)\s*$", re.MULTILINE)
 _CATEGORY_LINE = re.compile(r"^Category:[ \t]*(\S*)[ \t]*$", re.MULTILINE)
 _MIGRATION_HEADING = re.compile(r"^## Migration[ \t]*$", re.MULTILINE)
 _ANY_HEADING = re.compile(r"^#{1,2} ", re.MULTILINE)
-_FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})")
+_FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})(.*)$")
 
 
 def _without_fenced_code(text):
@@ -34,7 +34,7 @@ def _without_fenced_code(text):
             if fence_char is None:
                 fence_char = marker[0]
                 fence_length = len(marker)
-            elif marker[0] == fence_char and len(marker) >= fence_length:
+            elif marker[0] == fence_char and len(marker) >= fence_length and not fence.group(2).strip():
                 fence_char = None
                 fence_length = 0
             masked.append("".join("\n" if char == "\n" else "\r" if char == "\r" else " " for char in line))
