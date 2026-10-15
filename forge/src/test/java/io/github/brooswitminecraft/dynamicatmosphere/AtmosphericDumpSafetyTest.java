@@ -113,6 +113,30 @@ class AtmosphericDumpSafetyTest {
         assertTrue(text.contains("unreadableSkipped=1"));
     }
 
+    @Test
+    void cleanupAcrossMultipleRegisteredDimensionsReportsEachDimensionSeparately() {
+        CleanupFixture overworldFixture = new CleanupFixture();
+        CleanupFixture netherFixture = new CleanupFixture();
+        netherFixture.unreadableVapor = true;
+
+        var dimensionedTargets = List.of(
+            Map.entry(Level.OVERWORLD, (AtmosphericDumpSafety.LoadedChunkTarget) overworldFixture),
+            Map.entry(Level.NETHER, (AtmosphericDumpSafety.LoadedChunkTarget) netherFixture));
+
+        Map<net.minecraft.resources.ResourceKey<Level>, ForgeAtmospherePrototype.DumpReport> reports =
+            AtmosphericDumpSafety.cleanLoadedChunksByDimension(dimensionedTargets);
+
+        assertEquals(2, reports.size(), "each dimension must get its own report, not one combined total");
+        ForgeAtmospherePrototype.DumpReport overworldReport = reports.get(Level.OVERWORLD);
+        ForgeAtmospherePrototype.DumpReport netherReport = reports.get(Level.NETHER);
+        assertEquals(3, overworldReport.vapor);
+        assertEquals(1, overworldReport.unreadable, "overworld skips only the unreadable ENDER_GAS material");
+        assertEquals(0, netherReport.vapor, "the nether fixture's unreadable vapor must not be counted as deleted");
+        assertEquals(2, netherReport.unreadable, "nether skips vapor plus the unreadable ENDER_GAS material");
+        assertTrue(overworldFixture.capacityCleared);
+        assertTrue(netherFixture.capacityCleared);
+    }
+
     private static final class Fixture {
         private final String id;
         private int vapor;
@@ -132,8 +156,8 @@ class AtmosphericDumpSafetyTest {
     }
 
     private static final class CleanupFixture implements AtmosphericDumpSafety.LoadedChunkTarget {
-        boolean capacityCleared, unloadedTouched;
-        public boolean vaporReadable() { return true; }
+        boolean capacityCleared, unloadedTouched, unreadableVapor;
+        public boolean vaporReadable() { return !unreadableVapor; }
         public int deleteVapor() { return 3; }
         public boolean smokeReadable() { return true; }
         public int deleteSmoke() { return 2; }

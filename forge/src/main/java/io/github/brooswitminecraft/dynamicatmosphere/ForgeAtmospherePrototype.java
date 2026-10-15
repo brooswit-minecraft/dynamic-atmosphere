@@ -365,8 +365,7 @@ final class ForgeAtmospherePrototype {
      * would risk overwriting unrelated or unreadable payloads.
      */
     private int deleteLoadedMaterialData(CommandSourceStack source) {
-        var report = new LinkedHashMap<ResourceKey<Level>, DumpReport>();
-        var loaded = new ArrayList<Map.Entry<ChunkKey, ChunkState>>();
+        var dimensionedTargets = new ArrayList<Map.Entry<ResourceKey<Level>, AtmosphericDumpSafety.LoadedChunkTarget>>();
         for (var entry : chunks.entrySet()) {
             ChunkKey key = entry.getKey();
             ChunkState state = entry.getValue();
@@ -374,14 +373,10 @@ final class ForgeAtmospherePrototype {
             if (level == null || level.getChunkSource().getChunkNow(key.x(), key.z()) != state.chunk) {
                 continue;
             }
-            loaded.add(entry);
+            dimensionedTargets.add(Map.entry(key.dimension(), toLoadedChunkTarget(state)));
         }
-        AtmosphericDumpSafety.cleanLoadedOnly(loaded, entry -> {
-            ChunkKey key = entry.getKey();
-            ChunkState state = entry.getValue();
-            DumpReport dimension = report.computeIfAbsent(key.dimension(), ignored -> new DumpReport());
-            clearLoadedChunk(state, dimension);
-        });
+        Map<ResourceKey<Level>, DumpReport> report =
+            AtmosphericDumpSafety.cleanLoadedChunksByDimension(dimensionedTargets);
 
         AtmosphericDumpSafety.clearRuntimeState(
             pendingLoads::clear,
@@ -401,8 +396,8 @@ final class ForgeAtmospherePrototype {
         return 1;
     }
 
-    private void clearLoadedChunk(ChunkState state, DumpReport report) {
-        AtmosphericDumpSafety.cleanLoadedChunk(new AtmosphericDumpSafety.LoadedChunkTarget() {
+    private AtmosphericDumpSafety.LoadedChunkTarget toLoadedChunkTarget(ChunkState state) {
+        return new AtmosphericDumpSafety.LoadedChunkTarget() {
             public boolean vaporReadable() { return state.readable; }
             public int deleteVapor() {
                 int cells = state.cells.size();
@@ -433,7 +428,7 @@ final class ForgeAtmospherePrototype {
                 ForgeSmokeCapacity.clear(state.chunk);
                 ForgeMaterialCapacity.clear(state.chunk);
             }
-        }, report);
+        };
     }
 
     static String formatDumpReport(Map<ResourceKey<Level>, DumpReport> report) {

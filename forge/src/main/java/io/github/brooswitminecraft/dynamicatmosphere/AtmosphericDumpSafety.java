@@ -1,7 +1,12 @@
 package io.github.brooswitminecraft.dynamicatmosphere;
 
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.Level;
+
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 
 /**
@@ -63,6 +68,23 @@ final class AtmosphericDumpSafety {
 
     private static int delete(java.util.function.IntSupplier action, ForgeAtmospherePrototype.DumpReport report) {
         try { return action.getAsInt(); } catch (IllegalStateException exception) { report.unreadable++; return 0; }
+    }
+
+    /**
+     * Cleans every supplied (dimension, loaded-chunk) pair and merges results into one
+     * report per dimension, so a run spanning several registered dimensions in the same
+     * invocation is reported separately rather than collapsed into a single total.
+     */
+    static Map<ResourceKey<Level>, ForgeAtmospherePrototype.DumpReport> cleanLoadedChunksByDimension(
+        Collection<Map.Entry<ResourceKey<Level>, LoadedChunkTarget>> dimensionedTargets
+    ) {
+        var report = new LinkedHashMap<ResourceKey<Level>, ForgeAtmospherePrototype.DumpReport>();
+        for (var entry : loadedTargets(dimensionedTargets)) {
+            var dimensionReport = report.computeIfAbsent(entry.getKey(),
+                ignored -> new ForgeAtmospherePrototype.DumpReport());
+            cleanLoadedChunk(entry.getValue(), dimensionReport);
+        }
+        return report;
     }
 
     private AtmosphericDumpSafety() { }
