@@ -7,6 +7,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 
 final class AtmosphereSyncPlanner<P, D> {
 
@@ -32,7 +33,7 @@ final class AtmosphereSyncPlanner<P, D> {
     /** Used by callers that don't track view-distance changes; never matches a real change. */
     static final int UNKNOWN_VIEW_RADIUS = -1;
 
-    private record PlayerView<D>(D dimension, int viewRadius, Set<Chunk> authoritativeChunks, Map<CellCoordinate, Cell> cells) {
+    private record PlayerView<D>(D dimension, int viewRadius, Map<CellCoordinate, Cell> cells) {
     }
 
     private record CellCoordinate(int x, int y, int z) {
@@ -58,22 +59,30 @@ final class AtmosphereSyncPlanner<P, D> {
      * sliding as the player crosses a chunk boundary — never inferred from the chunk/cell set size.
      */
     List<Update<D>> plan(P player, D dimension, int viewRadius, List<Chunk> authoritativeChunks, List<Cell> visibleCells) {
-        List<Chunk> chunkScope = List.copyOf(new LinkedHashSet<>(authoritativeChunks));
-        Set<Chunk> currentChunks = Set.copyOf(chunkScope);
+        return plan(player, dimension, viewRadius, () -> authoritativeChunks, visibleCells);
+    }
+
+    /**
+     * Same as the list overload, but the authoritative chunk scope is only requested when the plan is a
+     * snapshot (first sync, dimension change, view-distance change). Delta syncs never read it, so callers can
+     * avoid building it every sync.
+     */
+    List<Update<D>> plan(P player, D dimension, int viewRadius, Supplier<List<Chunk>> authoritativeChunks,
+                         List<Cell> visibleCells) {
         Map<CellCoordinate, Cell> current = index(visibleCells);
-        PlayerView<D> previous = views.put(player, new PlayerView<>(dimension, viewRadius, currentChunks, current));
+        PlayerView<D> previous = views.put(player, new PlayerView<>(dimension, viewRadius, current));
         List<Update<D>> updates = new ArrayList<>();
 
         if (previous == null || !previous.dimension().equals(dimension)) {
             if (previous != null) {
                 updates.add(new Update<>(previous.dimension(), true, true, List.of(), List.of()));
             }
-            addBatches(updates, dimension, true, chunkScope, visibleCells);
+            addBatches(updates, dimension, true, scope(authoritativeChunks), visibleCells);
             return updates;
         }
 
         if (previous.viewRadius() != viewRadius) {
-            addBatches(updates, dimension, true, chunkScope, visibleCells);
+            addBatches(updates, dimension, true, scope(authoritativeChunks), visibleCells);
             return updates;
         }
 
@@ -119,12 +128,16 @@ final class AtmosphereSyncPlanner<P, D> {
         views.clear();
     }
 
+    private static List<Chunk> scope(Supplier<List<Chunk>> authoritativeChunks) {
+        return List.copyOf(new LinkedHashSet<>(authoritativeChunks.get()));
+    }
+
     private Map<CellCoordinate, Cell> index(List<Cell> cells) {
         Map<CellCoordinate, Cell> indexed = new LinkedHashMap<>();
         for (Cell cell : cells) {
             indexed.put(new CellCoordinate(cell.x(), cell.y(), cell.z()), cell);
         }
-        return Map.copyOf(indexed);
+        return indexed;
     }
 
     private void addBatches(

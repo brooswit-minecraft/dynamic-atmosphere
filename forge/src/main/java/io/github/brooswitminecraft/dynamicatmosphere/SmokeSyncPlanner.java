@@ -7,6 +7,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 import java.util.function.IntUnaryOperator;
 
 /** Per-player snapshot/delta planner for a grid with an integral number of cells per chunk. */
@@ -25,7 +26,7 @@ final class SmokeSyncPlanner<P, D> {
     static final int UNKNOWN_VIEW_RADIUS = -1;
 
     private record Coordinate(int x, int y, int z) { }
-    private record PlayerView<D>(D dimension, int viewRadius, Set<Chunk> chunks, Map<Coordinate, Cell> cells) { }
+    private record PlayerView<D>(D dimension, int viewRadius, Map<Coordinate, Cell> cells) { }
 
     private final int batchSize;
     private final IntUnaryOperator chunkCoordinate;
@@ -51,19 +52,23 @@ final class SmokeSyncPlanner<P, D> {
      * sliding as the player crosses a chunk boundary — never inferred from the chunk/cell set size.
      */
     List<Update<D>> plan(P player, D dimension, int viewRadius, List<Chunk> authoritativeChunks, List<Cell> visibleCells) {
-        List<Chunk> scope = List.copyOf(new LinkedHashSet<>(authoritativeChunks));
-        Set<Chunk> currentChunks = Set.copyOf(scope);
+        return plan(player, dimension, viewRadius, () -> authoritativeChunks, visibleCells);
+    }
+
+    /** Snapshot-only chunk scope: delta syncs never request it, so callers can skip building it. */
+    List<Update<D>> plan(P player, D dimension, int viewRadius, Supplier<List<Chunk>> authoritativeChunks,
+                         List<Cell> visibleCells) {
         Map<Coordinate, Cell> current = index(visibleCells);
-        PlayerView<D> previous = views.put(player, new PlayerView<>(dimension, viewRadius, currentChunks, current));
+        PlayerView<D> previous = views.put(player, new PlayerView<>(dimension, viewRadius, current));
         var updates = new ArrayList<Update<D>>();
 
         if (previous == null || !previous.dimension().equals(dimension)) {
             if (previous != null) updates.add(new Update<>(previous.dimension(), true, true, List.of(), List.of()));
-            addBatches(updates, dimension, true, scope, visibleCells);
+            addBatches(updates, dimension, true, scope(authoritativeChunks), visibleCells);
             return updates;
         }
         if (previous.viewRadius() != viewRadius) {
-            addBatches(updates, dimension, true, scope, visibleCells);
+            addBatches(updates, dimension, true, scope(authoritativeChunks), visibleCells);
             return updates;
         }
 
@@ -90,10 +95,14 @@ final class SmokeSyncPlanner<P, D> {
     }
     void clear() { views.clear(); }
 
+    private static List<Chunk> scope(Supplier<List<Chunk>> authoritativeChunks) {
+        return List.copyOf(new LinkedHashSet<>(authoritativeChunks.get()));
+    }
+
     private Map<Coordinate, Cell> index(List<Cell> cells) {
         var indexed = new LinkedHashMap<Coordinate, Cell>();
         for (Cell cell : cells) indexed.put(new Coordinate(cell.x(), cell.y(), cell.z()), cell);
-        return Map.copyOf(indexed);
+        return indexed;
     }
 
     private void addBatches(List<Update<D>> updates, D dimension, boolean reset, List<Chunk> chunks,

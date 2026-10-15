@@ -272,4 +272,26 @@ class AtmosphereSyncPlannerTest {
         assertFalse(snapshot.get(1).snapshotEnd());
         assertTrue(snapshot.getLast().snapshotEnd());
     }
+
+    @Test
+    void chunkScopeIsOnlyRequestedForSnapshots() {
+        var planner = new AtmosphereSyncPlanner<String, String>(512);
+        var requests = new int[1];
+        var cell = new AtmosphereSyncPlanner.Cell(1, 0, 0, 5, 10);
+        java.util.function.Supplier<List<AtmosphereSyncPlanner.Chunk>> scope = () -> {
+            requests[0]++;
+            return List.of(new AtmosphereSyncPlanner.Chunk(0, 0));
+        };
+
+        assertTrue(planner.plan("player", "overworld", 8, scope, List.of(cell)).getFirst().reset());
+        assertEquals(1, requests[0]);
+
+        assertTrue(planner.plan("player", "overworld", 8, scope, List.of(cell)).isEmpty());
+        var changed = new AtmosphereSyncPlanner.Cell(1, 0, 0, 6, 10);
+        assertEquals(List.of(changed), planner.plan("player", "overworld", 8, scope, List.of(changed)).getFirst().cells());
+        assertEquals(1, requests[0]);
+
+        assertTrue(planner.plan("player", "overworld", 9, scope, List.of(changed)).getFirst().reset());
+        assertEquals(2, requests[0]);
+    }
 }
