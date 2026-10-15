@@ -8,6 +8,7 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.config.ModConfig;
+import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.fml.common.Mod;
 import org.slf4j.Logger;
@@ -39,7 +40,10 @@ public class DynamicAtmosphereMod {
         modEventBus.addListener(DynamicAtmosphereClientConfig::onReloading);
         modEventBus.addListener(DynamicAtmosphereClientConfig::onUnloading);
         LOGGER.info("[{}] engine module reachable: {}", MODID, EngineInfo.DESCRIPTION);
-        LavaIceInteractions.register();
+        // Deferred to FMLCommonSetupEvent: NeoForgeMod.LAVA_TYPE's registry is not yet
+        // populated during mod construction, and FluidInteractionRegistry.addInteraction
+        // resolves it eagerly (NeoForgeMod.LAVA_TYPE.value()), not lazily.
+        modEventBus.addListener((FMLCommonSetupEvent event) -> LavaIceInteractions.register());
         modEventBus.addListener(AtmosphereNetwork::register);
         ForgeAtmosphereStorage.register(modEventBus);
         ForgeAtmosphereCapacity.register(modEventBus);
