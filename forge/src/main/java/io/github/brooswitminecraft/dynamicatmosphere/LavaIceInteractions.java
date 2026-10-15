@@ -2,6 +2,7 @@ package io.github.brooswitminecraft.dynamicatmosphere;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.neoforge.common.NeoForgeMod;
 import net.neoforged.neoforge.event.EventHooks;
@@ -55,14 +56,29 @@ public final class LavaIceInteractions {
     }
 
     /**
+     * Fires the fluid-place event for the lava's own position with this class's own
+     * obsidian/magma result. {@link LavaWaterMagmaGameplay} listens to the same event and
+     * rewrites any proposed obsidian to magma, which is correct only for vanilla's
+     * lava-meets-water obsidian; the guard marks this event as the ice ladder's own so that
+     * listener leaves the ice-ladder obsidian alone.
+     */
+    static BlockState fireLavaResult(LevelAccessor level, BlockPos pos, LavaIceRules.Rung rung) {
+        LavaWaterMagmaGameplay.beginIceInteraction();
+        try {
+            return EventHooks.fireFluidPlaceBlockEvent(level, pos, pos, LavaIceRules.lavaResult(rung));
+        } finally {
+            LavaWaterMagmaGameplay.endIceInteraction();
+        }
+    }
+
+    /**
      * Degrades the neighbouring ice one rung and converts the lava's own position,
      * firing the same fluid-place event and 1501 fizz sound NeoForge's own
      * convenience constructor fires, since both rules act on the lava's position too.
      */
     private static void apply(Level level, BlockPos currentPos, BlockPos relativePos, LavaIceRules.Rung rung) {
         level.setBlockAndUpdate(relativePos, LavaIceRules.neighborResult(rung));
-        BlockState lavaResult = EventHooks.fireFluidPlaceBlockEvent(
-            level, currentPos, currentPos, LavaIceRules.lavaResult(rung));
+        BlockState lavaResult = fireLavaResult(level, currentPos, rung);
         level.setBlockAndUpdate(currentPos, lavaResult);
         level.levelEvent(1501, currentPos, 0);
     }

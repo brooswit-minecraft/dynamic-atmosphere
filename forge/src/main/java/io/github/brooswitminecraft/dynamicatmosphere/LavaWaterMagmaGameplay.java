@@ -12,7 +12,15 @@ import net.neoforged.neoforge.event.level.BlockEvent;
 
 /** Overrides the three vanilla lava-and-water conversion results through one event listener. */
 public final class LavaWaterMagmaGameplay {
+    /** True while {@link LavaIceInteractions} fires its own fluid-place event (server thread only). */
+    private static final ThreadLocal<Boolean> ICE_INTERACTION = ThreadLocal.withInitial(() -> false);
+
+    static void beginIceInteraction() { ICE_INTERACTION.set(true); }
+
+    static void endIceInteraction() { ICE_INTERACTION.set(false); }
+
     public static void onFluidPlaceBlock(BlockEvent.FluidPlaceBlockEvent event) {
+        if (ICE_INTERACTION.get()) return;
         LavaWaterMagmaRules.Decision decision = LavaWaterMagmaRules.classify(proposedBlock(event.getNewState()));
         if (!decision.applies()) return;
 
