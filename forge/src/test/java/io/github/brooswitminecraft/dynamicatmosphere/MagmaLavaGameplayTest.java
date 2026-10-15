@@ -1,7 +1,14 @@
 package io.github.brooswitminecraft.dynamicatmosphere;
 
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
+import net.minecraft.world.level.block.Blocks;
+import net.neoforged.fml.loading.LoadingModList;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Random;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -9,6 +16,24 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MagmaLavaGameplayTest {
+    @BeforeAll
+    static void bootstrap() {
+        if (LoadingModList.get() == null) LoadingModList.of(List.of(), List.of(), List.of(), List.of(), Map.of());
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+    }
+
+    @Test
+    void lavaIsOnlyCommittedIntoAVacatedPositionNeverOverABlockThatTookItsPlace() {
+        assertTrue(MagmaLavaGameplay.canCommitLava(Blocks.AIR.defaultBlockState()));
+        assertTrue(MagmaLavaGameplay.canCommitLava(Blocks.CAVE_AIR.defaultBlockState()));
+        assertTrue(MagmaLavaGameplay.canCommitLava(Blocks.WATER.defaultBlockState()));
+        assertFalse(MagmaLavaGameplay.canCommitLava(Blocks.PISTON_HEAD.defaultBlockState()));
+        assertFalse(MagmaLavaGameplay.canCommitLava(Blocks.MOVING_PISTON.defaultBlockState()));
+        assertFalse(MagmaLavaGameplay.canCommitLava(Blocks.CHEST.defaultBlockState()));
+        assertFalse(MagmaLavaGameplay.canCommitLava(Blocks.STONE.defaultBlockState()));
+        assertFalse(MagmaLavaGameplay.canCommitLava(Blocks.MAGMA_BLOCK.defaultBlockState()));
+    }
 
     @Test
     void probabilityOneAlwaysRollsAndProbabilityZeroNeverDoes() {

@@ -6,6 +6,8 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
@@ -57,6 +59,11 @@ public final class MagmaLavaGameplay {
     /** Pure: a genuine removal is a tracked magma position that is no longer magma. */
     static boolean isRemoval(boolean wasMagma, boolean isMagmaNow) {
         return wasMagma && !isMagmaNow;
+    }
+
+    /** Pure: lava may only be written where nothing but air or a fluid now occupies the removed magma's position. */
+    static boolean canCommitLava(BlockState current) {
+        return current.isAir() || current.getBlock() instanceof LiquidBlock;
     }
 
     /** Pure roll, separable from the game hook so it is unit-testable without a running game. */
@@ -119,9 +126,9 @@ public final class MagmaLavaGameplay {
             ServerLevel level = event.getServer().getLevel(entry.getKey());
             if (level == null) continue;
             for (BlockPos pos : entry.getValue()) {
-                // Skip only if magma genuinely came back (e.g. a machine replaced it within
-                // the same tick); any other current state still gets overwritten with lava.
-                if (level.getBlockState(pos).is(Blocks.MAGMA_BLOCK)) continue;
+                // Commit only into a vacated position; a block that took the place within the
+                // same tick (piston head, placed container, regrown magma) is left untouched.
+                if (!canCommitLava(level.getBlockState(pos))) continue;
                 level.setBlockAndUpdate(pos, Blocks.LAVA.defaultBlockState());
             }
         }

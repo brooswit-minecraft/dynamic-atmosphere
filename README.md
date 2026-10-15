@@ -477,7 +477,10 @@ source (`Blocks.LAVA` at level 0, never flowing) at the removed position.
 and, like the rest of server config, is read fresh on each roll: a config
 reload takes effect without a restart. Placing magma, or a magma block
 replaced by another magma block, never rolls; only a tracked magma position
-genuinely becoming non-magma does.
+genuinely becoming non-magma does. The lava is written at the end of the tick and
+only into a vacated (air or fluid) position: a block that took the removed
+magma's place that same tick, such as a piston head or a placed container, is
+left untouched and no lava appears.
 
 ## Development
 
