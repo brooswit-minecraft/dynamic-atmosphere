@@ -1,9 +1,18 @@
+# 0.20.3-alpha.1
+
+Category: patch
+
+- Keep the previous detailed atmosphere frontier visible while rebuilding after ordinary chunk-boundary crossings; teleport-sized moves still use a coarse preview.
+- Include the merged delta-only chunk-boundary synchronization fixes for Vapor, Smoke, and material grids.
+- Default rain-cloud sampling to world Y=256 while preserving configured heights and high-terrain emission bounds.
+
 # 0.20.2-alpha.1
 
 Category: patch
 
 - Release notes now carry a `Category: patch|minor|breaking` marker; a release fails fast if it is missing or invalid, instead of shipping a category-less build.
 - Every published release now sends a `repository_dispatch` to the Sickos repository, once Modrinth confirms the upload through an authenticated read-back. The dispatch is skipped with a warning when no dispatch credential is configured (no credential is configured as of 0.20.2-alpha.1), and consuming it requires a receiving workflow on Sickos's default branch.
+- Crossing a chunk boundary no longer forces a full resend of every tracked chunk and visible cell for the Vapor, Smoke, and per-material atmosphere grids; only the chunks actually entering or leaving your view are updated. Reduces network traffic and client-side rebuild cost at render-distance edges. A real render-distance change or dimension change still resends the full view, as before. No gameplay or save impact.
 
 # 0.20.1-alpha.1
 

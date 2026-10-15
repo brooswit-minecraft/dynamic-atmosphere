@@ -12,6 +12,7 @@ import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ChunkTrackingView;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.FluidTags;
@@ -61,6 +62,7 @@ final class ForgeAtmospherePrototype {
     }
 
     private static final int DEMO_PARTICLE_CAP = 24;
+    private static final int UNKNOWN_VIEW_RADIUS = -1;
     private static final int[][] DEMO_CELL_OFFSETS = {
         {0, 0, 0}, {1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}
     };
@@ -598,12 +600,15 @@ final class ForgeAtmospherePrototype {
 
     private void advanceSimulation(MinecraftServer server) {
         var capacities = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer>();
+        var verticalDirections = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, FillBiasedVerticalMovement.Direction>();
         ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacityAt = key ->
             capacities.computeIfAbsent(key, candidate -> capacityAt(server.getLevel(candidate.dimension()), candidate));
         BiPredicate<AtmosphereGrid.CellKey<ResourceKey<Level>>,
             AtmosphereGrid.CellKey<ResourceKey<Level>>> canTransfer =
-                (source, destination) -> canTransferDown(server, source, destination, false);
+                (source, destination) -> canTransferDown(server, source, destination, false)
+                    && allowsVerticalMovement(source, destination, verticalDirections);
         var spread = grid.spread(serverTicks, capacityAt, key -> {
+            rememberVerticalMovement(server, grid, key, AtmosphereGrid.CELL_SIZE, capacityAt, verticalDirections);
             growPlants(server.getLevel(key.dimension()), grid, key, AtmosphereGrid.CELL_SIZE, capacityAt);
             capacities.clear();
             if (condense(server.getLevel(key.dimension()), key, capacityAt.applyAsInt(key))) capacities.clear();
@@ -681,13 +686,16 @@ final class ForgeAtmospherePrototype {
 
     private void advanceSmokeSimulation(MinecraftServer server) {
         var capacities = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer>();
+        var verticalDirections = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, FillBiasedVerticalMovement.Direction>();
         ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacityAt = key ->
             capacities.computeIfAbsent(key,
                 candidate -> smokeCapacityAt(server.getLevel(candidate.dimension()), candidate));
         BiPredicate<AtmosphereGrid.CellKey<ResourceKey<Level>>,
             AtmosphereGrid.CellKey<ResourceKey<Level>>> canTransfer =
-                (source, destination) -> canTransferDown(server, source, destination, true);
+                (source, destination) -> canTransferDown(server, source, destination, true)
+                    && allowsVerticalMovement(source, destination, verticalDirections);
         var spread = smokeGrid.spread(serverTicks, capacityAt, key -> {
+            rememberVerticalMovement(server, smokeGrid, key, SmokeGridLayout.CELL_SIZE, capacityAt, verticalDirections);
             ServerLevel level = server.getLevel(key.dimension());
             var cell = smokeGrid.get(key);
             if (level == null || cell == null) return;
@@ -711,14 +719,17 @@ final class ForgeAtmospherePrototype {
     private void advanceMaterialSimulations(MinecraftServer server) {
         for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
             var capacities = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer>();
+            var verticalDirections = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, FillBiasedVerticalMovement.Direction>();
             ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacityAt = key ->
                 capacities.computeIfAbsent(key,
                     candidate -> materialCapacityAt(server.getLevel(candidate.dimension()), material, candidate));
             AtmosphereGrid<ResourceKey<Level>> materialGrid = materialGrids.get(material);
             BiPredicate<AtmosphereGrid.CellKey<ResourceKey<Level>>,
                 AtmosphereGrid.CellKey<ResourceKey<Level>>> canTransfer =
-                    (source, destination) -> canMaterialTransferDown(server, material, source, destination);
+                    (source, destination) -> canMaterialTransferDown(server, material, source, destination)
+                        && allowsVerticalMovement(source, destination, verticalDirections);
             var spread = materialGrid.spread(serverTicks, capacityAt, key -> {
+                rememberVerticalMovement(server, materialGrid, key, material.cellSize(), capacityAt, verticalDirections);
                 ServerLevel cellLevel = server.getLevel(key.dimension());
                 if (cellLevel == null) return;
                 BlockPos origin = materialCellOrigin(material, key);
@@ -1108,17 +1119,16 @@ final class ForgeAtmospherePrototype {
             emitSource(level, emittedSources, frozenSource, cellKey(level, frozenSurface.above()), tuning().vapor().snowIceEmission());
         }
 
-        BlockPos cloud = new BlockPos(x, tuning().vapor().rainCloudHeight(), z);
-        if (!level.dimensionType().ultraWarm()
-            && !level.dimensionType().hasCeiling()
-            && level.isInWorldBounds(cloud)
-            && chunk.getBlockState(cloud).isAir()
-            && level.isRainingAt(cloud)) {
+        var rainSampling = RainCloudSampling.forLanding(
+            landing.getY(), tuning().vapor().rainCloudHeight());
+        BlockPos cloud = new BlockPos(x, rainSampling.cloudY(), z);
+        if (RainCloudSampling.isEligible(
+            level.dimensionType().ultraWarm(), level.dimensionType().hasCeiling(),
+            level.isInWorldBounds(cloud), chunk.getBlockState(cloud).isAir(), level.isRainingAt(cloud))) {
             var rain = AtmosphereSourceStrength.splitRain(
                 tuning().vapor().rainCloudEmission(), level.random.nextInt(tuning().vapor().rainCloudEmission() + 1));
-            int upperY = Math.max(landing.getY(), tuning().vapor().rainCloudHeight());
             BlockPos airborne = new BlockPos(x,
-                landing.getY() + level.random.nextInt(upperY - landing.getY() + 1), z);
+                landing.getY() + level.random.nextInt(rainSampling.airborneUpperY() - landing.getY() + 1), z);
             SourceKey rainSource = new SourceKey(SourceKind.RAIN_CLOUD, level.dimension(), airborne);
             SourceKey groundSource = new SourceKey(SourceKind.RAIN_GROUND, level.dimension(), landing);
             boolean emittedGround = rain.ground() > 0
@@ -1159,6 +1169,18 @@ final class ForgeAtmospherePrototype {
         return false;
     }
 
+    /**
+     * The tracking view's own radius, used only to tell a real view-distance change apart from the tracked-chunk
+     * set sliding because the player crossed a chunk boundary. {@code ChunkTrackingView.EMPTY} (pre-subscription)
+     * has no radius to report; its sentinel never collides with a real {@code Positioned} radius, which is always
+     * non-negative.
+     */
+    private static int viewRadiusOf(ChunkTrackingView view) {
+        return view instanceof ChunkTrackingView.Positioned positioned
+            ? positioned.viewDistance()
+            : UNKNOWN_VIEW_RADIUS;
+    }
+
     private void syncPlayers(MinecraftServer server, boolean forceSnapshot) {
         List<ServerPlayer> players = server.getPlayerList().getPlayers();
         var capacities = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer>();
@@ -1182,7 +1204,8 @@ final class ForgeAtmospherePrototype {
         var authoritativeChunks = new ArrayList<AtmosphereSyncPlanner.Chunk>();
         // Use Minecraft's subscription, including changes to client/server view distance.
         // ensureImported only reads already loaded chunks and retains its per-tick budget.
-        player.getChunkTrackingView().forEach(chunk -> {
+        var trackingView = player.getChunkTrackingView();
+        trackingView.forEach(chunk -> {
             ChunkState state = ensureImported(player.serverLevel(), chunk.x, chunk.z);
             if (state == null || !state.readable) {
                 return;
@@ -1205,7 +1228,7 @@ final class ForgeAtmospherePrototype {
         }
 
         for (AtmosphereSyncPlanner.Update<ResourceKey<Level>> update
-            : syncPlanner.plan(player.getUUID(), dimension, authoritativeChunks, visible)) {
+            : syncPlanner.plan(player.getUUID(), dimension, viewRadiusOf(trackingView), authoritativeChunks, visible)) {
             List<AtmosphereGridPayload.Chunk> chunks = update.authoritativeChunks().stream()
                 .map(chunk -> new AtmosphereGridPayload.Chunk(chunk.x(), chunk.z()))
                 .toList();
@@ -1232,7 +1255,8 @@ final class ForgeAtmospherePrototype {
         ResourceKey<Level> dimension = player.serverLevel().dimension();
         var scope = new ArrayList<SmokeSyncPlanner.Chunk>();
         var visible = new ArrayList<SmokeSyncPlanner.Cell>();
-        player.getChunkTrackingView().forEach(chunk -> {
+        var trackingView = player.getChunkTrackingView();
+        trackingView.forEach(chunk -> {
             ChunkState state = ensureImported(player.serverLevel(), chunk.x, chunk.z);
             if (state == null || !state.smokeReadable) return;
             scope.add(new SmokeSyncPlanner.Chunk(chunk.x, chunk.z));
@@ -1247,7 +1271,7 @@ final class ForgeAtmospherePrototype {
             }
         });
 
-        for (var update : smokeSyncPlanner.plan(player.getUUID(), dimension, scope, visible)) {
+        for (var update : smokeSyncPlanner.plan(player.getUUID(), dimension, viewRadiusOf(trackingView), scope, visible)) {
             List<SmokeGridPayload.Chunk> payloadChunks = update.authoritativeChunks().stream()
                 .map(chunk -> new SmokeGridPayload.Chunk(chunk.x(), chunk.z())).toList();
             List<SmokeGridPayload.Cell> payloadCells = update.cells().stream()
@@ -1281,7 +1305,8 @@ final class ForgeAtmospherePrototype {
         ResourceKey<Level> dimension = player.serverLevel().dimension();
         var scope = new ArrayList<SmokeSyncPlanner.Chunk>();
         var visible = new ArrayList<SmokeSyncPlanner.Cell>();
-        player.getChunkTrackingView().forEach(chunk -> {
+        var trackingView = player.getChunkTrackingView();
+        trackingView.forEach(chunk -> {
             ChunkState state = ensureImported(player.serverLevel(), chunk.x, chunk.z);
             if (state == null || !state.materialReadable.contains(material)) return;
             scope.add(new SmokeSyncPlanner.Chunk(chunk.x, chunk.z));
@@ -1296,7 +1321,7 @@ final class ForgeAtmospherePrototype {
             }
         });
 
-        for (var update : planner.plan(player.getUUID(), dimension, scope, visible)) {
+        for (var update : planner.plan(player.getUUID(), dimension, viewRadiusOf(trackingView), scope, visible)) {
             List<MaterialGridPayload.Chunk> payloadChunks = update.authoritativeChunks().stream()
                 .map(chunk -> new MaterialGridPayload.Chunk(chunk.x(), chunk.z())).toList();
             List<MaterialGridPayload.Cell> payloadCells = update.cells().stream()
@@ -1455,6 +1480,36 @@ final class ForgeAtmospherePrototype {
             material.chunkCoordinate(source.z())));
         return state != null
             && ForgeMaterialCapacity.get(state.chunk, material).downwardBarrier(source.x(), source.y(), source.z()) == 0;
+    }
+
+    private void rememberVerticalMovement(
+        MinecraftServer server,
+        AtmosphereGrid<ResourceKey<Level>> target,
+        AtmosphereGrid.CellKey<ResourceKey<Level>> key,
+        int cellSize,
+        ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacityAt,
+        Map<AtmosphereGrid.CellKey<ResourceKey<Level>>, FillBiasedVerticalMovement.Direction> directions
+    ) {
+        ServerLevel level = server.getLevel(key.dimension());
+        var cell = target.get(key);
+        int capacity = capacityAt.applyAsInt(key);
+        if (level == null || cell == null || capacity <= 0) return;
+        var movement = tuning().verticalMovement();
+        int cloudlineCell = Math.floorDiv(tuning().vapor().rainCloudHeight(), cellSize);
+        directions.put(key, FillBiasedVerticalMovement.choose(key.y(), cloudlineCell, cell.amount(), capacity,
+            movement.emptyTowardCloudlineChance(), movement.fullTowardCloudlineChance(), level.random::nextDouble));
+    }
+
+    private static boolean allowsVerticalMovement(
+        AtmosphereGrid.CellKey<ResourceKey<Level>> source,
+        AtmosphereGrid.CellKey<ResourceKey<Level>> destination,
+        Map<AtmosphereGrid.CellKey<ResourceKey<Level>>, FillBiasedVerticalMovement.Direction> directions
+    ) {
+        var direction = directions.get(source);
+        if (direction == null || destination.y() == source.y()) return true;
+        return destination.y() > source.y()
+            ? direction == FillBiasedVerticalMovement.Direction.UP
+            : direction == FillBiasedVerticalMovement.Direction.DOWN;
     }
 
     private void importPendingChunks(MinecraftServer server) {
