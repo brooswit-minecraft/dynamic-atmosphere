@@ -1,13 +1,3 @@
-# 0.22.0-alpha.1
-
-Category: minor
-
-- Uniform LOD with a horizontal-only max-distance fade (MINECRAFT-19): every material now shares ONE client config value, `[rendering] maxDistanceMultiplier` (default 2.0, range 0.25-4), instead of its own `*ReachMultiplier`. The seven removed keys (`vaporReachMultiplier`, `smokeReachMultiplier`, `dustReachMultiplier`, `voidGasReachMultiplier`, `exhaustReachMultiplier`, `slimeReachMultiplier`, `enderGasReachMultiplier`) are gone from `[materials]` in `dynamicatmosphere-client.toml`.
-- The flat cutoff is replaced by a fade that starts at `[rendering] fadeStartFraction` (default 0.75, range 0-1) of the max distance and reaches full transparency at it.
-- The cull is now cylindrical: bounded horizontally, unbounded vertically within the world build range, so stuff far above or below stays visible. This is an inferred resolution of the epic's intent and may be revisited. LOD detail-level thresholds also use the same horizontal-only distance.
-- Dust, Exhaust and Ender Gas previously defaulted to a 0.25 multiplier and now render 8x farther by default (all keep `rootLevel = 0`), a real cell-budget increase at range. Vapor, Smoke, Void Gas and Slime keep their previous default distance.
-- Void Gas and Slime amplification (C1): the `voidGas.bottomChanceDenominator` and `slime.undergroundChanceDenominator` gates fire every scheduled check (8 to 1), `voidGas.bottomEmission` 8 to 64, `voidGas.hostileDeathEmission` 40 to 320, `voidGas.netherrackEmission` 2 to 16, `slime.undergroundEmission` 8 to 64, and `heavyGas.dissipationFactor` rises 3 to 12, so Void Gas, Ender Gas and Slime dissipate at a twelfth of Smoke's rate. Ender Gas dissipation slowing is an intended side effect of the shared factor.
-
 # 0.21.0-alpha.1
 
 Category: minor
