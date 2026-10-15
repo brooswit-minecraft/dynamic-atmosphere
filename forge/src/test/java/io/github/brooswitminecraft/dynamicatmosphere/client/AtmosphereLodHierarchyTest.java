@@ -149,6 +149,16 @@ class AtmosphereLodHierarchyTest {
         assertTrue(busyPreview.volumes().stream().anyMatch(v -> v.x == 0 && v.y == 0 && v.z == 0));
     }
 
+    @Test
+    void chunkBoundaryStepKeepsPreviousFrontierWhileRebuilding() {
+        var tree = new AtmosphereLodHierarchy();
+        seedBusyRegion(tree);
+        var settled = tree.select(0, 0, 0, 4, 0);
+        for (int tick = 1; tree.selectionPending(); tick++) settled = tree.select(0, 0, 0, 4, tick);
+        var crossing = tree.select(16, 0, 0, 4, 1000);
+        assertSame(settled, crossing);
+    }
+
     private static void seedBusyRegion(AtmosphereLodHierarchy tree) {
         for (int x = -8; x < 8; x++) {
             for (int y = -8; y < 8; y++) {

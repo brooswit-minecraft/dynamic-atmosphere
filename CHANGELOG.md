@@ -9,7 +9,17 @@ Category: minor
 - Blue ice still remains basalt, not obsidian, when lava has soul soil beneath it — the existing basalt-generator precedence is unchanged.
 - Breaking a magma block, by any actor or mechanism (player, explosion, piston, mob, or an automated machine), now independently rolls a `magma.breakLavaChance` chance (default `0.1`) to leave a lava source at the removed position. Placing magma, or replacing magma with magma, never rolls. Config-backed and reloadable at runtime; see README's "Lava and Magma" section.
 
+# 0.20.3-alpha.1
+
+Category: patch
+
+- Keep the previous detailed atmosphere frontier visible while rebuilding after ordinary chunk-boundary crossings; teleport-sized moves still use a coarse preview.
+- Include the merged delta-only chunk-boundary synchronization fixes for Vapor, Smoke, and material grids.
+- Default rain-cloud sampling to world Y=256 while preserving configured heights and high-terrain emission bounds.
+
 # 0.20.2-alpha.1
+
+Category: patch
 
 - Release notes now carry a `Category: patch|minor|breaking` marker; a release fails fast if it is missing or invalid, instead of shipping a category-less build.
 - Every published release now sends a `repository_dispatch` to the Sickos repository, once Modrinth confirms the upload through an authenticated read-back. The dispatch is skipped with a warning when no dispatch credential is configured (no credential is configured as of 0.20.2-alpha.1), and consuming it requires a receiving workflow on Sickos's default branch.
