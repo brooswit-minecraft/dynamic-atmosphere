@@ -4,7 +4,7 @@ import io
 import json
 from pathlib import Path
 import unittest
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
 spec = importlib.util.spec_from_file_location(
     "verify_modrinth_publish", Path(__file__).with_name("verify-modrinth-publish.py")
@@ -40,6 +40,10 @@ def _record(project_id="proj1", version="0.20.0-alpha.1", sha1=SHA1, sha512=SHA5
 
 def _not_found(request):
     raise HTTPError(request.full_url, 404, "not found", hdrs=None, fp=None)
+
+
+def _server_error(request):
+    raise HTTPError(request.full_url, 503, "service unavailable", hdrs=None, fp=None)
 
 
 class VerifyTest(unittest.TestCase):
@@ -111,6 +115,90 @@ class VerifyTest(unittest.TestCase):
             )
         self.assertEqual(calls["n"], 3)
         self.assertEqual(len(sleeps), 2)
+
+    def test_retries_through_503_then_succeeds(self):
+        calls = {"n": 0}
+
+        def fetch(request, timeout):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                return _server_error(request)
+            return _FakeResponse(_record())
+
+        sleeps = []
+        result = verify_modrinth_publish.verify(
+            "proj1", "0.20.0-alpha.1", ARTIFACT, "token", fetch=fetch, sleep=sleeps.append,
+        )
+        self.assertEqual(result["modrinth_version_id"], "modrinth-version-id")
+        self.assertEqual(calls["n"], 3)
+        self.assertEqual(len(sleeps), 2)
+
+    def test_retries_through_network_error_then_succeeds(self):
+        calls = {"n": 0}
+
+        def fetch(request, timeout):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise URLError("connection reset")
+            return _FakeResponse(_record())
+
+        sleeps = []
+        result = verify_modrinth_publish.verify(
+            "proj1", "0.20.0-alpha.1", ARTIFACT, "token", fetch=fetch, sleep=sleeps.append,
+        )
+        self.assertEqual(result["modrinth_version_id"], "modrinth-version-id")
+        self.assertEqual(calls["n"], 3)
+        self.assertEqual(len(sleeps), 2)
+
+    def test_5xx_exhausted_retries_fails_with_clear_error(self):
+        calls = {"n": 0}
+
+        def fetch(request, timeout):
+            calls["n"] += 1
+            return _server_error(request)
+
+        sleeps = []
+        with self.assertRaises(SystemExit) as context:
+            verify_modrinth_publish.verify(
+                "proj1", "0.20.0-alpha.1", ARTIFACT, "token",
+                attempts=3, fetch=fetch, sleep=sleeps.append,
+            )
+        self.assertEqual(calls["n"], 3)
+        self.assertEqual(len(sleeps), 2)
+        self.assertIn("::error::", str(context.exception))
+
+    def test_401_fails_immediately_without_retry(self):
+        calls = {"n": 0}
+
+        def fetch(request, timeout):
+            calls["n"] += 1
+            raise HTTPError(request.full_url, 401, "unauthorized", hdrs=None, fp=None)
+
+        sleeps = []
+        with self.assertRaises(SystemExit) as context:
+            verify_modrinth_publish.verify(
+                "proj1", "0.20.0-alpha.1", ARTIFACT, "token",
+                attempts=5, fetch=fetch, sleep=sleeps.append,
+            )
+        self.assertEqual(calls["n"], 1)
+        self.assertEqual(len(sleeps), 0)
+        self.assertIn("::error::", str(context.exception))
+
+    def test_403_fails_immediately_without_retry(self):
+        calls = {"n": 0}
+
+        def fetch(request, timeout):
+            calls["n"] += 1
+            raise HTTPError(request.full_url, 403, "forbidden", hdrs=None, fp=None)
+
+        sleeps = []
+        with self.assertRaises(SystemExit):
+            verify_modrinth_publish.verify(
+                "proj1", "0.20.0-alpha.1", ARTIFACT, "token",
+                attempts=5, fetch=fetch, sleep=sleeps.append,
+            )
+        self.assertEqual(calls["n"], 1)
+        self.assertEqual(len(sleeps), 0)
 
 
 if __name__ == "__main__":
