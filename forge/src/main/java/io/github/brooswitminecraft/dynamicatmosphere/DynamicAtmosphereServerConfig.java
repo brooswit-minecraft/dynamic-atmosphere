@@ -92,7 +92,9 @@ public final class DynamicAtmosphereServerConfig {
     private static final IntOption ENDER_MOB;
     private static final IntOption ENDER_PORTAL;
     private static final IntOption ENDER_PORTAL_BLOCK;
-    private static final IntOption ENDER_PASSIVE;
+    private static final IntOption OBSIDIAN_PASSIVE;
+    private static final IntOption OBSIDIAN_BLOCK;
+    private static final IntOption CRYING_OBSIDIAN;
     private static final IntOption ENDER_PEARL_USE;
     private static final IntOption ENDER_PEARL_IMPACT;
     private static final IntOption ENDER_MOB_INTERVAL;
@@ -207,20 +209,33 @@ public final class DynamicAtmosphereServerConfig {
         builder.pop();
 
         builder.push("heavyGas");
-        // Shared by Void Gas, Ender Gas and Slime: their dissipation chance is Smoke's own
+        // Shared by Void Gas, Obsidian Powder and Slime: their dissipation chance is Smoke's own
         // dissipationChance() divided by this factor, keeping Smoke's dissipationAmount() as maxLoss.
         // 1 means "dissipate exactly as fast as Smoke"; a factor must stay finite and greater than zero.
         HEAVY_GAS_DISSIPATION_FACTOR = decimal(builder, "dissipationFactor", 12.0, 0.001, 1_000.0);
         builder.pop();
 
-        builder.push("enderGas");
+        builder.push("obsidianPowder");
+        // No worldRestart/gameRestart marker is applied in this section: NeoForge's default is RestartType.NONE.
+        builder.comment("Emission from Endermen, endermites, dragons, witches, and shulkers.");
         ENDER_MOB = integer(builder, "mobEmission", 1, 0, 1_000_000);
+        builder.comment("Emission for entities occupying a Nether portal.");
         ENDER_PORTAL = integer(builder, "portalOccupantEmission", 2, 0, 1_000_000);
+        builder.comment("Emission split across the two faces of each Nether portal block.");
         ENDER_PORTAL_BLOCK = integer(builder, "portalBlockEmission", 100, 0, 1_000_000);
-        ENDER_PASSIVE = integer(builder, "passiveBlockEmission", 1, 0, 1_000_000);
+        builder.comment("Emission from the existing passive soul and Ender block sources.");
+        OBSIDIAN_PASSIVE = integer(builder, "passiveBlockEmission", 1, 0, 1_000_000);
+        builder.comment("Emission from plain obsidian blocks sampled by the passive producer.");
+        OBSIDIAN_BLOCK = integer(builder, "obsidianBlockEmission", 1, 0, 1_000_000);
+        builder.comment("Emission from crying obsidian blocks; deliberately much stronger than plain obsidian.");
+        CRYING_OBSIDIAN = integer(builder, "cryingObsidianEmission", 1000, 0, 1_000_000);
+        builder.comment("Emission when an Ender pearl is spawned.");
         ENDER_PEARL_USE = integer(builder, "pearlUseEmission", 24, 0, 1_000_000);
+        builder.comment("Emission at the first impact of an Ender pearl.");
         ENDER_PEARL_IMPACT = integer(builder, "pearlImpactEmission", 48, 0, 1_000_000);
+        builder.comment("Ticks between mob emission checks.");
         ENDER_MOB_INTERVAL = integer(builder, "mobIntervalTicks", 40, 1, 72000);
+        builder.comment("Ticks between portal occupancy emission checks.");
         ENDER_PORTAL_INTERVAL = integer(builder, "portalIntervalTicks", 20, 1, 72000);
         builder.pop();
 
@@ -282,7 +297,8 @@ public final class DynamicAtmosphereServerConfig {
                 EXHAUST_MAX_DAMAGE.get(), EXHAUST_MIN_COST.get(), EXHAUST_MAX_COST.get()),
             new Slime(SLIME_UNDERGROUND.get(), SLIME_UNDERGROUND_DENOMINATOR.get(),
                 SLIME_SPAWN_DENOMINATOR.get(), SLIME_SPAWN_ATTEMPTS.get()),
-            new EnderGas(ENDER_MOB.get(), ENDER_PORTAL.get(), ENDER_PASSIVE.get(), ENDER_PEARL_USE.get(),
+            new ObsidianPowder(ENDER_MOB.get(), ENDER_PORTAL.get(), OBSIDIAN_PASSIVE.get(), OBSIDIAN_BLOCK.get(),
+                CRYING_OBSIDIAN.get(), ENDER_PEARL_USE.get(),
                 ENDER_PEARL_IMPACT.get(), ENDER_MOB_INTERVAL.get(),
                 ENDER_PORTAL_INTERVAL.get(), ENDER_PORTAL_BLOCK.get()),
             new PlantGrowth(PLANT_CHANCE.get(), PLANT_COST.get()),
@@ -331,7 +347,7 @@ public final class DynamicAtmosphereServerConfig {
     }
 
     public record Snapshot(RuntimeTuning runtime, Vapor vapor, VerticalMovement verticalMovement, Smoke smoke, Dust dust, VoidGas voidGas,
-                           Exhaust exhaust, Slime slime, EnderGas enderGas, PlantGrowth plantGrowth,
+                           Exhaust exhaust, Slime slime, ObsidianPowder obsidianPowder, PlantGrowth plantGrowth,
                            Integrations integrations, HeavyGas heavyGas, Magma magma) { }
     public record RuntimeTuning(int syncIntervalTicks, int fullSnapshotIntervalTicks,
                                 int simulationIntervalTicks, int producerIntervalTicks,
@@ -371,14 +387,15 @@ public final class DynamicAtmosphereServerConfig {
                           double suffocationMaxCostFraction) { }
     public record Slime(int undergroundEmission, int undergroundChanceDenominator,
                         int spawnChanceDenominator, int spawnAttempts) { }
-    public record EnderGas(int mobEmission, int portalOccupantEmission, int passiveBlockEmission,
+    public record ObsidianPowder(int mobEmission, int portalOccupantEmission, int passiveBlockEmission,
+                                 int obsidianBlockEmission, int cryingObsidianEmission,
                            int pearlUseEmission, int pearlImpactEmission,
                            int mobIntervalTicks, int portalIntervalTicks,
                            int portalBlockEmission) { }
     public record PlantGrowth(double chance, int cost) { }
     public record Integrations(double createFanTransportPerRpm, int createFanIntervalTicks,
                                int maxFanChunksPerTick) { }
-    /** Shared by Void Gas, Ender Gas and Slime: their dissipation chance is Smoke's own divided by this. */
+    /** Shared by Void Gas, Obsidian Powder and Slime: their dissipation chance is Smoke's own divided by this. */
     public record HeavyGas(double dissipationFactor) { }
     public record Magma(double breakLavaChance) { }
 

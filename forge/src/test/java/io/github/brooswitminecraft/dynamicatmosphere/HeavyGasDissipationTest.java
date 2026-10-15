@@ -42,7 +42,7 @@ class HeavyGasDissipationTest {
     void rollBoundaryHasExactEffectiveChanceForVoidGas() { assertRollBoundary(); }
 
     @Test
-    void rollBoundaryHasExactEffectiveChanceForEnderGas() { assertRollBoundary(); }
+    void rollBoundaryHasExactEffectiveChanceForObsidianPowder() { assertRollBoundary(); }
 
     @Test
     void rollBoundaryHasExactEffectiveChanceForSlime() { assertRollBoundary(); }
@@ -59,7 +59,7 @@ class HeavyGasDissipationTest {
     void expectedLossPerTurnIsOneThirdOfSmokesForVoidGas() { assertExpectedLossIsOneOverFactorOfSmokes(); }
 
     @Test
-    void expectedLossPerTurnIsOneThirdOfSmokesForEnderGas() { assertExpectedLossIsOneOverFactorOfSmokes(); }
+    void expectedLossPerTurnIsOneThirdOfSmokesForObsidianPowder() { assertExpectedLossIsOneOverFactorOfSmokes(); }
 
     @Test
     void expectedLossPerTurnIsOneThirdOfSmokesForSlime() { assertExpectedLossIsOneOverFactorOfSmokes(); }
@@ -77,7 +77,7 @@ class HeavyGasDissipationTest {
     void voidGasFadesToZeroOverRepeatedDeterministicTurns() { assertFadesToZero(); }
 
     @Test
-    void enderGasFadesToZeroOverRepeatedDeterministicTurns() { assertFadesToZero(); }
+    void obsidianPowderFadesToZeroOverRepeatedDeterministicTurns() { assertFadesToZero(); }
 
     @Test
     void slimeFadesToZeroOverRepeatedDeterministicTurns() { assertFadesToZero(); }

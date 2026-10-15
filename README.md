@@ -170,7 +170,7 @@ required.
 server amounts and separate client state. These are active MVP systems, not
 placeholders for future runtime support. Numeric defaults are initial tuning,
 not a claim of balance or measured performance. `0.20.0-alpha.1` moved every
-material onto the same `4x4x4`-block cell; Dust, Ender Gas, Exhaust, Void Gas,
+material onto the same `4x4x4`-block cell; Dust, Obsidian Powder, Exhaust, Void Gas,
 and Slime previously used their own smaller or larger cell sizes. `0.20.0-alpha.1`
 also renamed Void Gas's id, config keys, and identifiers (see CHANGELOG); its
 emission sources, thresholds, and costs did not change.
@@ -180,7 +180,7 @@ emission sources, thresholds, and costs did not change.
 | Vapor | 4 blocks | 200 ticks | Minecraft fog/horizon | 1x |
 | Smoke | 4 blocks | 200 ticks | Very dark brown (0x1F160F) | 2x |
 | Dust | 4 blocks | 200 ticks | Brown | 1x |
-| Ender Gas | 4 blocks | 200 ticks | Purple | 40x |
+| Obsidian Powder | 4 blocks | 200 ticks | Purple | 40x |
 | Void Gas | 4 blocks | 200 ticks | Black | 4x |
 | Exhaust | 4 blocks | 200 ticks | Yellow | 1x |
 | Slime | 4 blocks | 200 ticks | Green | 4x |
@@ -189,7 +189,7 @@ Intervals are scheduled game ticks, subject to bounded work queues, not guarante
 wall-clock completion. Scheduled producer passes share a 300-tick cadence. All
 materials have a configurable 75% due-check skip; Vapor retains condensation.
 Material amounts do not combine across identities. `0.20.0-alpha.1`'s move to a
-uniform cell size bumped the Dust/Ender Gas/Exhaust/Void Gas/Slime storage
+uniform cell size bumped the Dust/Obsidian Powder/Exhaust/Void Gas/Slime storage
 version; a chunk whose stored tag still has the old version or cell size loads
 as empty for that material and accumulates new material normally, with the
 stale tag replaced on the next save (`0.20.1-alpha.1`; from `0.20.0-alpha.1`
@@ -223,11 +223,11 @@ and migrated chunks are saved in the new format.
   can place gravel in air, consuming 25% of current Dust on successful placement,
   rounded down with a minimum of 1 unit.
   Independently, a 1/64 processed-turn roll dissipates up to 40 Dust units.
-- **Ender Gas:** Endermen, endermites, the Ender Dragon, witches, shulkers, ender
+- **Obsidian Powder:** Endermen, endermites, the Ender Dragon, witches, shulkers, ender
   chests, portals/portal occupants, soul torches/fire/sand, Crying Obsidian, and ender-pearl use and
   impact are sources. Pearl use adds 24 and impact 48. Random full-moon bursts
   have been removed; only source-driven emissions remain.
-  Ender Gas never gates spawning. Overworld monsters, including Endermen,
+  Obsidian Powder never gates spawning. Overworld monsters, including Endermen,
   follow the Vapor (fog) spawn rule: no qualifying terrain above and Vapor
   not strictly more than half full denies natural/chunk-generation monster
   spawns. Nether and End monster spawns follow vanilla rules.
@@ -248,7 +248,7 @@ and migrated chunks are saved in the new format.
   below Y=40 on every producer check. At 75% fullness or higher, a 1/32
   processed-turn roll attempts a slime spawn with a quarter-capacity cost and
   spawn checks.
-- **Void Gas, Ender Gas and Slime dissipation:** like Smoke, each dissipates
+- **Void Gas, Obsidian Powder and Slime dissipation:** like Smoke, each dissipates
   gradually via an independent processed-turn roll, reusing Smoke's own
   `dissipationAmount` (up to 40 units) as the cap. The chance is Smoke's own
   `dissipationChance` divided by `heavyGas.dissipationFactor` (default 12), so
@@ -306,8 +306,8 @@ Void Gas and Slime use base cells through V and 2x cells through 2V. All seven
 materials now share the same max render distance: `client.rendering.maxDistanceMultiplier`
 (default 2.0) multiplies the player's effective render distance to get one
 `maxDistance` used by every material — the seven per-material `*ReachMultiplier`
-keys from `0.20.x` (Vapor/Smoke/Void Gas/Slime at 2.0, Dust/Exhaust/Ender Gas at
-0.25) are gone. Dust, Exhaust, and Ender Gas therefore now render out to the same
+keys from `0.20.x` (Vapor/Smoke/Void Gas/Slime at 2.0, Dust/Exhaust/Obsidian Powder at
+0.25) are gone. Dust, Exhaust, and Obsidian Powder therefore now render out to the same
 `2 * V` distance as the other materials, 8x farther than their old `V/4` cutoff;
 they still use base cells only (no coarser LOD tier), so this is a real increase
 in worst-case rendered cell count at range for those three, not just a visual
@@ -335,7 +335,7 @@ goal and has not been separately confirmed.
 These cutoffs include cached fallback geometry and preserve stored cache data.
 What changed from `0.20.0-alpha.1`'s uniform cell size is unaffected here: Void
 Gas and Slime's LOD tiers are still 4 then 8 blocks, down from 8 then 16 (Void
-Gas) and 16 then 32 (Slime); Dust, Exhaust, and Ender Gas's base tier is still 4
+Gas) and 16 then 32 (Slime); Dust, Exhaust, and Obsidian Powder's base tier is still 4
 blocks, up from 2.
 
 Each coarser volume recursively averages eight children, counting empty volumes
@@ -368,7 +368,7 @@ The other six materials use the colors in the table above. Vapor-only frames ret
 the constant-color unsorted path; mixed-material slices are merged back-to-front
 through shared bounded GPU batches. Mixed colors are not order-independent.
 Void Gas and Slime multiply optical density by four and Smoke by two before
-thickness-integrated alpha; Ender Gas uses 40x. This changes rendering only, not
+thickness-integrated alpha; Obsidian Powder uses 40x. This changes rendering only, not
 material amounts, capacity, or simulation fullness.
 
 With the default four slices per base cell, 4-block Vapor and Smoke cells use
@@ -471,7 +471,7 @@ via the existing lava-removal mixin hook; no mixin changes were needed.
 ## Fans and Configuration
 
 Fans affect cells up to 4x4x4, which now covers every material: Vapor, Smoke,
-Dust, Exhaust, Ender Gas, Void Gas, and Slime. Void Gas and Slime previously used
+Dust, Exhaust, Obsidian Powder, Void Gas, and Slime. Void Gas and Slime previously used
 larger cells and were unaffected; they are fan-transportable as of `0.20.0-alpha.1`.
 
 When Create is installed, a rotating Encased Fan performs intake followed by output
@@ -493,9 +493,12 @@ requests up to 256 units of intake and 256 units of output per pass per supporte
 material. Integer remainders rotate between neighbors to avoid fixed-axis bias.
 
 Portal-containing loaded sections are palette-filtered, then scanned for each
-portal block. `enderGas.portalBlockEmission` controls the total emitted on its
-two faces per producer pass (default 100, zero disables). Other passive Ender Gas
-sources retain their random sampling.
+portal block. `obsidianPowder.portalBlockEmission` controls the total emitted on its
+two faces per producer pass (default 100, zero disables). Other passive Obsidian Powder
+sources retain their random sampling. `obsidianPowder.passiveBlockEmission` remains the
+general passive source; plain obsidian has its own `obsidianPowder.obsidianBlockEmission`
+(default 1), and crying obsidian has its own `obsidianPowder.cryingObsidianEmission`
+(default 1000).
 
 `runtime.simulationSkipChance` applies to all seven materials (default 0.75,
 zero processes every due cell, one skips every due cell). It replaces the old

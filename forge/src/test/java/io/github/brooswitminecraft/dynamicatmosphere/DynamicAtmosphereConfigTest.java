@@ -20,7 +20,7 @@ class DynamicAtmosphereConfigTest {
         assertEquals(10.0 / 256, first.smoke().villagerConversionChance());
         assertEquals(10.0 / 64, first.smoke().dissipationChance());
         assertEquals(0.75, first.runtime().simulationSkipChance());
-        assertEquals(100, first.enderGas().portalBlockEmission());
+        assertEquals(100, first.obsidianPowder().portalBlockEmission());
         assertEquals(256, first.vapor().rainCloudHeight());
         assertEquals(0.75, first.verticalMovement().emptyTowardCloudlineChance());
         assertEquals(0.25, first.verticalMovement().fullTowardCloudlineChance());
@@ -45,7 +45,7 @@ class DynamicAtmosphereConfigTest {
         assertEquals(2, first.maxDistanceMultiplier());
         assertEquals(0.75, first.fadeStartFraction());
         assertEquals(2, first.smoke().opticalDensity());
-        assertEquals(40, first.enderGas().opticalDensity());
+        assertEquals(40, first.obsidianPowder().opticalDensity());
         assertEquals(200_000, first.allocation().cellBudget());
     }
 
@@ -56,7 +56,7 @@ class DynamicAtmosphereConfigTest {
         for (String removed : List.of(
             "vaporReachMultiplier", "smokeReachMultiplier", "dustReachMultiplier",
             "voidGasReachMultiplier", "exhaustReachMultiplier", "slimeReachMultiplier",
-            "enderGasReachMultiplier")) {
+            "obsidianPowderReachMultiplier")) {
             assertFalse(names.stream().anyMatch(n -> n.toLowerCase(java.util.Locale.ROOT)
                 .contains(removed.toLowerCase(java.util.Locale.ROOT))), removed + " must no longer be defined");
         }

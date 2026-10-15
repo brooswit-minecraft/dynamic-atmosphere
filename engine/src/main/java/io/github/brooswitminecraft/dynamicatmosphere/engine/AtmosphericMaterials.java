@@ -38,12 +38,12 @@ public final class AtmosphericMaterials {
     public static final MaterialDefinition SLIME = new MaterialDefinition("slime", GREEN,
         new MaterialSettings(CELL_SIZE, VOID_GAS_LOD, 1, OptionalDouble.of(1), 4),
         Set.of(UNDERGROUND_SLIME_CHUNKS_RANDOMLY), Set.of(MaterialDefinition.Transformation.SLIME));
-    public static final MaterialDefinition ENDER_GAS = new MaterialDefinition("ender_gas", PURPLE,
+    public static final MaterialDefinition OBSIDIAN_POWDER = new MaterialDefinition("obsidian_powder", PURPLE,
         new MaterialSettings(CELL_SIZE, DUST_LOD, 1, OptionalDouble.of(1), 40),
         Set.of(NETHER_PORTAL_BLOCKS_SLOWLY, ENDERMEN, ENDERMITES, ENDER_DRAGON,
             ENDER_PEARL_USE, STANDING_IN_NETHER_PORTAL, SOUL_TORCHES, SOUL_FIRES, SOUL_SAND), Set.of());
 
-    public static final List<MaterialDefinition> ALL = List.of(VAPOR, DUST, SMOKE, VOID_GAS, EXHAUST, SLIME, ENDER_GAS);
+    public static final List<MaterialDefinition> ALL = List.of(VAPOR, DUST, SMOKE, VOID_GAS, EXHAUST, SLIME, OBSIDIAN_POWDER);
 
     private AtmosphericMaterials() { }
 

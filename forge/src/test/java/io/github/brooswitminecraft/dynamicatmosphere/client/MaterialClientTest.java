@@ -43,9 +43,9 @@ class MaterialClientTest {
     }
 
     @Test
-    void enderGasIsTenTimesItsPreviousOpticalDensity() {
-        assertEquals(40, AtmosphereRenderMaterial.ENDER_GAS.opticalDensityMultiplier);
-        assertEquals(4, AtmosphereRenderMaterial.ENDER_GAS.cellSize);
+    void obsidianPowderIsTenTimesItsPreviousOpticalDensity() {
+        assertEquals(40, AtmosphereRenderMaterial.OBSIDIAN_POWDER.opticalDensityMultiplier);
+        assertEquals(4, AtmosphereRenderMaterial.OBSIDIAN_POWDER.cellSize);
         assertEquals(4, AtmosphereRenderMaterial.SMOKE.cellSize);
         double oldDepth = -Math.log1p(-AtmosphereVolumeGeometry.sliceAlpha(100, 1, 1, 4));
         double newDepth = -Math.log1p(-AtmosphereVolumeGeometry.sliceAlpha(100, 1, 1, 40));
@@ -57,7 +57,7 @@ class MaterialClientTest {
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.VAPOR,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.SMOKE,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.DUST,
-            io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.ENDER_GAS,
+            io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.OBSIDIAN_POWDER,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.VOID_GAS,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.EXHAUST,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.SLIME);
@@ -100,8 +100,8 @@ class MaterialClientTest {
         assertEquals(1, AtmosphereRenderMaterial.EXHAUST.tuning().opticalDensity());
         assertEquals(4, AtmosphereRenderMaterial.SLIME.opticalDensityMultiplier);
         assertEquals(4, AtmosphereRenderMaterial.SLIME.tuning().opticalDensity());
-        assertEquals(40, AtmosphereRenderMaterial.ENDER_GAS.opticalDensityMultiplier);
-        assertEquals(40, AtmosphereRenderMaterial.ENDER_GAS.tuning().opticalDensity());
+        assertEquals(40, AtmosphereRenderMaterial.OBSIDIAN_POWDER.opticalDensityMultiplier);
+        assertEquals(40, AtmosphereRenderMaterial.OBSIDIAN_POWDER.tuning().opticalDensity());
     }
 
     @Test
@@ -160,7 +160,7 @@ class MaterialClientTest {
     @Test
     void dustAndEnderHaveIndependentAtomicScopesAndOwnChunkCoordinates() {
         var dust = new MaterialClientSession(AtmosphereRenderMaterial.DUST);
-        var ender = new MaterialClientSession(AtmosphereRenderMaterial.ENDER_GAS);
+        var ender = new MaterialClientSession(AtmosphereRenderMaterial.OBSIDIAN_POWDER);
         dust.world(DIMENSION);
         ender.world(DIMENSION);
         var scope = List.of(new AtmosphereClientCache.Chunk(0, 0), new AtmosphereClientCache.Chunk(2, 0));
@@ -178,7 +178,7 @@ class MaterialClientTest {
 
     @Test
     void negativeChunkScopesAndDeltaRemovalWorkForBothLayouts() {
-        for (var material : List.of(AtmosphereRenderMaterial.DUST, AtmosphereRenderMaterial.ENDER_GAS)) {
+        for (var material : List.of(AtmosphereRenderMaterial.DUST, AtmosphereRenderMaterial.OBSIDIAN_POWDER)) {
             var session = new MaterialClientSession(material);
             session.world(DIMENSION);
             session.receive(WORLD, DIMENSION, true, true, List.of(new AtmosphereClientCache.Chunk(-1, 0)), List.of(update(-1, 400)));
@@ -191,7 +191,7 @@ class MaterialClientTest {
 
     @Test
     void worldDimensionAndDisconnectClearOnlyTheirOwnMaterialState() {
-        for (var material : List.of(AtmosphereRenderMaterial.DUST, AtmosphereRenderMaterial.ENDER_GAS)) {
+        for (var material : List.of(AtmosphereRenderMaterial.DUST, AtmosphereRenderMaterial.OBSIDIAN_POWDER)) {
             var session = new MaterialClientSession(material);
             session.receive(WORLD, DIMENSION, true, true, List.of(new AtmosphereClientCache.Chunk(0, 0)), List.of(update(0, 200)));
             session.world(DIMENSION);
@@ -213,7 +213,7 @@ class MaterialClientTest {
     @Test
     void quarterViewIsInclusiveBaseOnlyWithoutCoarseOrUnloadedFallback() {
         double reachBlocks = UNIFORM_MAX_DISTANCE_MULTIPLIER * 128;
-        for (var material : List.of(AtmosphereRenderMaterial.DUST, AtmosphereRenderMaterial.ENDER_GAS)) {
+        for (var material : List.of(AtmosphereRenderMaterial.DUST, AtmosphereRenderMaterial.OBSIDIAN_POWDER)) {
             for (double distance : new double[] {reachBlocks - 0.001, reachBlocks, reachBlocks + 0.001}) {
                 var cache = material.newCache();
                 cache.changeDimension(DIMENSION);
@@ -234,7 +234,7 @@ class MaterialClientTest {
 
     @Test
     void baseOnlySelectionRemainsWorkBoundedWithoutOversizedPreview() {
-        for (var material : List.of(AtmosphereRenderMaterial.DUST, AtmosphereRenderMaterial.ENDER_GAS)) {
+        for (var material : List.of(AtmosphereRenderMaterial.DUST, AtmosphereRenderMaterial.OBSIDIAN_POWDER)) {
             var lod = new AtmosphereLodHierarchy(material.cellSize, 0, UNIFORM_MAX_DISTANCE_MULTIPLIER);
             for (int x = -10; x <= 10; x++) for (int y = -10; y <= 10; y++) for (int z = -10; z <= 10; z++) {
                 lod.put(new AtmosphereClientCache.Cell(x, y, z), 1000, 1000, 0, 0);
@@ -269,9 +269,9 @@ class MaterialClientTest {
         assertEquals(139 / 255f, AtmosphereRenderMaterial.DUST.channel(0, fog));
         assertEquals(69 / 255f, AtmosphereRenderMaterial.DUST.channel(1, fog));
         assertEquals(19 / 255f, AtmosphereRenderMaterial.DUST.channel(2, fog));
-        assertEquals(128 / 255f, AtmosphereRenderMaterial.ENDER_GAS.channel(0, fog));
-        assertEquals(0, AtmosphereRenderMaterial.ENDER_GAS.channel(1, fog));
-        assertEquals(128 / 255f, AtmosphereRenderMaterial.ENDER_GAS.channel(2, fog));
+        assertEquals(128 / 255f, AtmosphereRenderMaterial.OBSIDIAN_POWDER.channel(0, fog));
+        assertEquals(0, AtmosphereRenderMaterial.OBSIDIAN_POWDER.channel(1, fog));
+        assertEquals(128 / 255f, AtmosphereRenderMaterial.OBSIDIAN_POWDER.channel(2, fog));
         assertEquals(0, AtmosphereRenderMaterial.VOID_GAS.channel(0, fog));
         assertEquals(0, AtmosphereRenderMaterial.VOID_GAS.channel(1, fog));
         assertEquals(0, AtmosphereRenderMaterial.VOID_GAS.channel(2, fog));

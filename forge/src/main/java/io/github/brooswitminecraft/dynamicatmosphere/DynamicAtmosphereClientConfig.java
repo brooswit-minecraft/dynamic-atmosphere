@@ -22,7 +22,7 @@ public final class DynamicAtmosphereClientConfig {
     private static final DoubleOption VOID_GAS_DENSITY;
     private static final DoubleOption EXHAUST_DENSITY;
     private static final DoubleOption SLIME_DENSITY;
-    private static final DoubleOption ENDER_GAS_DENSITY;
+    private static final DoubleOption OBSIDIAN_POWDER_DENSITY;
 
     private static final IntOption CELL_BUDGET;
     private static volatile Snapshot cached;
@@ -37,7 +37,7 @@ public final class DynamicAtmosphereClientConfig {
         SLICES_PER_BATCH = integer(builder, "slicesPerBatch", 4096, 1, 1_000_000);
         // Uniform max visible distance, shared by every material (replaces the seven
         // per-material *ReachMultiplier keys removed in ATMO-28/ATMO-39). Default 2.0
-        // matches Vapor/Smoke/Void Gas/Slime's prior multiplier; Dust/Exhaust/Ender Gas
+        // matches Vapor/Smoke/Void Gas/Slime's prior multiplier; Dust/Exhaust/Obsidian Powder
         // move from 0.25 to 2.0, rendering substantially farther (see PR body/CHANGELOG).
         MAX_DISTANCE_MULTIPLIER = decimal(builder, "maxDistanceMultiplier", 2, 0.25, 4);
         // Fraction of maxDistanceMultiplier's distance at which the horizontal fade
@@ -52,7 +52,7 @@ public final class DynamicAtmosphereClientConfig {
         VOID_GAS_DENSITY = decimal(builder, "voidGasOpticalDensity", 4, 0, 1000);
         EXHAUST_DENSITY = decimal(builder, "exhaustOpticalDensity", 1, 0, 1000);
         SLIME_DENSITY = decimal(builder, "slimeOpticalDensity", 4, 0, 1000);
-        ENDER_GAS_DENSITY = decimal(builder, "enderGasOpticalDensity", 40, 0, 1000);
+        OBSIDIAN_POWDER_DENSITY = decimal(builder, "obsidianPowderOpticalDensity", 40, 0, 1000);
         builder.pop();
 
         builder.push("allocation");
@@ -84,7 +84,7 @@ public final class DynamicAtmosphereClientConfig {
             new Material(VOID_GAS_DENSITY.get()),
             new Material(EXHAUST_DENSITY.get()),
             new Material(SLIME_DENSITY.get()),
-            new Material(ENDER_GAS_DENSITY.get()),
+            new Material(OBSIDIAN_POWDER_DENSITY.get()),
             new Allocation(CELL_BUDGET.get())
         );
     }
@@ -154,7 +154,7 @@ public final class DynamicAtmosphereClientConfig {
                            double maxDistanceMultiplier, double fadeStartFraction,
                            Material vapor, Material smoke,
                            Material dust, Material voidGas, Material exhaust, Material slime,
-                           Material enderGas, Allocation allocation) { }
+                           Material obsidianPowder, Allocation allocation) { }
     public record Material(double opticalDensity) { }
     public record Allocation(int cellBudget) { }
 
