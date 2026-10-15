@@ -14,7 +14,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 USER_AGENT = "brooswit-minecraft/dynamic-atmosphere-release"
@@ -31,7 +31,11 @@ def lookup_version_file(sha512, token, fetch):
     except HTTPError as error:
         if error.code == 404:
             return None
+        if 500 <= error.code <= 599:
+            return None
         raise
+    except (URLError, TimeoutError):
+        return None
 
 
 def _matching_file(record, sha512):

@@ -204,9 +204,11 @@ final class AtmosphereLodHierarchy {
                 build.previewRoots.add(build.seed);
                 build.pending.push(build.seed);
             }
-            // A changed/teleported view gets its own coarse roots immediately, never
-            // the old camera's frontier. Same-view refinements retain existing detail.
-            if (!view.equals(selectedView)) selection = build.preview;
+            // A teleported view gets its own coarse roots immediately, never the old
+            // camera's frontier. Same-view refinements and ordinary chunk-boundary steps
+            // keep the previous frontier (padded for movement) until the rebuild publishes,
+            // otherwise every crossing flashes a coarse one-volume preview.
+            if (!view.equals(selectedView) && !adjacent(view, selectedView)) selection = build.preview;
         }
         if (workedTick == tick) return selection;
         workedTick = tick;
@@ -249,6 +251,12 @@ final class AtmosphereLodHierarchy {
             }
         }
         return selection;
+    }
+
+    private static boolean adjacent(View view, View previous) {
+        return previous != null && view.chunks() == previous.chunks()
+            && Math.abs(view.x() - previous.x()) <= 2 && Math.abs(view.y() - previous.y()) <= 2
+            && Math.abs(view.z() - previous.z()) <= 2;
     }
 
     /** One bounded column lookup per work unit, including empty/out-of-height columns. */

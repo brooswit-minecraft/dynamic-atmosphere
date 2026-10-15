@@ -17,6 +17,8 @@ public final class DynamicAtmosphereServerConfig {
     private static final IntOption SMOKE_PRODUCER_CHUNKS;
 
     private static final DoubleOption VAPOR_PRODUCER_CHANCE;
+    private static final DoubleOption VERTICAL_MOVEMENT_EMPTY_TOWARD_CLOUDLINE;
+    private static final DoubleOption VERTICAL_MOVEMENT_FULL_TOWARD_CLOUDLINE;
     private static final DoubleOption SIMULATION_SKIP_CHANCE;
     private static final IntOption RAIN_CLOUD_HEIGHT;
     private static final IntOption HIGH_TERRAIN_ABOVE_SEA;
@@ -117,9 +119,14 @@ public final class DynamicAtmosphereServerConfig {
         SMOKE_PRODUCER_CHUNKS = integer(builder, "maxSmokeProducerChunksPerTick", 4, 1, 4096);
         builder.pop();
 
+        builder.push("verticalMovement");
+        VERTICAL_MOVEMENT_EMPTY_TOWARD_CLOUDLINE = decimal(builder, "emptyTowardCloudlineChance", 0.75, 0, 1);
+        VERTICAL_MOVEMENT_FULL_TOWARD_CLOUDLINE = decimal(builder, "fullTowardCloudlineChance", 0.25, 0, 1);
+        builder.pop();
+
         builder.push("vapor");
         VAPOR_PRODUCER_CHANCE = decimal(builder, "producerChance", 0.10, 0, 1);
-        RAIN_CLOUD_HEIGHT = integer(builder, "rainCloudHeight", 192, -2048, 2048);
+        RAIN_CLOUD_HEIGHT = integer(builder, "rainCloudHeight", 256, -2048, 2048);
         HIGH_TERRAIN_ABOVE_SEA = integer(builder, "highTerrainBlocksAboveSeaLevel", 24, 0, 2048);
         HIGH_TERRAIN = integer(builder, "highTerrainEmission", 40, 0, 1_000_000);
         RAIN_CLOUD = integer(builder, "rainCloudEmission", 320, 0, 1_000_000);
@@ -249,6 +256,8 @@ public final class DynamicAtmosphereServerConfig {
                 HIGH_TERRAIN.get(), RAIN_CLOUD.get(), SNOW_ICE.get(), DARK_GROUND.get(),
                 SNOW_LAYER.get(), ICE_REMOVAL.get(), CONDENSATION_CHANCE.get(),
                 RAIN_CLOUD_HEIGHT.get(), HIGH_TERRAIN_ABOVE_SEA.get()),
+            new VerticalMovement(VERTICAL_MOVEMENT_EMPTY_TOWARD_CLOUDLINE.get(),
+                VERTICAL_MOVEMENT_FULL_TOWARD_CLOUDLINE.get()),
             new Smoke(FIRE.get(), LAVA.get(), FURNACE.get(),
                 TORCH.get(), CAMPFIRE.get(), EXPLOSION.get(), EXPLOSION_BLOCK.get(), LEAF_CHANCE.get(),
                 LEAF_COST.get(), FARMLAND_CHANCE.get(), FARMLAND_COST.get(), VILLAGER_CHANCE.get(),
@@ -313,7 +322,7 @@ public final class DynamicAtmosphereServerConfig {
         }
     }
 
-    public record Snapshot(RuntimeTuning runtime, Vapor vapor, Smoke smoke, Dust dust, VoidGas voidGas,
+    public record Snapshot(RuntimeTuning runtime, Vapor vapor, VerticalMovement verticalMovement, Smoke smoke, Dust dust, VoidGas voidGas,
                            Exhaust exhaust, Slime slime, EnderGas enderGas, PlantGrowth plantGrowth,
                            Integrations integrations, HeavyGas heavyGas) { }
     public record RuntimeTuning(int syncIntervalTicks, int fullSnapshotIntervalTicks,
@@ -328,6 +337,8 @@ public final class DynamicAtmosphereServerConfig {
         public int simulationIntervalTicks() { return snapshot().runtime().simulationIntervalTicks(); }
         public int producerIntervalTicks() { return snapshot().runtime().producerIntervalTicks(); }
     }
+    /** Fill fraction linearly maps from emptyTowardCloudlineChance to fullTowardCloudlineChance. */
+    public record VerticalMovement(double emptyTowardCloudlineChance, double fullTowardCloudlineChance) { }
     public record Smoke(int fireEmission,
                         int lavaEmission, int litFurnaceEmission, int torchEmission, int litCampfireEmission,
                         int explosionEmission, int explosionBlockEmission, double leafRemovalChance,
