@@ -29,7 +29,10 @@ final class AtmosphereSyncPlanner<P, D> {
         }
     }
 
-    private record PlayerView<D>(D dimension, Set<Chunk> authoritativeChunks, Map<CellCoordinate, Cell> cells) {
+    /** Used by callers that don't track view-distance changes; never matches a real change. */
+    static final int UNKNOWN_VIEW_RADIUS = -1;
+
+    private record PlayerView<D>(D dimension, int viewRadius, Set<Chunk> authoritativeChunks, Map<CellCoordinate, Cell> cells) {
     }
 
     private record CellCoordinate(int x, int y, int z) {
@@ -46,10 +49,19 @@ final class AtmosphereSyncPlanner<P, D> {
     }
 
     List<Update<D>> plan(P player, D dimension, List<Chunk> authoritativeChunks, List<Cell> visibleCells) {
+        return plan(player, dimension, UNKNOWN_VIEW_RADIUS, authoritativeChunks, visibleCells);
+    }
+
+    /**
+     * {@code viewRadius} is the chunk-tracking view's own radius (e.g. {@code ChunkTrackingView.Positioned
+     * .viewDistance()}), used ONLY to tell a real view-distance change apart from the tracked-chunk set merely
+     * sliding as the player crosses a chunk boundary — never inferred from the chunk/cell set size.
+     */
+    List<Update<D>> plan(P player, D dimension, int viewRadius, List<Chunk> authoritativeChunks, List<Cell> visibleCells) {
         List<Chunk> chunkScope = List.copyOf(new LinkedHashSet<>(authoritativeChunks));
         Set<Chunk> currentChunks = Set.copyOf(chunkScope);
         Map<CellCoordinate, Cell> current = index(visibleCells);
-        PlayerView<D> previous = views.put(player, new PlayerView<>(dimension, currentChunks, current));
+        PlayerView<D> previous = views.put(player, new PlayerView<>(dimension, viewRadius, currentChunks, current));
         List<Update<D>> updates = new ArrayList<>();
 
         if (previous == null || !previous.dimension().equals(dimension)) {
@@ -60,14 +72,14 @@ final class AtmosphereSyncPlanner<P, D> {
             return updates;
         }
 
-        if (!previous.authoritativeChunks().equals(currentChunks)) {
+        if (previous.viewRadius() != viewRadius) {
             addBatches(updates, dimension, true, chunkScope, visibleCells);
             return updates;
         }
 
         List<Cell> delta = new ArrayList<>();
         for (CellCoordinate old : previous.cells().keySet()) {
-            if (!current.containsKey(old) && currentChunks.contains(chunkOf(old))) {
+            if (!current.containsKey(old)) {
                 delta.add(new Cell(old.x(), old.y(), old.z(), 0, 0));
             }
         }

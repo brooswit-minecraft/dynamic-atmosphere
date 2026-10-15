@@ -59,7 +59,7 @@ world generation. All seven materials and their MVP gameplay systems are enabled
 
 Each passed rain check splits 320 units between ground and an airborne position:
 an integer ground allocation from 0 through 320, with the remainder at a random
-height between ground and Y=192 (ground itself if already above Y=192).
+height between ground and the configurable default cloud height of Y=256 (ground itself if already above that height).
 The existing rain gate is retained; the total is not doubled.
 Evaporation traces the sampled contiguous water column to its bottom. Bottom water
 directly above magma bypasses the temperature roll and also targets the original

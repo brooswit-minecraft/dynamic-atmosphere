@@ -17,7 +17,7 @@ jobs:
   release-gate:
     uses: brooswit-factory/release-gate/.github/workflows/gate.yml@v1
     with:
-      gated-paths: '["^engine/src/", "^forge/src/", "^version\\.txt$"]'
+      gated-paths: '["^forge/src/"]'
       version-file: 'version.txt'
 
   build:
