@@ -265,6 +265,25 @@ The coarse transport model and these numerical defaults remain open to tuning.
 trades, place gravel/mud/water, damage living entities, and spawn mobs. Back up
 worlds. Updating does not clear existing material or undo previous world changes.**
 
+### Lava and Water: Magma Instead of Obsidian, Cobblestone, or Stone
+
+Lava touching water no longer makes obsidian, cobblestone or stone — it makes
+magma, and the water is consumed too. This replaces all three vanilla lava+water
+contact cases: water reaching a lava source or flowing lava (the water neighbor
+is cleared and the lava's own position becomes magma), and lava spreading down
+into water (only the water's position becomes magma; the lava source above
+survives untouched, its own downward spread simply blocked, same as vanilla).
+
+Automated stone/cobble/obsidian generation stops working, because the water
+source is now consumed rather than persisting. These conversions emit smoke.
+That is deliberate — it marks a conversion from a distance — not a bug. Only
+the first two cases emit it; lava spreading into water removes no lava fluid,
+so it stays silent.
+
+Obsidian isn't removed from the game by this change — it has moved sideways.
+See "Lava, Ice, and Obsidian" below: lava against packed ice or blue ice now
+pays out obsidian there, in place of the obsidian water+lava used to make.
+
 ## Distance-Based Rendering
 
 Vapor and Smoke use three levels of detail (LOD), with no rendering beyond 2V.
@@ -384,6 +403,40 @@ Back up existing worlds before upgrading. Downgrading the mod does not restore
 broken blocks; restore the backup to roll back terrain damage. This alpha's
 pressure implementation still requires build and server/client verification.
 
+## Lava, Ice, and Obsidian
+
+`0.21.0-alpha.1` adds an ice ladder that lava degrades one rung at a time via
+NeoForge's `FluidInteractionRegistry`, each rung paying out a different
+lava-side result:
+
+| Neighbor block | Neighbor becomes | Lava becomes |
+| --- | --- | --- |
+| Ice | Water | Magma block |
+| Packed ice | Ice | Obsidian |
+| Blue ice | Packed ice | Obsidian |
+
+Blue ice and packed ice both route to obsidian, not just water — lava does
+not simply melt them. Only ice's own rung produces water; there is no
+config option to change that.
+
+`FluidInteractionRegistry`'s adjacency check never looks straight down: it
+walks `LiquidBlock.POSSIBLE_FLOW_DIRECTIONS` (down, south, north, east, west)
+and tests `pos.relative(direction.getOpposite())`, so the neighbors actually
+probed are up, north, south, east, and west. **Ice directly below a lava
+source never triggers any of these three rules** — only ice beside or above
+the lava does.
+
+**Known, accepted exception:** blue ice directly above soul soil still makes
+basalt, not obsidian — NeoForge registers its own lava + soul-soil-below +
+blue-ice-adjacent → basalt interaction ahead of this mod's, and that is left
+unfixed. This only affects the standard basalt-generator layout (blue ice
+resting on soul soil); blue ice beside lava with no soul soil below still
+converts to packed ice and obsidian as tabled above.
+
+All three rules remove the lava fluid at its own position (converting it to
+magma or obsidian), which is exactly the transition Smoke already emits for
+via the existing lava-removal mixin hook; no mixin changes were needed.
+
 ## Fans and Configuration
 
 Fans affect cells up to 4x4x4, which now covers every material: Vapor, Smoke,
@@ -431,6 +484,20 @@ without restarting. The client `allocation.cellBudget` setting is the exception
 and requires a game restart. Structural cell sizes, storage formats, and network
 protocol are intentionally not configurable and change only with a matching mod
 update on both sides.
+
+## Lava and Magma
+
+Removing a magma block, by any actor or mechanism (player, explosion, piston,
+mob, or an automated machine), independently rolls a chance to leave a lava
+source (`Blocks.LAVA` at level 0, never flowing) at the removed position.
+`magma.breakLavaChance` controls the odds (default `0.1`, range `0.0`-`1.0`)
+and, like the rest of server config, is read fresh on each roll: a config
+reload takes effect without a restart. Placing magma, or a magma block
+replaced by another magma block, never rolls; only a tracked magma position
+genuinely becoming non-magma does. The lava is written at the end of the tick and
+only into a vacated (air or fluid) position: a block that took the removed
+magma's place that same tick, such as a piston head or a placed container, is
+left untouched and no lava appears.
 
 ## Development
 

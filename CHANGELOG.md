@@ -1,3 +1,22 @@
+# 0.21.0-alpha.1
+
+Category: minor
+
+- Lava touching water no longer makes obsidian, cobblestone or stone — it makes magma, and the water is consumed too.
+- Obsidian isn't removed from the game by this change — it has moved sideways: lava against packed ice or blue ice now pays out obsidian there instead, in place of the obsidian water+lava used to make.
+- Automated stone/cobble/obsidian generation stops working, because the water source is now consumed rather than persisting.
+- Five of these conversions emit DA's existing lava-removal smoke (water-on-source, water-on-flowing-lava, and all three ice rungs); lava spreading down into water does not, since no lava fluid is actually removed in that case. That split is deliberate — smoke marks a lava removal from a distance — not a bug.
+- Blue ice still remains basalt, not obsidian, when lava has soul soil beneath it — the existing basalt-generator precedence is unchanged.
+- Breaking a magma block, by any actor or mechanism (player, explosion, piston, mob, or an automated machine), now independently rolls a `magma.breakLavaChance` chance (default `0.1`) to leave a lava source at the removed position. Placing magma, or replacing magma with magma, never rolls. Config-backed and reloadable at runtime; see README's "Lava and Magma" section.
+
+# 0.20.3-alpha.2
+
+Category: minor
+
+- Add configurable continuous fill-biased vertical movement for Vapor, Smoke and material grids, preserving horizontal spreading, fans and downward barriers (MINECRAFT-79).
+- Handle transient Modrinth read-back failures with bounded retries and extract CHANGELOG sections correctly around fenced code (MINECRAFT-80).
+- Publish automatic releases as individual mod artifacts without changing Modrinth project settings or dispatching a Sickos modpack update. Manual releases default to the same boundary.
+
 # 0.20.3-alpha.1
 
 Category: patch
@@ -18,32 +37,32 @@ Category: patch
 
 Category: patch
 
-- Fix: `0.20.0`'s Dust/Obsidian Powder/Exhaust/Void Gas/Slime chunk storage version bump left those materials permanently absent in chunks saved by `0.19.x` or earlier, contrary to the `0.20.0` changelog's claim that they would return once new material accumulated — the write path refused to overwrite the preserved old-format tag, so nothing ever could. A chunk whose stored tag has a stale `version`/`cell_size` for one of those five materials now loads as empty and accumulates new material normally, with the stale tag replaced on the next save. Genuinely corrupt or unparseable data (a missing `cells` array, a malformed tag, a decode failure) is still preserved and skipped, as before. Vapor and Smoke are unaffected.
+- Fix: `0.20.0`'s Dust/Ender Gas/Exhaust/Void Gas/Slime chunk storage version bump left those materials permanently absent in chunks saved by `0.19.x` or earlier, contrary to the `0.20.0` changelog's claim that they would return once new material accumulated — the write path refused to overwrite the preserved old-format tag, so nothing ever could. A chunk whose stored tag has a stale `version`/`cell_size` for one of those five materials now loads as empty and accumulates new material normally, with the stale tag replaced on the next save. Genuinely corrupt or unparseable data (a missing `cells` array, a malformed tag, a decode failure) is still preserved and skipped, as before. Vapor and Smoke are unaffected.
 
 # 0.20.0-alpha.1
 
 Category: breaking
 
-**BREAKING:** saved Dust, Obsidian Powder, Exhaust, Void Gas, and Slime atmosphere is discarded on upgrade (see the chunk storage version bump below). Existing `violence` server and client config sections are discarded; config resets to `voidGas` defaults on upgrade. Client and server must be upgraded together: a client running the old per-material cell sizes, or the old `violence` id, will file and render material at the wrong size, position, or name against this server. Back up worlds before upgrading.
+**BREAKING:** saved Dust, Ender Gas, Exhaust, Void Gas, and Slime atmosphere is discarded on upgrade (see the chunk storage version bump below). Existing `violence` server and client config sections are discarded; config resets to `voidGas` defaults on upgrade. Client and server must be upgraded together: a client running the old per-material cell sizes, or the old `violence` id, will file and render material at the wrong size, position, or name against this server. Back up worlds before upgrading.
 
-- Move every atmosphere material onto a uniform 4x4x4-block cell. Dust, Obsidian Powder, and Exhaust grow from 2x2x2; Void Gas shrinks from 8x8x8; Slime shrinks from 16x16x16.
+- Move every atmosphere material onto a uniform 4x4x4-block cell. Dust, Ender Gas, and Exhaust grow from 2x2x2; Void Gas shrinks from 8x8x8; Slime shrinks from 16x16x16.
 - Collapse `AtmosphereMaterial`'s per-material cell size onto the shared `AtmosphereGridLayout.CELL_SIZE`; the engine's approved specification catalog matches.
 - Collapse the client's `AtmosphereRenderMaterial` per-material cell size onto the same `AtmosphereGridLayout.CELL_SIZE`, so the client files and renders cells at the size the server actually sends. A test now asserts the client, server, and engine catalogs agree by material name.
-- Bump the Dust/Obsidian Powder/Exhaust/Void Gas/Slime chunk storage version. Pre-upgrade chunk data for those materials is retained on disk but treated as unreadable rather than reinterpreted at the new cell size. Vapor and Smoke were already 4x4x4 and are unaffected. **Correction (see `0.20.1-alpha.1`):** this left affected chunks permanently without that material rather than the empty-then-refilling behavior originally claimed here; `0.20.1-alpha.1` fixes it.
-- Remove the now-unreachable legacy one-block Obsidian Powder merge path, superseded by the storage version bump above.
-- Void Gas and Slime are fan-transportable for the first time, a direct consequence of sharing Vapor/Smoke/Dust/Exhaust/Obsidian Powder's existing 4-block fan size limit; no fan code changed.
+- Bump the Dust/Ender Gas/Exhaust/Void Gas/Slime chunk storage version. Pre-upgrade chunk data for those materials is retained on disk but treated as unreadable rather than reinterpreted at the new cell size. Vapor and Smoke were already 4x4x4 and are unaffected. **Correction (see `0.20.1-alpha.1`):** this left affected chunks permanently without that material rather than the empty-then-refilling behavior originally claimed here; `0.20.1-alpha.1` fixes it.
+- Remove the now-unreachable legacy one-block Ender Gas merge path, superseded by the storage version bump above.
+- Void Gas and Slime are fan-transportable for the first time, a direct consequence of sharing Vapor/Smoke/Dust/Exhaust/Ender Gas's existing 4-block fan size limit; no fan code changed.
 - LOD bands (`VOID_GAS_LOD`, `DUST_LOD`, `VAPOR_LOD`) are multipliers of each material's own cell size and were left as-is; see README for the resulting per-tier volume size change per material.
-- Overworld Endermen now follow the fog (Vapor) spawn rule; the Obsidian Powder spawn gate is removed. Nether and End spawns use vanilla rules.
+- Overworld Endermen now follow the fog (Vapor) spawn rule; the Ender Gas spawn gate is removed. Nether and End spawns use vanilla rules.
 - Rename `AtmosphereMaterial.VIOLENCE` (`"violence"`) to `AtmosphereMaterial.VOID_GAS` (`"void_gas"`) across the server, engine, and client catalogs. Enum order and ordinals are unchanged.
 - Rename `ViolenceGameplay`/`ViolenceGameplayTest` to `VoidGasGameplay`/`VoidGasGameplayTest`. Rename the server `violence` config section to `voidGas`, and the client `violenceReachMultiplier`/`violenceOpticalDensity` keys to `voidGasReachMultiplier`/`voidGasOpticalDensity`. No migration: old values reset to their defaults.
 - Slime continues to share the renamed `VOID_GAS_LOD` constant in the engine catalog; its behavior is unchanged and pinned by a test. A new test confirms the server, engine, and client catalogs agree on the Void Gas entry and that ordinals are unchanged.
 - Smoke's optical density drops from 4x to 2x and its color changes from black to a very dark, subtle brown tint (`0x1F160F`) in the engine and client catalogs. Void Gas's color changes from red to black, keeping its optical density at 4x — the darkness Smoke previously had. No other material's color or optical density changes.
 - Update the client `smokeOpticalDensity` config default from `4` to `2` to match; the renderer reads this config value at render time, not the catalogs' `opticalDensityMultiplier` field, so the config default has to move with the catalogs or Smoke would keep rendering at its old darkness in-game.
-- Void Gas, Obsidian Powder and Slime now dissipate gradually each processed turn, reusing `SmokeDissipation`'s roll and `dissipationAmount` cap at a chance of Smoke's own `dissipationChance` divided by the new `heavyGas.dissipationFactor` server config option (default 3). The factor is shared by all three, must be finite and greater than zero, and is reloadable like the rest of server config. Dust and Smoke are unchanged.
+- Void Gas, Ender Gas and Slime now dissipate gradually each processed turn, reusing `SmokeDissipation`'s roll and `dissipationAmount` cap at a chance of Smoke's own `dissipationChance` divided by the new `heavyGas.dissipationFactor` server config option (default 3). The factor is shared by all three, must be finite and greater than zero, and is reloadable like the rest of server config. Dust and Smoke are unchanged.
 
 ## Migration
 
-- Saved Dust, Obsidian Powder, Exhaust, Void Gas, and Slime atmosphere is dropped on load. **Correction (see `0.20.1-alpha.1`):** affected chunks did not refill from normal production as claimed here — that required `0.20.1-alpha.1`.
+- Saved Dust, Ender Gas, Exhaust, Void Gas, and Slime atmosphere is dropped on load. **Correction (see `0.20.1-alpha.1`):** affected chunks did not refill from normal production as claimed here — that required `0.20.1-alpha.1`.
 - Existing `violence` server and client config resets to `voidGas` defaults; old `violence`/`violenceReachMultiplier`/`violenceOpticalDensity` values are not migrated.
 - Forge config keeps an already-saved value when a default changes: a client with a saved `smokeOpticalDensity` (e.g. `4`, the old default) keeps rendering Smoke at that value. Delete `dynamicatmosphere-client.toml` or manually set `smokeOpticalDensity` to `2` to see the new look.
 - Client and server must be upgraded together and match versions.
@@ -56,7 +75,7 @@ Category: patch
 - Fix: scope `VaporHostileSpawnGate` to the Overworld. Natural and chunk-generation
   monster spawns in the Nether and End no longer require dense local Vapor; they
   follow vanilla rules again. The Overworld rule (qualifying terrain above, or Vapor
-  strictly more than half full) is unchanged. Endermen and Obsidian Powder are untouched.
+  strictly more than half full) is unchanged. Endermen and Ender Gas are untouched.
 
 # 0.19.0-alpha.1
 
@@ -66,7 +85,7 @@ Category: patch
 
 # 0.18.1-alpha.1
 
-- Restrict Create fan transport to grids with cell edges of four blocks or less. Vapor, Smoke, Dust, Exhaust, and Obsidian Powder can move; Violence and Slime are unaffected.
+- Restrict Create fan transport to grids with cell edges of four blocks or less. Vapor, Smoke, Dust, Exhaust, and Ender Gas can move; Violence and Slime are unaffected.
 
 # 0.18.0-alpha.1
 
@@ -82,20 +101,14 @@ Category: patch
 
 # 0.17.0-alpha.1
 
-- Rename Ender Gas to Obsidian Powder throughout (`ender_gas` → `obsidian_powder` and
-  every `enderGas.*` key → `obsidianPowder.*`). Add `obsidianPowder.obsidianBlockEmission`
-  (default 1) for plain obsidian and `obsidianPowder.cryingObsidianEmission` (default
-  1000) for crying obsidian; `obsidianPowder.passiveBlockEmission` remains the general
-  passive source.
-
-- Increase Obsidian Powder cells from 1x1x1 to 2x2x2 on the server and client. No other material used one-block cells.
-- Merge existing one-block Obsidian Powder cells into aligned two-block cells when chunks load, preserving amounts. Corrupt or unrepresentably large merges retain their original data instead of truncating it.
-- Remove random full-moon Obsidian Powder bursts and their configuration fields. Portal, mob, block-source, and pearl emissions remain.
+- Increase Ender Gas cells from 1x1x1 to 2x2x2 on the server and client. No other material used one-block cells.
+- Merge existing one-block Ender Gas cells into aligned two-block cells when chunks load, preserving amounts. Corrupt or unrepresentably large merges retain their original data instead of truncating it.
+- Remove random full-moon Ender Gas bursts and their configuration fields. Portal, mob, block-source, and pearl emissions remain.
 - Protocol 10 requires matching updated client and server; no world reset is needed.
 
 # 0.16.2-alpha.1
 
-- Find portal blocks in loaded sections using palette-gated scans, emitting Obsidian Powder on both faces instead of into occupied portal cells. `obsidianPowder.portalBlockEmission` defaults to 100 per portal block per producer pass; zero disables this source.
+- Find portal blocks in loaded sections using palette-gated scans, emitting Ender Gas on both faces instead of into occupied portal cells. `enderGas.portalBlockEmission` defaults to 100 per portal block per producer pass; zero disables this source.
 - Apply configurable `runtime.simulationSkipChance` to all seven materials, defaulting to 0.75. This replaces Vapor-only `vapor.skipChance`; production intervals remain unchanged.
 - Allow magma-created water bubble columns to evaporate, and count them as fluid capacity while retaining their downward-transfer barrier.
 
@@ -113,7 +126,7 @@ Category: patch
 - Powered Create fans move material into the neighboring cell in their facing direction, proportional to absolute RPM and limited by available capacity and downward barriers.
 - Liquids provide capacity but prevent downward transfer; waterlogged solid hosts remain occupied.
 - Smoke now uses 4-block cells. Existing 8-block Smoke storage migrates with total material preserved. Protocol 9 requires matching client and server versions.
-- Obsidian Powder optical density increases from 4 to 40; Crying Obsidian produces Obsidian Powder.
+- Ender Gas optical density increases from 4 to 40; Crying Obsidian produces Ender Gas.
 - Smoke interaction probabilities increase tenfold, capped at 100%, without changing costs. Lava remains at one tenth of its original emission.
 
 # 0.15.1-alpha.1
@@ -122,15 +135,15 @@ Category: patch
 
 # 0.15.0-alpha.1
 
-- Enable all seven independent, chunk-persisted runtime materials: Vapor (4-block cells), Smoke (8), Dust (2), Obsidian Powder (1), Violence (8), Exhaust (2), and Slime (16). Initial numeric behavior is MVP tuning, not a balance or performance guarantee.
+- Enable all seven independent, chunk-persisted runtime materials: Vapor (4-block cells), Smoke (8), Dust (2), Ender Gas (1), Violence (8), Exhaust (2), and Slime (16). Initial numeric behavior is MVP tuning, not a balance or performance guarantee.
 - Extend Smoke beyond fire to lava, lit furnaces/campfires/torches, presence transitions, and explosions. Defaults: fire/lava 40, furnaces/campfires 20, torches 2, explosion burst 80 plus 10 per successfully destroyed block. Independent processed-turn effects remove leaves (10%), turn farmland to dirt (1/128), or make eligible villagers nitwits (1/256), each costing 40 on success. Profession changes invalidate trades.
 - Add Dust from movement, jumps/landings, fall damage, block breaking/placement, and falling-block landing. Water-to-mud chance rises from zero at 50% fullness to 100% at capacity, costing half the current amount rounded up on success. Above capacity, a 1/16 roll can place gravel in air, consuming 25% of current Dust on successful placement, rounded down with a minimum of 1 unit. A separate 1/64 roll dissipates up to 40 units.
-- Add Obsidian Powder from End-related mobs/blocks, witches, soul sources, portals, and pearl use/impact. Full-moon chunk checks have a 1/256 chance of an 8,000-unit burst. Natural Endermen require strictly more than 50% local Obsidian Powder, including underground, without consuming it; other spawn restrictions remain.
+- Add Ender Gas from End-related mobs/blocks, witches, soul sources, portals, and pearl use/impact. Full-moon chunk checks have a 1/256 chance of an 8,000-unit burst. Natural Endermen require strictly more than 50% local Ender Gas, including underground, without consuming it; other spawn restrictions remain.
 - Add Violence from hostile deaths, netherrack, and world-bottom producers. At 10% through 25% fullness it can supply eligible villagers with breeding food for a 5%-current-amount cost; it does not force births. At 75% or higher, a 1/32 roll attempts a zombie spawn with a quarter-capacity cost.
 - Add Exhaust from living mobs and damage. Processed eye-position exposure deals 1 through 4 damage points across 50% through 100% fullness and consumes 25% through 50% of current material when damage succeeds. Its own damage does not recursively emit. Vapor and Exhaust grow eligible crops/saplings via normal bonemeal behavior, a 10% roll and 40-unit successful-growth cost.
 - Add Slime production below Y=40 in vanilla-seeded slime chunks. At 75% fullness or higher, a 1/32 roll attempts a slime spawn with a quarter-capacity cost. Material scans, producers, and spawn attempts remain bounded and loaded-only.
-- Render all seven colors with shared mixed-material depth ordering. Smoke, Obsidian Powder, Violence, and Slime have 4x optical density before thickness-integrated alpha; Vapor, Dust, and Exhaust remain 1x. No simulation amounts change for opacity.
-- Vapor/Smoke render base detail through half view distance, 2x through view distance, and 4x through twice view distance. Violence/Slime render base through view distance and 2x through twice view distance. Dust/Exhaust/Obsidian Powder render base only through quarter view distance. Nothing, including fallback geometry, renders beyond each material's cutoff.
+- Render all seven colors with shared mixed-material depth ordering. Smoke, Ender Gas, Violence, and Slime have 4x optical density before thickness-integrated alpha; Vapor, Dust, and Exhaust remain 1x. No simulation amounts change for opacity.
+- Vapor/Smoke render base detail through half view distance, 2x through view distance, and 4x through twice view distance. Violence/Slime render base through view distance and 2x through twice view distance. Dust/Exhaust/Ender Gas render base only through quarter view distance. Nothing, including fallback geometry, renders beyond each material's cutoff.
 - Pressure chooses neighbor scope with probability equal to source-cell air fraction, otherwise source scope. Select the weakest eligible block within the chosen scope (nearest reachable layer for neighbors), with no other-scope fallback. Fresh overflow revalidation, unknown-boundary/search-budget safeguards, vanilla drops, 1-unit break emission, and the shared four-attempt limit remain.
 - Use protocol 8: update client and server together. Preserve existing worlds, chunk-persisted amounts, and the Vapor visual disk cache; the other six client caches are independent session-only state. No world reset or clearing. Existing destructive-pressure/water warnings remain; new effects can also alter crops, villagers, health, and mob populations.
 

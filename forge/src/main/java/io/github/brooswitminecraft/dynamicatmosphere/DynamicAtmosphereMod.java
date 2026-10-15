@@ -8,6 +8,7 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.config.ModConfig;
+import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.fml.common.Mod;
 import org.slf4j.Logger;
@@ -39,6 +40,10 @@ public class DynamicAtmosphereMod {
         modEventBus.addListener(DynamicAtmosphereClientConfig::onReloading);
         modEventBus.addListener(DynamicAtmosphereClientConfig::onUnloading);
         LOGGER.info("[{}] engine module reachable: {}", MODID, EngineInfo.DESCRIPTION);
+        // Deferred to FMLCommonSetupEvent: NeoForgeMod.LAVA_TYPE's registry is not yet
+        // populated during mod construction, and FluidInteractionRegistry.addInteraction
+        // resolves it eagerly (NeoForgeMod.LAVA_TYPE.value()), not lazily.
+        modEventBus.addListener((FMLCommonSetupEvent event) -> LavaIceInteractions.register());
         modEventBus.addListener(AtmosphereNetwork::register);
         ForgeAtmosphereStorage.register(modEventBus);
         ForgeAtmosphereCapacity.register(modEventBus);
@@ -56,6 +61,7 @@ public class DynamicAtmosphereMod {
         NeoForge.EVENT_BUS.addListener(prototype::onServerStopped);
         NeoForge.EVENT_BUS.addListener(VaporHostileSpawnGate::onSpawnPlacementCheck);
         NeoForge.EVENT_BUS.addListener(VaporOverheadTerrain::onTagsUpdated);
+        NeoForge.EVENT_BUS.addListener(LavaWaterMagmaGameplay::onFluidPlaceBlock);
         DustGameplay dust = prototype.dustGameplay();
         NeoForge.EVENT_BUS.addListener(dust::onEntityTick);
         NeoForge.EVENT_BUS.addListener(dust::onLivingDamage);
@@ -70,6 +76,11 @@ public class DynamicAtmosphereMod {
         NeoForge.EVENT_BUS.addListener(prototype.voidGasGameplay()::onLivingDeath);
         NeoForge.EVENT_BUS.addListener(prototype.exhaustGameplay()::onEntityTick);
         NeoForge.EVENT_BUS.addListener(prototype.exhaustGameplay()::onLivingDamage);
+        MagmaLavaGameplay magmaLava = MagmaLavaGameplay.create();
+        NeoForge.EVENT_BUS.addListener(magmaLava::onChunkLoad);
+        NeoForge.EVENT_BUS.addListener(magmaLava::onChunkUnload);
+        NeoForge.EVENT_BUS.addListener(magmaLava::onNeighborNotify);
+        NeoForge.EVENT_BUS.addListener(magmaLava::onServerTick);
         LOGGER.info("[{}] bounded atmospheric grid enabled", MODID);
     }
 
