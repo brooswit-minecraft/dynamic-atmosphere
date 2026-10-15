@@ -1,6 +1,15 @@
-# 0.20.2-alpha.1
+# 0.21.0-alpha.1
 
-Category: patch
+Category: minor
+
+- Lava touching water no longer makes obsidian, cobblestone or stone — it makes magma, and the water is consumed too.
+- Obsidian isn't removed from the game by this change — it has moved sideways: lava against packed ice or blue ice now pays out obsidian there instead, in place of the obsidian water+lava used to make.
+- Automated stone/cobble/obsidian generation stops working, because the water source is now consumed rather than persisting.
+- Five of these conversions emit DA's existing lava-removal smoke (water-on-source, water-on-flowing-lava, and all three ice rungs); lava spreading down into water does not, since no lava fluid is actually removed in that case. That split is deliberate — smoke marks a lava removal from a distance — not a bug.
+- Blue ice still remains basalt, not obsidian, when lava has soul soil beneath it — the existing basalt-generator precedence is unchanged.
+- Breaking a magma block, by any actor or mechanism (player, explosion, piston, mob, or an automated machine), now independently rolls a `magma.breakLavaChance` chance (default `0.1`) to leave a lava source at the removed position. Placing magma, or replacing magma with magma, never rolls. Config-backed and reloadable at runtime; see README's "Lava and Magma" section.
+
+# 0.20.2-alpha.1
 
 - Release notes now carry a `Category: patch|minor|breaking` marker; a release fails fast if it is missing or invalid, instead of shipping a category-less build.
 - Every published release now sends a `repository_dispatch` to the Sickos repository, once Modrinth confirms the upload through an authenticated read-back. The dispatch is skipped with a warning when no dispatch credential is configured (no credential is configured as of 0.20.2-alpha.1), and consuming it requires a receiving workflow on Sickos's default branch.
