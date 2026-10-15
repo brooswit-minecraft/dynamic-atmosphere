@@ -26,30 +26,33 @@ public final class AtmosphereVolumeGeometry {
 
     public record Slice(double depth, float alpha, List<Point> vertices) { }
 
-    /** Clip boundary-crossing slices to an inscribed reach disk; no fallback can draw past reach. */
-    static List<Slice> clipToReach(List<Slice> slices, Point look, double reach) {
-        Point forward = look.normalized();
-        Point right = forward.cross(Math.abs(forward.y) < 0.9 ? new Point(0, 1, 0) : new Point(1, 0, 0)).normalized();
-        Point up = right.cross(forward);
+    /**
+     * Clip boundary-crossing slices to an inscribed reach CYLINDER (bounded horizontal
+     * X/Z radius, unbounded Y); no fallback can draw past reach. Slice vertices are
+     * camera-relative world axes (translation only, no rotation), so a vertex's own
+     * x/z components already are its horizontal offset from the camera — the clip
+     * planes are vertical half-planes in world X/Z and need no view-direction basis,
+     * unlike the sphere this replaced.
+     */
+    static List<Slice> clipToReach(List<Slice> slices, double reach) {
         double reachSquared = reach * reach;
         var result = new ArrayList<Slice>(slices.size());
         for (Slice slice : slices) {
-            if (slice.depth() >= reach) continue;
-            if (slice.vertices().stream().allMatch(p -> p.dot(p) <= reachSquared)) {
+            if (slice.vertices().stream().allMatch(p -> horizontalDistanceSquared(p) <= reachSquared)) {
                 result.add(slice);
                 continue;
             }
-            // An inscribed 32-sided disk is conservative and only needed at the outer boundary.
-            double limit = Math.sqrt(Math.max(0, reachSquared - slice.depth() * slice.depth())) * Math.cos(Math.PI / 32);
+            // An inscribed 32-sided prism is conservative and only needed at the outer boundary.
+            double limit = reach * Math.cos(Math.PI / 32);
             List<Point> polygon = slice.vertices();
             for (int edge = 0; edge < 32 && polygon.size() >= 3; edge++) {
                 double angle = (edge + 0.5) * Math.PI / 16;
-                Point normal = right.scale(Math.cos(angle)).add(up.scale(Math.sin(angle)));
+                double nx = Math.cos(angle), nz = Math.sin(angle);
                 var clipped = new ArrayList<Point>();
                 Point previous = polygon.getLast();
-                double previousGap = previous.dot(normal) - limit;
+                double previousGap = previous.x() * nx + previous.z() * nz - limit;
                 for (Point point : polygon) {
-                    double gap = point.dot(normal) - limit;
+                    double gap = point.x() * nx + point.z() * nz - limit;
                     if ((gap <= 0) != (previousGap <= 0)) {
                         clipped.add(previous.add(point.subtract(previous).scale(previousGap / (previousGap - gap))));
                     }
@@ -62,6 +65,20 @@ public final class AtmosphereVolumeGeometry {
             if (polygon.size() >= 3) result.add(new Slice(slice.depth(), slice.alpha(), List.copyOf(polygon)));
         }
         return result;
+    }
+
+    private static double horizontalDistanceSquared(Point p) { return p.x() * p.x() + p.z() * p.z(); }
+
+    /**
+     * Continuous 1..0 fade factor: full opacity at/below fadeStart, linearly falling
+     * to fully transparent at/beyond maxDistance. Checking the maxDistance cutoff
+     * before the fadeStart one means a degenerate band (fadeStart >= maxDistance)
+     * still resolves to a hard cutoff rather than dividing by zero.
+     */
+    static float fadeMultiplier(double distance, double fadeStart, double maxDistance) {
+        if (distance >= maxDistance) return 0;
+        if (distance <= fadeStart) return 1;
+        return (float) (1 - (distance - fadeStart) / (maxDistance - fadeStart));
     }
 
     public static float sliceAlpha(float amount, double thickness) {

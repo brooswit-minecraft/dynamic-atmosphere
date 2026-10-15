@@ -12,15 +12,16 @@ import net.minecraft.world.level.levelgen.WorldgenRandom;
 /**
  * Loaded-only Slime production and high-density spawning.
  *
- * <p>Conservative MVP defaults: each scheduled loaded slime-chunk check has an
- * independent 1/8 chance to emit 8 units at a random position below Y=40.
- * At or above 75% fullness, one 1/32 roll may create one slime for 25% of cell
- * capacity, after at most eight loaded-only positions pass vanilla spawn rules.
- * The finite debit and one-spawn-per-callback limit prevent duplicate runaway.</p>
+ * <p>Amplified defaults (ATMO-24 C1): each scheduled loaded slime-chunk check
+ * unconditionally (denominator 1) emits 64 units at a random position below
+ * Y=40. At or above 75% fullness, one 1/32 roll may create one slime for 25%
+ * of cell capacity, after at most eight loaded-only positions pass vanilla
+ * spawn rules. The finite debit and one-spawn-per-callback limit prevent
+ * duplicate runaway.</p>
  */
 public final class SlimeGameplay {
-    static final int UNDERGROUND_AMOUNT = 8;
-    static final int UNDERGROUND_CHANCE_DENOMINATOR = 8;
+    static final int UNDERGROUND_AMOUNT = 64;
+    static final int UNDERGROUND_CHANCE_DENOMINATOR = 1;
     static final int HIGH_SPAWN_CHANCE_DENOMINATOR = 32;
     static final int SPAWN_ATTEMPTS = 8;
     private static final long SLIME_SALT = 987234911L;
