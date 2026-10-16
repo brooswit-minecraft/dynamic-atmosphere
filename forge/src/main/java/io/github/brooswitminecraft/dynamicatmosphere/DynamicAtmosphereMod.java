@@ -62,6 +62,9 @@ public class DynamicAtmosphereMod {
         NeoForge.EVENT_BUS.addListener(VaporHostileSpawnGate::onSpawnPlacementCheck);
         NeoForge.EVENT_BUS.addListener(AtmosphericSpawnModifierGate::onSpawnPlacementCheck);
         NeoForge.EVENT_BUS.addListener(EntityDeathMaterialSource::onLivingDeath);
+        NeoForge.EVENT_BUS.addListener(CreeperExhaustSpawnGate::onSpawnPlacementCheck);
+        NeoForge.EVENT_BUS.addListener(CreeperExhaustSpawnGate::onPositionCheck);
+        NeoForge.EVENT_BUS.addListener(EventPriority.LOWEST, CreeperExhaustSpawnGate::onEntityJoin);
         NeoForge.EVENT_BUS.addListener(VaporOverheadTerrain::onTagsUpdated);
         NeoForge.EVENT_BUS.addListener(LavaWaterMagmaGameplay::onFluidPlaceBlock);
         DustGameplay dust = prototype.dustGameplay();

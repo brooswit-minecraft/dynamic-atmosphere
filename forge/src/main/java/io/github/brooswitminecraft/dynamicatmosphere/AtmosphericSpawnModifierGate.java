@@ -33,7 +33,7 @@ final class AtmosphericSpawnModifierGate {
         if (!(event.getLevel().getLevel() instanceof ServerLevel level)) return;
         BlockPos pos = event.getPos();
         String entityId = BuiltInRegistries.ENTITY_TYPE.getKey(event.getEntityType()).toString();
-        boolean allowed = event.getResult() != MobSpawnEvent.SpawnPlacementCheck.Result.FAIL;
+        var result = event.getResult();
 
         for (Entry entry : ENTRIES) {
             for (SpawnModifier modifier : entry.modifiers().get()) {
@@ -43,15 +43,44 @@ final class AtmosphericSpawnModifierGate {
                 var context = EventContext.of(state.get().amount(), state.get().capacity(), false, 0);
                 if (!modifier.conditionsMatch(context)) continue;
                 double roll = level.random.nextDouble();
-                if (!allowed && AtmosphericEventEngine.shouldOverrideDeny(modifier, roll)) {
-                    event.setResult(MobSpawnEvent.SpawnPlacementCheck.Result.DEFAULT);
-                    allowed = true;
-                } else if (allowed && AtmosphericEventEngine.shouldSuppress(modifier, roll)) {
-                    event.setResult(MobSpawnEvent.SpawnPlacementCheck.Result.FAIL);
-                    allowed = false;
-                }
+                result = applyModifier(result, modifier, roll);
             }
         }
+        event.setResult(result);
+    }
+
+    /**
+     * Folds one modifier's roll into the running decision. A vanilla placement check starts
+     * as {@code DEFAULT} (vanilla's own predicate decides) and only becomes {@code FAIL} when
+     * something -- vanilla itself, or an earlier gate such as {@link VaporHostileSpawnGate} --
+     * has explicitly denied it; {@code DEFAULT} is therefore NOT "already allowed" the way an
+     * explicit {@code SUCCEED} is -- treating it as such (as an earlier version of this gate
+     * did) silently skips the override-deny roll for the ordinary case where vanilla's own
+     * predicate was always going to fail, since nothing had set {@code FAIL} yet. Overriding
+     * must also set {@code SUCCEED}, never {@code DEFAULT}: resetting an explicit {@code FAIL}
+     * back to {@code DEFAULT} only asks vanilla to decide again, which can discard another
+     * gate's deliberate denial without actually forcing the spawn through. Suppression is the
+     * mirror image: anything other than an explicit {@code FAIL} is still "could still spawn",
+     * so it may be knocked down to {@code FAIL}.
+     *
+     * <p>Package-private for {@code AtmosphericSpawnModifierGateTest}: a plain
+     * {@code Result}-in/{@code Result}-out function has no Minecraft world/level dependency, so
+     * it is testable without bootstrapping Minecraft or constructing a {@code MobSpawnEvent}.
+     */
+    static MobSpawnEvent.SpawnPlacementCheck.Result applyModifier(
+        MobSpawnEvent.SpawnPlacementCheck.Result current,
+        SpawnModifier modifier,
+        double roll
+    ) {
+        if (current != MobSpawnEvent.SpawnPlacementCheck.Result.SUCCEED
+            && AtmosphericEventEngine.shouldOverrideDeny(modifier, roll)) {
+            return MobSpawnEvent.SpawnPlacementCheck.Result.SUCCEED;
+        }
+        if (current != MobSpawnEvent.SpawnPlacementCheck.Result.FAIL
+            && AtmosphericEventEngine.shouldSuppress(modifier, roll)) {
+            return MobSpawnEvent.SpawnPlacementCheck.Result.FAIL;
+        }
+        return current;
     }
 
     private AtmosphericSpawnModifierGate() { }

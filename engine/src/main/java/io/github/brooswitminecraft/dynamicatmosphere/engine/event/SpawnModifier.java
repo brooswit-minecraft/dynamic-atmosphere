@@ -24,7 +24,7 @@ public record SpawnModifier(String entityId, List<Condition> conditions, double 
         return Condition.allMatch(conditions, context);
     }
 
-    /** Probability (roll &lt; threshold) that this modifier overrides a vanilla DENY to PASS_THROUGH. */
+    /** Probability (roll &lt; threshold) that this modifier overrides a vanilla DENY to SUCCEED. */
     public double overrideDenyProbability() {
         return Math.min(1.0, Math.max(0.0, multiplier - 1.0));
     }
