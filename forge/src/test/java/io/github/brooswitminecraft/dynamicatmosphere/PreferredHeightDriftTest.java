@@ -3,6 +3,7 @@ package io.github.brooswitminecraft.dynamicatmosphere;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PreferredHeightDriftTest {
     private static final double W = 0.40;
@@ -96,14 +97,15 @@ class PreferredHeightDriftTest {
         assertEquals(0.0, PreferredHeightDrift.upProbability(0, 100, CAPACITY, CAPACITY, 0.5, DEAD_BAND), 1e-9);
     }
 
+    private static final int LARGE_CAPACITY = 1000;
+
     @Test
     void splitConservesAmountAndRemainderStaysUnmoved() {
-        // amount=0 fill fraction, home far above y: thin, so p_up=0.90. amount=100 units stored
-        // (capacity is only used for the fill fraction, not as an upper bound on amount here),
-        // driftFraction=0.10 -> drift=10 units moved total, 90 stay in the source cell.
-        var split = PreferredHeightDrift.split(100, 0, 100, Integer.MAX_VALUE, W, DEAD_BAND, 0.10);
-        assertEquals(10, split.up() + split.down());
-        assertEquals(9, split.up()); // round(10 * 0.90)
+        // amount=100 of capacity=1000 (f=0.1), home far above y: h=+1. p_up=0.5+0.4*(0.9-0.1)=0.82.
+        // driftFraction=0.10 -> driftExact=10.0: up=floor(8.2)=8, down=floor(1.8)=1, 1 unit of the
+        // 10-unit drift budget stays as a genuine remainder (on top of the other 900 untouched).
+        var split = PreferredHeightDrift.split(100, 0, 100, LARGE_CAPACITY, W, DEAD_BAND, 0.10);
+        assertEquals(8, split.up());
         assertEquals(1, split.down());
     }
 
@@ -112,6 +114,46 @@ class PreferredHeightDriftTest {
         var split = PreferredHeightDrift.split(100, 0, 4, CAPACITY, W, DEAD_BAND, 0.10);
         assertEquals(0, split.up());
         assertEquals(0, split.down());
+    }
+
+    @Test
+    void splitNeverExceedsTheExactPerLegBudgetEvenWhenTheTotalBudgetIsAFraction() {
+        // amount=5 of capacity=1000, driftFraction=0.1 -> driftExact=0.5. Neither leg's exact
+        // share reaches 1 unit, so NEITHER leg may move anything: moving a whole unit here would
+        // exceed the exact budget of either leg. This is the regression for a previous bug where
+        // rounding the combined total first (to 1) and handing the whole unit to whichever leg
+        // won let a leg move more than its own exact share, with the "remainder" silently
+        // vanishing into the other leg instead of staying at the source.
+        var split = PreferredHeightDrift.split(100, 0, 5, LARGE_CAPACITY, W, DEAD_BAND, 0.10);
+        assertEquals(0, split.up());
+        assertEquals(0, split.down());
+    }
+
+    @Test
+    void splitLeavesAGenuineRemainderInTheSourceRatherThanRoundingItIntoALeg() {
+        // amount=20 of capacity=1000 (f=0.02), home far above: h=+1, p_up=0.5+0.4*(0.98-0.02)=0.884.
+        // driftFraction=0.10 -> driftExact=2.0. Exact shares: up=1.768, down=0.232. Flooring each
+        // independently gives up=1, down=0 -- moving only 1 of the 2.0-unit budget, with the rest
+        // staying as a genuine remainder, never swept into the down leg to fill out the budget.
+        var split = PreferredHeightDrift.split(100, 0, 20, LARGE_CAPACITY, W, DEAD_BAND, 0.10);
+        assertEquals(1, split.up());
+        assertEquals(0, split.down());
+        assertTrue(split.up() + split.down() < 20 * 0.10, "moved amount must not reach the full drift budget");
+    }
+
+    @Test
+    void neitherLegEverExceedsItsOwnExactShareAcrossASweepOfSmallAmountsAndFractions() {
+        for (int amount = 0; amount <= 50; amount++) {
+            for (double driftFraction : new double[] {0.01, 0.05, 0.1, 0.33, 0.5, 1.0}) {
+                var split = PreferredHeightDrift.split(100, 0, amount, LARGE_CAPACITY, W, DEAD_BAND, driftFraction);
+                double driftExact = amount * driftFraction;
+                double pUp = PreferredHeightDrift.upProbability(100, 0, amount, LARGE_CAPACITY, W, DEAD_BAND);
+                String context = "amount=" + amount + " driftFraction=" + driftFraction;
+                assertTrue(split.up() <= driftExact * pUp + 1e-9, "up leg exceeded its exact share: " + context);
+                assertTrue(split.down() <= driftExact * (1 - pUp) + 1e-9, "down leg exceeded its exact share: " + context);
+                assertTrue(split.up() + split.down() <= amount, "moved more than the cell holds: " + context);
+            }
+        }
     }
 
     private static double up(int home, int y, int amount) {

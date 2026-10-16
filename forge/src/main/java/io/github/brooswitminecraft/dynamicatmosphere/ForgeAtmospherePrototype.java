@@ -1620,8 +1620,11 @@ final class ForgeAtmospherePrototype {
         int capacity = capacityAt.applyAsInt(key);
         if (level == null || cell == null || capacity <= 0) return;
         var movement = tuning().verticalMovement();
-        int homeCell = Math.floorDiv(homeAt.applyAsInt(level), cellSize);
-        var split = PreferredHeightDrift.split(homeCell, key.y(), cell.amount(), capacity,
+        // home, deadBand and w are all specified in blocks; compare against the cell's own
+        // origin in block units too, rather than converting home down to cell units, so a
+        // configured deadBand of N blocks stays exactly N blocks regardless of cellSize.
+        int home = homeAt.applyAsInt(level);
+        var split = PreferredHeightDrift.split(home, cellOriginY(key.y(), cellSize), cell.amount(), capacity,
             movement.w(), movement.deadBand(), movement.driftFraction());
         if (split.up() > 0) {
             var upKey = new AtmosphereGrid.CellKey<>(key.dimension(), key.x(), key.y() + 1, key.z());
@@ -1633,6 +1636,15 @@ final class ForgeAtmospherePrototype {
                 transferPreferredHeightDrift(target, key, downKey, split.down(), capacityAt);
             }
         }
+    }
+
+    /**
+     * MINECRAFT-1 (B1): the block Y of a cell's own origin, for comparing against a home/deadBand
+     * that are both specified in blocks. Package-private and Minecraft-free so the unit
+     * conversion itself — not just {@link PreferredHeightDrift}'s formula — is directly testable.
+     */
+    static int cellOriginY(int cellY, int cellSize) {
+        return cellY * cellSize;
     }
 
     private void transferPreferredHeightDrift(

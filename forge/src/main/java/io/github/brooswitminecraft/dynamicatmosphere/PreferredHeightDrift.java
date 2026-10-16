@@ -35,21 +35,22 @@ public final class PreferredHeightDrift {
     }
 
     /**
-     * Deterministic expected-value split of {@code driftFraction * amount} between up and down;
-     * {@code up + down} never exceeds the rounded drift amount, so any fractional remainder stays
-     * in the source cell rather than being moved or randomly assigned.
+     * Deterministic expected-value split of {@code driftFraction * amount} between up and down.
+     * Each leg is floored independently from the exact (unrounded) per-direction share, so neither
+     * leg can ever exceed its own exact budget; whatever is left over — the fractional remainder
+     * of either leg, not just of the combined total — stays in the source cell untouched. It is
+     * never rounded up into a leg, moved anyway, or randomly assigned.
      */
     public static Split split(
         int home, int y, int amount, int capacity, double w, int deadBand, double driftFraction
     ) {
-        int drift = Math.round((float) (amount * driftFraction));
-        if (drift <= 0) {
+        double driftExact = amount * driftFraction;
+        if (driftExact <= 0) {
             return new Split(0, 0);
         }
         double pUp = upProbability(home, y, amount, capacity, w, deadBand);
-        int up = Math.round((float) (drift * pUp));
-        up = Math.min(up, drift);
-        int down = drift - up;
+        int up = (int) Math.floor(driftExact * pUp);
+        int down = (int) Math.floor(driftExact * (1 - pUp));
         return new Split(up, down);
     }
 }
