@@ -235,8 +235,17 @@ and migrated chunks are saved in the new format.
   world-bottom producer unconditionally adds 64 every producer check. At 10% through 25% fullness,
   eligible villagers can receive three bread for vanilla breeding readiness,
   costing 5% of the current amount rounded up; this does not force a birth.
-  At 75% fullness or higher, a 1/32 processed-turn roll attempts a zombie spawn,
-  with a quarter-capacity material cost and normal spawn-position/rule checks.
+  Void Gas is a hazard, not a spawner (MINECRAFT-17/ATMO-22): the consumption-driven
+  zombie spawn that used to fire above 75% fullness is removed, along with the
+  now-dead `voidGas.spawnChanceDenominator`/`voidGas.spawnAttempts` keys, and no
+  damage path was added in its place. Instead, a Void Gas cell strictly more than
+  half full makes its position eligible for the Vapor surface-spawn rule above, the
+  same way a more-than-half-full Vapor cell is — monsters there spawn under vanilla
+  control instead of being denied. Whether this eligibility is Overworld-only (like
+  the Vapor rule) or applies in every dimension is governed by the new
+  `voidGas.surfaceSpawnEligibleOverworldOnly` key (default `true`, matching Vapor);
+  Brooswit has not confirmed the dimension scope, so this is a configurable default,
+  not a hard-coded assumption.
 - **Exhaust:** passive living-mob emissions use a 1/128 chance, or 1/16 for
   creepers, adding 1 unit. Damage emits four units per damage point, rounded up
   and capped at 64; Exhaust's own damage does not recursively emit.

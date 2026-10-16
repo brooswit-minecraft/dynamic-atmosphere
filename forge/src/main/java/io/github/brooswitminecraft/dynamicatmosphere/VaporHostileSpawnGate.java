@@ -8,11 +8,18 @@ import net.neoforged.neoforge.event.entity.living.MobSpawnEvent;
 
 /**
  * Denies hostile spawning without qualifying overhead terrain unless the local vapor cell is
- * strictly more than half full. Overworld only: Vapor does not gate Nether or
- * End monster spawns. Applies uniformly to every monster-category entity
- * type, including Endermen — there is no per-entity-type carve-out. This
- * gate never consumes vapor and never forces a chunk load. Commands, eggs,
- * spawners, and underground spawning retain their normal behavior.
+ * strictly more than half full, or (MINECRAFT-17/ATMO-22) a sufficiently full Void Gas cell
+ * makes the position eligible the same way. Applies uniformly to every
+ * monster-category entity type, including Endermen — there is no
+ * per-entity-type carve-out. This gate never consumes vapor or Void Gas and
+ * never forces a chunk load. Commands, eggs, spawners, and underground
+ * spawning retain their normal behavior.
+ *
+ * <p>Vapor's own gating stays Overworld-only, unconditionally — it does not gate Nether or
+ * End monster spawns. Void Gas's dimension scope is instead governed by
+ * {@code voidGas.surfaceSpawnEligibleOverworldOnly}: Brooswit has not confirmed whether "like
+ * vapor" means Overworld-only for Void Gas too (ATMO-22 comment 23231), so that reading is a
+ * configurable default rather than a hard-coded assumption.</p>
  */
 public final class VaporHostileSpawnGate {
 
@@ -24,14 +31,14 @@ public final class VaporHostileSpawnGate {
     static Decision evaluate(
         MobSpawnType spawnType,
         MobCategory category,
-        boolean overworld,
+        boolean gateAppliesInDimension,
         boolean qualifyingTerrainAbove,
-        boolean vaporMoreThanHalfFull
+        boolean denseAtmosphere
     ) {
-        if (!overworld || !appliesTo(spawnType, category) || qualifyingTerrainAbove) {
+        if (!gateAppliesInDimension || !appliesTo(spawnType, category) || qualifyingTerrainAbove) {
             return Decision.PASS_THROUGH;
         }
-        return vaporMoreThanHalfFull ? Decision.PASS_THROUGH : Decision.DENY;
+        return denseAtmosphere ? Decision.PASS_THROUGH : Decision.DENY;
     }
 
     /**
@@ -42,12 +49,12 @@ public final class VaporHostileSpawnGate {
     static Decision evaluate(
         MobSpawnType spawnType,
         EntityType<?> entityType,
-        boolean overworld,
+        boolean gateAppliesInDimension,
         boolean qualifyingTerrainAbove,
-        boolean vaporMoreThanHalfFull
+        boolean denseAtmosphere
     ) {
         return evaluate(
-            spawnType, entityType.getCategory(), overworld, qualifyingTerrainAbove, vaporMoreThanHalfFull);
+            spawnType, entityType.getCategory(), gateAppliesInDimension, qualifyingTerrainAbove, denseAtmosphere);
     }
 
     public static void onSpawnPlacementCheck(MobSpawnEvent.SpawnPlacementCheck event) {
@@ -58,15 +65,21 @@ public final class VaporHostileSpawnGate {
         }
 
         var level = event.getLevel().getLevel();
-        if (level.dimension() != Level.OVERWORLD) {
+        boolean overworld = level.dimension() == Level.OVERWORLD;
+        boolean voidGasAppliesHere = overworld
+            || !DynamicAtmosphereServerConfig.snapshot().voidGas().surfaceSpawnEligibleOverworldOnly();
+        if (!overworld && !voidGasAppliesHere) {
             return;
         }
 
         var pos = event.getPos();
         boolean qualifyingTerrainAbove = VaporOverheadTerrain.hasQualifyingTerrainAbove(level, pos);
-        boolean vaporMoreThanHalfFull = !qualifyingTerrainAbove
+        boolean vaporMoreThanHalfFull = overworld && !qualifyingTerrainAbove
             && DynamicAtmosphereMod.isVaporMoreThanHalfFull(level, pos);
-        if (evaluate(spawnType, entityType, true, qualifyingTerrainAbove, vaporMoreThanHalfFull) == Decision.DENY) {
+        boolean voidGasEligible = voidGasAppliesHere && !qualifyingTerrainAbove
+            && DynamicAtmosphereMod.isMaterialMoreThanHalfFull(level, AtmosphereMaterial.VOID_GAS, pos);
+        boolean denseAtmosphere = vaporMoreThanHalfFull || voidGasEligible;
+        if (evaluate(spawnType, entityType, true, qualifyingTerrainAbove, denseAtmosphere) == Decision.DENY) {
             event.setResult(MobSpawnEvent.SpawnPlacementCheck.Result.FAIL);
         }
     }

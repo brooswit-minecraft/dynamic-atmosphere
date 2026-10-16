@@ -32,6 +32,20 @@ class DynamicAtmosphereConfigTest {
         assertEquals(32, first.integrations().maxFanChunksPerTick());
         assertEquals(12.0, first.heavyGas().dissipationFactor());
         assertEquals(0.1, first.magma().breakLavaChance());
+        assertEquals(true, first.voidGas().surfaceSpawnEligibleOverworldOnly());
+    }
+
+    @Test
+    void removedVoidGasSpawnKeysAreNoLongerDefined() {
+        // MINECRAFT-17: the consumption-driven zombie spawn (and these two keys) are removed.
+        // Slime keeps its own identically-named spawnChanceDenominator/spawnAttempts keys, so
+        // this checks the voidGas-qualified path rather than a bare substring match.
+        var names = DynamicAtmosphereServerConfig.SPEC.getValues().valueMap().keySet().stream()
+            .map(Object::toString).collect(java.util.stream.Collectors.toSet());
+        for (String removed : List.of("voidGas.spawnChanceDenominator", "voidGas.spawnAttempts")) {
+            assertFalse(names.stream().anyMatch(n -> n.toLowerCase(java.util.Locale.ROOT)
+                .contains(removed.toLowerCase(java.util.Locale.ROOT))), removed + " must no longer be defined");
+        }
     }
 
     @Test

@@ -52,9 +52,13 @@ class VaporHostileSpawnGateTest {
 
     @Test
     void densityDecisionIsReadOnlyAndRepeatable() {
-        boolean vaporMoreThanHalfFull = true;
-        assertEquals(PASS_THROUGH, decide(MobSpawnType.NATURAL, false, vaporMoreThanHalfFull));
-        assertEquals(PASS_THROUGH, decide(MobSpawnType.NATURAL, false, vaporMoreThanHalfFull));
+        // MINECRAFT-17: this boolean is "dense enough" at the decision layer, true whether the
+        // call site derived it from Vapor or from a sufficiently full Void Gas cell — evaluate()
+        // itself cannot tell the two apart, which is the point: Void Gas satisfies the gate the
+        // same way Vapor does.
+        boolean denseAtmosphere = true;
+        assertEquals(PASS_THROUGH, decide(MobSpawnType.NATURAL, false, denseAtmosphere));
+        assertEquals(PASS_THROUGH, decide(MobSpawnType.NATURAL, false, denseAtmosphere));
     }
 
     @Test
