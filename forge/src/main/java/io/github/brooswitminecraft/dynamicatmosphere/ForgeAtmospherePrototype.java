@@ -657,6 +657,14 @@ final class ForgeAtmospherePrototype {
      * at most one lava source block per pass into Nether Fog, equal to one full block's capacity
      * share (the same constant {@link #condenseNetherFog} uses, so the cycle neither drains nor
      * floods lava). The existing Smoke "lava disappeared" emission is deliberately not fired.
+     *
+     * <p>All-or-nothing: {@link #hasExactHeadroom} is checked against the destination cell
+     * <em>before</em> the lava is touched, so a saturated or otherwise-unemittable destination
+     * declines the whole harvest rather than destroying a lava source for a partial, clamped, or
+     * entirely refused emission. The notifying block write requires the same loaded-neighbor
+     * containment {@link #condenseNetherFog} already applies, since it can touch adjacent chunks.
+     * If the write still somehow fails after that, or emission unexpectedly fails despite the
+     * precheck, the lava source is restored rather than left destroyed with nothing produced.
      */
     private void sampleNetherFogChunk(ServerLevel level, LevelChunk chunk) {
         if (!level.dimensionType().ultraWarm()) return;
@@ -674,8 +682,38 @@ final class ForgeAtmospherePrototype {
         BlockPos pos = new BlockPos(x, y, z);
         BlockState state = chunk.getBlockState(pos);
         if (!state.is(Blocks.LAVA) || !state.getFluidState().isSource()) return;
-        level.setBlock(pos, Blocks.AIR.defaultBlockState(), 3);
-        emitMaterial(level, AtmosphereMaterial.NETHER_FOG, pos, AtmosphereMaterial.NETHER_FOG.capacityForAirBlocks(1));
+        // The notifying write below can touch neighboring chunks; require them loaded first,
+        // the same containment condenseNetherFog already applies.
+        for (int dx = -16; dx <= 16; dx += 16) {
+            for (int dz = -16; dz <= 16; dz += 16) {
+                if (!level.hasChunkAt(pos.offset(dx, 0, dz))) return;
+            }
+        }
+
+        int amount = AtmosphereMaterial.NETHER_FOG.capacityForAirBlocks(1);
+        var fogKey = materialCellKey(level, AtmosphereMaterial.NETHER_FOG, pos);
+        int capacity = materialCapacityAt(level, AtmosphereMaterial.NETHER_FOG, fogKey);
+        if (capacity <= 0) return;
+        var fogGrid = materialGrids.get(AtmosphereMaterial.NETHER_FOG);
+        var existing = fogGrid.get(fogKey);
+        if (!hasExactHeadroom(existing == null ? 0 : existing.amount(), amount)) return;
+
+        if (!level.setBlock(pos, Blocks.AIR.defaultBlockState(), 3)) return;
+        if (!fogGrid.emit(fogKey, amount, serverTicks, capacity)) {
+            // The precheck above should make this unreachable; restore rather than destroy lava
+            // for nothing if it somehow still happens.
+            level.setBlock(pos, Blocks.LAVA.defaultBlockState(), 3);
+        }
+    }
+
+    /**
+     * MINECRAFT-1 (B3): true only if adding {@code amount} to {@code currentAmount} would land
+     * at or under {@link AtmosphereGrid#MAX_STORED_AMOUNT} exactly -- not merely nonzero after
+     * {@link AtmosphereGrid#emit} would silently clamp it. Package-private and pure so the exact
+     * headroom check the production harvest relies on is directly testable.
+     */
+    static boolean hasExactHeadroom(int currentAmount, int amount) {
+        return amount > 0 && (long) currentAmount + amount <= AtmosphereGrid.MAX_STORED_AMOUNT;
     }
 
     /**
