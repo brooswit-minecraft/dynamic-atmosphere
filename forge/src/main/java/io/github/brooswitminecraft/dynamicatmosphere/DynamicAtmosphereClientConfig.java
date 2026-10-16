@@ -34,6 +34,7 @@ public final class DynamicAtmosphereClientConfig {
     private static final DoubleOption EXHAUST_DENSITY;
     private static final DoubleOption SLIME_DENSITY;
     private static final DoubleOption OBSIDIAN_POWDER_DENSITY;
+    private static final DoubleOption GLOW_GAS_DENSITY;
 
     private static final IntOption VAPOR_COLOR;
     private static final IntOption SMOKE_COLOR;
@@ -42,6 +43,7 @@ public final class DynamicAtmosphereClientConfig {
     private static final IntOption EXHAUST_COLOR;
     private static final IntOption SLIME_COLOR;
     private static final IntOption OBSIDIAN_POWDER_COLOR;
+    private static final IntOption GLOW_GAS_COLOR;
 
     private static final IntOption CELL_BUDGET;
     private static volatile Snapshot cached;
@@ -76,8 +78,11 @@ public final class DynamicAtmosphereClientConfig {
         EXHAUST_DENSITY = decimal(builder, "exhaustOpticalDensity", 1, 0, 1000);
         SLIME_DENSITY = decimal(builder, "slimeOpticalDensity", 4, 0, 1000);
         OBSIDIAN_POWDER_DENSITY = decimal(builder, "obsidianPowderOpticalDensity", 0.3, 0, 1000);
+        // MINECRAFT-1 (B2): 2x Vapor's optical density (see the catalog default in AtmosphericMaterials).
+        // The renderer reads this client-config value, not the catalog field -- both must match.
+        GLOW_GAS_DENSITY = decimal(builder, "glowGasOpticalDensity", 2, 0, 1000);
 
-        // MINECRAFT-21 (transferred from MINECRAFT-20): all seven materials' colours are now
+        // MINECRAFT-21 (transferred from MINECRAFT-20): all materials' colours are now
         // client config values, not AtmosphereRenderMaterial enum literals (a full mod release
         // used to be required to retune a colour). Colours are packed 0xRRGGBB, range 0-0xFFFFFF.
         // Vapor's own colour key is defined for catalog/config parity but is NOT read by the
@@ -99,6 +104,8 @@ public final class DynamicAtmosphereClientConfig {
         builder.comment("Packed 0xRRGGBB. PROPOSED value (ATMO-22 comment 23234), pending in-game",
             "visual confirmation against Smoke/Void Gas at representative densities.");
         OBSIDIAN_POWDER_COLOR = integer(builder, "obsidianPowderColor", 0x1A1025, 0x000000, 0xFFFFFF);
+        builder.comment("Packed 0xRRGGBB.");
+        GLOW_GAS_COLOR = integer(builder, "glowGasColor", 0xFFC83C, 0x000000, 0xFFFFFF);
         builder.pop();
 
         builder.push("allocation");
@@ -131,6 +138,7 @@ public final class DynamicAtmosphereClientConfig {
             new Material(EXHAUST_DENSITY.get(), EXHAUST_COLOR.get()),
             new Material(SLIME_DENSITY.get(), SLIME_COLOR.get()),
             new Material(OBSIDIAN_POWDER_DENSITY.get(), OBSIDIAN_POWDER_COLOR.get()),
+            new Material(GLOW_GAS_DENSITY.get(), GLOW_GAS_COLOR.get()),
             new Allocation(CELL_BUDGET.get())
         );
     }
@@ -200,7 +208,7 @@ public final class DynamicAtmosphereClientConfig {
                            double maxDistanceMultiplier, double fadeStartFraction,
                            Material vapor, Material smoke,
                            Material dust, Material voidGas, Material exhaust, Material slime,
-                           Material obsidianPowder, Allocation allocation) { }
+                           Material obsidianPowder, Material glowGas, Allocation allocation) { }
     public record Material(double opticalDensity, int color) { }
     public record Allocation(int cellBudget) { }
 

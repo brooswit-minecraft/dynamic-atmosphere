@@ -8,7 +8,6 @@ import net.minecraft.world.level.storage.LevelResource;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.fml.ModContainer;
-import net.neoforged.fml.config.ConfigTracker;
 import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.neoforged.fml.loading.FMLPaths;
@@ -71,6 +70,9 @@ public class DynamicAtmosphereMod {
         NeoForge.EVENT_BUS.addListener(prototype::onPlayerRespawn);
         NeoForge.EVENT_BUS.addListener(prototype::onServerStopped);
         NeoForge.EVENT_BUS.addListener(VaporHostileSpawnGate::onSpawnPlacementCheck);
+        NeoForge.EVENT_BUS.addListener(CreeperExhaustSpawnGate::onSpawnPlacementCheck);
+        NeoForge.EVENT_BUS.addListener(CreeperExhaustSpawnGate::onPositionCheck);
+        NeoForge.EVENT_BUS.addListener(EventPriority.LOWEST, CreeperExhaustSpawnGate::onEntityJoin);
         NeoForge.EVENT_BUS.addListener(VaporOverheadTerrain::onTagsUpdated);
         NeoForge.EVENT_BUS.addListener(LavaWaterMagmaGameplay::onFluidPlaceBlock);
         DustGameplay dust = prototype.dustGameplay();
@@ -108,33 +110,22 @@ public class DynamicAtmosphereMod {
      * {@code ServerLifecycleHooks.handleServerAboutToStart} calls
      * {@code ConfigTracker.loadConfigs(SERVER, globalConfigDir, worldServerConfigDir)}
      * synchronously BEFORE constructing and posting this very event — confirmed by decompiling
-     * NeoForge 21.1's {@code ServerLifecycleHooks.class}. So by the time ANY listener for this
-     * event runs, including one at {@code EventPriority.HIGHEST}, the per-world file (stale or
-     * not) has already been loaded into the active in-memory spec for this session; renaming the
-     * file at that point only prevents the NEXT load, it does not undo this one. There is no
-     * earlier supported event to hook instead (the internal call happens inside NeoForge's own
-     * server-bootstrap code, not from a separately-postable event).
-     *
-     * <p>So: back up/remove the stale file as before (still correct — it stops the SAME stale
-     * values from being loaded again on every future start), and when that found a mismatch,
-     * explicitly re-run NeoForge's own public {@code ConfigTracker.loadConfigs(Type, Path, Path)}
-     * — the exact same method {@code handleServerAboutToStart} itself just called — now that the
-     * stale per-world file is gone, so it falls through to current global defaults and correctly
-     * updates the active spec (and this mod's config-reload listener refreshes its cache) for
-     * this session instead of running it stale until the next full restart.
+     * NeoForge 21.1's {@code ServerLifecycleHooks.class}. So by the time this listener runs, a
+     * stale per-world override has already been loaded into the active spec for this session.
+     * Per product direction, preserving an old session's in-memory values across that exact
+     * one-restart window is not a requirement — only new worlds/overrides matter going forward —
+     * so this just backs up/resets the file for the NEXT start, without forcing a same-session
+     * correction via NeoForge's broader (and {@code @Internal}, every-mod-affecting)
+     * {@code ConfigTracker.loadConfigs} reload.
      */
     private static void onServerAboutToStart(ServerAboutToStartEvent event) {
-        Path worldServerConfigDir = event.getServer().getWorldPath(SERVERCONFIG);
-        if (invalidateServerConfigAt(worldServerConfigDir)) {
-            ConfigTracker.INSTANCE.loadConfigs(ModConfig.Type.SERVER, FMLPaths.CONFIGDIR.get(), worldServerConfigDir);
-        }
+        invalidateServerConfigAt(event.getServer().getWorldPath(SERVERCONFIG));
     }
 
     /** Package-visible for ConfigVersionGuardTest: proves the per-world wiring touches only the
-     * exact SERVER file/version this mod owns, in the exact directory handed to it, and reports
-     * whether it found (and corrected) a mismatch. */
-    static boolean invalidateServerConfigAt(Path worldServerConfigDir) {
-        return ConfigVersionGuard.applyVersionInvalidation(worldServerConfigDir,
+     * exact SERVER file/version this mod owns, in the exact directory handed to it. */
+    static void invalidateServerConfigAt(Path worldServerConfigDir) {
+        ConfigVersionGuard.applyVersionInvalidation(worldServerConfigDir,
             DynamicAtmosphereServerConfig.FILE_NAME, DynamicAtmosphereServerConfig.CURRENT_VERSION);
     }
 

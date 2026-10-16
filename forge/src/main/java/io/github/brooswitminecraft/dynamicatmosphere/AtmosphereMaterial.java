@@ -2,6 +2,7 @@ package io.github.brooswitminecraft.dynamicatmosphere;
 
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.server.level.ServerLevel;
 
 /** Additional atmospheric materials introduced after the dedicated Vapor and Smoke formats. */
 public enum AtmosphereMaterial {
@@ -9,7 +10,8 @@ public enum AtmosphereMaterial {
     OBSIDIAN_POWDER("obsidian_powder"),
     VOID_GAS("void_gas"),
     EXHAUST("exhaust"),
-    SLIME("slime");
+    SLIME("slime"),
+    GLOW_GAS("glow_gas");
 
     public static final StreamCodec<RegistryFriendlyByteBuf, AtmosphereMaterial> STREAM_CODEC =
         new StreamCodec<>() {
@@ -63,5 +65,21 @@ public enum AtmosphereMaterial {
         if (tick < 0) throw new IllegalArgumentException("tick must be non-negative");
         int interval = DynamicAtmosphereServerConfig.snapshot().runtime().producerIntervalTicks();
         return Math.multiplyExact(Math.floorDiv(tick, interval) + 1, (long) interval);
+    }
+
+    /**
+     * MINECRAFT-1 (B1/B2): the preferred resting height ("home") this material's cells drift
+     * toward. Dust, Obsidian Powder, Void Gas and Exhaust rest on the dimension's own bottom
+     * (structural, not configurable); Slime rests at an absolute, configurable height clamped to
+     * the dimension's build range; Glow Gas rests at a literal Y=0, not configurable.
+     */
+    public int home(ServerLevel level) {
+        var snapshot = DynamicAtmosphereServerConfig.snapshot();
+        return switch (this) {
+            case DUST, OBSIDIAN_POWDER, VOID_GAS, EXHAUST -> level.getMinBuildHeight();
+            case SLIME -> Math.clamp(snapshot.slime().preferredHeight(),
+                level.getMinBuildHeight(), level.getMaxBuildHeight());
+            case GLOW_GAS -> Math.clamp(0, level.getMinBuildHeight(), level.getMaxBuildHeight());
+        };
     }
 }

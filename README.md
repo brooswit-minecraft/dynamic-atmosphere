@@ -90,21 +90,50 @@ material. The fluid-tick scope includes Flowing Fluids 1.0.6's injected movement
 and always clears on return or exception. Direct bucket/removal, block replacement,
 and scheduled atmospheric evaporation outside transport still emit by humidity.
 
-### Fill-biased vertical movement
+### Preferred resting heights and fill-biased vertical movement
 
-Every atmosphere cell (Vapor, Smoke, and all named material grids) chooses a vertical
-distribution direction on each selected simulation turn after fan transport has run.
-With fill fraction `f = clamp(amount / capacity, 0, 1)`, the chance of choosing the
-direction toward the configured rain cloudline is
-`emptyTowardCloudlineChance + f * (fullTowardCloudlineChance - emptyTowardCloudlineChance)`.
-The downward chance is its complement. Defaults are 75% toward the cloudline when
-empty and 25% when full, deliberately leaving horizontal spreading available while
-making sparse cells buoyant and dense cells sink. Both endpoints are configurable in
-the server `verticalMovement` section. At or above the cloudline, “toward the
-cloudline” is downward, so both outcomes collapse to downward. Existing downward
-barriers still apply.
-This fix does not delete accumulated atmosphere or reset worlds; existing material
-and simulation backlog remain.
+Every atmosphere cell (Vapor, Smoke, and all named material grids) moves a small
+fraction of its own amount vertically on each selected simulation turn, after fan
+transport has run and before equalization. This is a direct transfer, not a bias
+on equalization: it conserves material, and any portion that can't be delivered —
+no room at the destination, or the downward barrier below (see below) — simply
+stays in the source cell rather than being forced through or discarded.
+
+Each material has its own **preferred resting height ("home")**, rather than all
+sharing one global cloudline:
+
+| Material | Home |
+| --- | --- |
+| Dust, Void Gas, Obsidian Powder (Ender Gas), Exhaust | the dimension's own bottom (its minimum build height) |
+| Slime | `slime.preferredHeight` (absolute, default 64, clamped to the dimension's build range) |
+| Smoke | `smoke.preferredHeight` (absolute, default 144, clamped to the dimension's build range) |
+| Vapor | the dimension's cloudline: `vapor.rainCloudHeight` in the Overworld, `vapor.netherCloudlineHeight` in the Nether, or `vapor.endCloudlineBlocksBelowTop` blocks below the End's build-height ceiling |
+
+A thin cell (low fill fraction) drifts toward its home; a dense cell sinks,
+continuously in fill. Let `h = sign(home - y)` (zero inside a `verticalMovement.deadBand`
+dead band around home) and `f = clamp(amount / capacity, 0, 1)`. The probability of
+moving toward the cloudline direction is
+`p_up = clamp01(0.5 + verticalMovement.w * ((1 - f) * h - f))`, and `p_down = 1 - p_up`.
+With the defaults (`w = 0.40`), a thin cell below home moves up with 90% probability
+and a dense cell anywhere moves up with only 10% probability; a cell within the dead
+band of home splits evenly when thin. Each turn moves
+`verticalMovement.driftFraction` (default 10%) of the cell's amount, split `p_up`/`p_down`
+as a deterministic expected value — any fractional remainder from rounding simply
+stays put, it is never randomly assigned or carried over.
+
+Existing downward barriers still apply to the down leg only: material cannot drift
+down out of a cell containing fluid or bedrock, though drifting into a cell that
+already contains liquid is allowed. There is no equivalent restriction on the up leg.
+
+A known consequence: Void Gas and Slime spawn mobs where the gas actually is, so
+their mob spawns follow these new heights — both now settle toward the dimension
+floor rather than toward the old shared cloudline.
+
+This change does not delete accumulated atmosphere or reset worlds; existing
+material and simulation backlog remain. It replaces the simpler global-cloudline
+gate this mod shipped previously (every material sharing Vapor's `rainCloudHeight`
+as a single bias on the existing equalization step) with the mechanism above,
+per the epic's own B1 specification.
 
 Exposed non-fluid ground also emits according to effective light: zero at light
 15, rising to 40 units per pass at light 0. This uses the day/night-adjusted sky
@@ -125,7 +154,7 @@ units; capacity remains 0..1000.
 
 Install this version on **both server and client**, or in a single-player NeoForge
 instance. Earlier particle-only releases did not require a client installation;
-the new grid renderer and sync protocol do. **Protocol 10 requires updating both
+the new grid renderer and sync protocol do. **Protocol 11 requires updating both
 sides together; earlier-protocol clients cannot connect.** Large snapshots use
 512-cell packets and a completion marker. Snapshot scope and chunk freshness
 distinguish current observations from retained visual history. There is no
@@ -164,9 +193,9 @@ before upgrading.** It changes the world, not just the visual cache. Existing
 destructive-pressure warnings remain unchanged, and no data or world reset is
 required.
 
-## Seven Materials
+## Eight Materials
 
-`0.19.0-alpha.1` enables all seven independent materials, each with chunk-persisted
+`0.19.0-alpha.1` enabled all seven independent materials, each with chunk-persisted
 server amounts and separate client state. These are active MVP systems, not
 placeholders for future runtime support. Numeric defaults are initial tuning,
 not a claim of balance or measured performance. `0.20.0-alpha.1` moved every
@@ -184,9 +213,13 @@ emission sources, thresholds, and costs did not change.
 | Void Gas | 4 blocks | 200 ticks | Black (`voidGasColor`, default `0x000000`) | 4x |
 | Exhaust | 4 blocks | 200 ticks | Yellow (`exhaustColor`, default `0xFFFF00`) | 1x |
 | Slime | 4 blocks | 200 ticks | Green (`slimeColor`, default `0x00FF00`) | 4x |
+| Glow Gas | 4 blocks | 200 ticks | Warm gold (`glowGasColor`, default `0xFFC83C`) | 2x |
 
-`0.22.0-alpha.1` (MINECRAFT-21, transferred from MINECRAFT-20) made all seven
-colours above client config values (`client.materials.<material>Color`,
+Glow Gas (MINECRAFT-1 B2) is visual only: it carries no real block light and is
+rendered unlit, purely atmospheric haze colored to suggest glowstone's glow.
+
+`0.22.0-alpha.1` (MINECRAFT-21, transferred from MINECRAFT-20) made every
+material's colour above a client config value (`client.materials.<material>Color`,
 packed `0xRRGGBB`), where a hard-coded `AtmosphereRenderMaterial` enum literal
 used to be the only way to change one — retuning a colour previously required
 a full mod release. The renderer reads the live client config value, never the
@@ -198,8 +231,8 @@ density. Obsidian Powder's optical density moved from `40x` to `0.3x` and its
 colour from `0x800080` to a PROPOSED `0x1A1025`, pending in-game visual
 confirmation against Smoke and Void Gas at representative densities. Vapor's
 optical density moved from `1x` to `1.2x`; its colour is unchanged (and, per
-above, not actually read). Dust, Exhaust, and Slime are unchanged in both
-colour and optical density.
+above, not actually read). Dust, Exhaust, Slime, and Glow Gas are unchanged in
+both colour and optical density.
 
 Intervals are scheduled game ticks, subject to bounded work queues, not guaranteed
 wall-clock completion. Scheduled producer passes share a 300-tick cadence. All
@@ -214,7 +247,7 @@ Genuinely invalid or corrupt data — a missing `cells` array, a malformed tag,
 a decode failure — is handled differently: the original tag is retained and
 that chunk is skipped rather than silently truncated.
 Only Vapor uses the persistent
-client visual disk cache; the other six keep independent session-only visual caches.
+client visual disk cache; the other seven keep independent session-only visual caches.
 Legacy 8-block Smoke cells are split into aligned 4-block children on load. Integer
 remainders are distributed among children so total stored Smoke mass is preserved,
 and migrated chunks are saved in the new format.
@@ -288,6 +321,10 @@ and migrated chunks are saved in the new format.
   dissipate (roughly 330:1 at the default factor) — this is intended: full
   cells billow upward and are a stable, load-bearing signal, not a runaway to
   be capped or damped.
+- **Glow Gas (MINECRAFT-1 B2):** a bounded, palette-gated section scan of each
+  loaded-chunk producer check emits 100 units per glowstone block found; only
+  sections whose palette actually contains glowstone pay the scan. Visual
+  only — no entity effects, no spawn gating, no real block light.
 
 Producer hooks and effect scans are bounded and loaded-only; not every block or
 entity is sampled each tick. Effects requiring material cannot spend unavailable

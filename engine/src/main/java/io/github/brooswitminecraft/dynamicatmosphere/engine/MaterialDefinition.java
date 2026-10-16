@@ -25,7 +25,7 @@ public record MaterialDefinition(
     // Named colors preserve the specification without selecting unspecified RGB values.
     // MINECRAFT-21: DARK_BROWN -> DARK_WARM_GREY (Smoke's exact RGB, now client config, is
     // 0x0D0A08 — deliberately NOT pure black so Smoke stays distinct from Void Gas).
-    public enum Color { CURRENT_FOG, BROWN, DARK_WARM_GREY, BLACK, YELLOW, GREEN, PURPLE }
+    public enum Color { CURRENT_FOG, BROWN, DARK_WARM_GREY, BLACK, YELLOW, GREEN, PURPLE, GOLD }
 
     public enum Producer {
         EXISTING_VAPOR_RULES, SNOW_ICE_SURFACE,
@@ -36,7 +36,9 @@ public record MaterialDefinition(
         LIVING_MOBS_RANDOMLY, CREEPERS_FREQUENTLY, PLAYER_DAMAGE, MOB_DAMAGE,
         UNDERGROUND_SLIME_CHUNKS_RANDOMLY,
         NETHER_PORTAL_BLOCKS_SLOWLY, ENDERMEN, ENDERMITES, ENDER_DRAGON,
-        ENDER_PEARL_USE, STANDING_IN_NETHER_PORTAL, SOUL_TORCHES, SOUL_FIRES, SOUL_SAND
+        ENDER_PEARL_USE, STANDING_IN_NETHER_PORTAL, SOUL_TORCHES, SOUL_FIRES, SOUL_SAND,
+        WITCH, SHULKER, ENDER_CHEST, CRYING_OBSIDIAN,
+        GLOWSTONE
     }
 
     public enum Transformation { WATER, GRAVEL, ZOMBIE, SLIME }

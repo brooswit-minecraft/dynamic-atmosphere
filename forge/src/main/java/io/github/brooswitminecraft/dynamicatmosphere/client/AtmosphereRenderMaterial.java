@@ -20,7 +20,9 @@ enum AtmosphereRenderMaterial {
     VAPOR(2, 0, 1.2), SMOKE(2, 0x0D0A08, 4),
     DUST(0, 0x8B4513, 1), OBSIDIAN_POWDER(0, 0x1A1025, 0.3),
     VOID_GAS(1, 0x000000, 4), EXHAUST(0, 0xFFFF00, 1),
-    SLIME(1, 0x00FF00, 4);
+    SLIME(1, 0x00FF00, 4),
+    /** MINECRAFT-1 (B2): visual only, rendered unlit -- no real block light. */
+    GLOW_GAS(0, 0xFFC83C, 2);
 
     final int cellSize = AtmosphereGridLayout.CELL_SIZE;
     final int rootLevel;
@@ -48,6 +50,7 @@ enum AtmosphereRenderMaterial {
             case EXHAUST -> config.exhaust();
             case SLIME -> config.slime();
             case OBSIDIAN_POWDER -> config.obsidianPowder();
+            case GLOW_GAS -> config.glowGas();
         };
     }
 

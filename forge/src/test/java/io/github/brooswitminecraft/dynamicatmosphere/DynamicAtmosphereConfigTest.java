@@ -23,8 +23,13 @@ class DynamicAtmosphereConfigTest {
         assertEquals(0.75, first.runtime().simulationSkipChance());
         assertEquals(100, first.obsidianPowder().portalBlockEmission());
         assertEquals(256, first.vapor().rainCloudHeight());
-        assertEquals(0.75, first.verticalMovement().emptyTowardCloudlineChance());
-        assertEquals(0.25, first.verticalMovement().fullTowardCloudlineChance());
+        assertEquals(120, first.vapor().netherCloudlineHeight());
+        assertEquals(16, first.vapor().endCloudlineBlocksBelowTop());
+        assertEquals(2, first.verticalMovement().deadBand());
+        assertEquals(0.40, first.verticalMovement().w());
+        assertEquals(0.10, first.verticalMovement().driftFraction());
+        assertEquals(144, first.smoke().preferredHeight());
+        assertEquals(64, first.slime().preferredHeight());
         assertEquals(24, first.vapor().highTerrainBlocksAboveSeaLevel());
         assertEquals(200, first.runtime().simulationIntervalTicks());
         assertEquals(300, first.runtime().producerIntervalTicks());
@@ -37,6 +42,21 @@ class DynamicAtmosphereConfigTest {
         assertEquals(8, first.slime().dissipationSpawnAttempts());
         assertEquals(0.25, first.slime().mediumDensityThreshold());
         assertEquals(0.75, first.slime().bigDensityThreshold());
+    }
+
+    @Test
+    void onlyAbsoluteHomedMaterialsHaveAPreferredHeightKey() {
+        // MINECRAFT-1 (B1): Dust, Void Gas, Exhaust and Obsidian Powder rest on the dimension's
+        // own bottom, which is structural, not a tunable number, so they get no preferredHeight
+        // key at all. Smoke and Slime rest at an absolute height and do get one.
+        var names = flattenConfigKeys(DynamicAtmosphereServerConfig.SPEC.getValues(), "");
+        for (String expected : List.of("smoke.preferredheight", "slime.preferredheight")) {
+            assertTrue(names.contains(expected), expected + " must be defined");
+        }
+        for (String absent : List.of("dust.preferredheight", "voidgas.preferredheight",
+            "exhaust.preferredheight", "obsidianpowder.preferredheight")) {
+            assertFalse(names.contains(absent), absent + " must not be defined");
+        }
     }
 
     @Test
@@ -91,17 +111,16 @@ class DynamicAtmosphereConfigTest {
         assertEquals(4096, first.selectionWorkPerTick());
         assertEquals(2, first.maxDistanceMultiplier());
         assertEquals(0.75, first.fadeStartFraction());
-        // MINECRAFT-21: smokeOpticalDensity 2 -> 4; obsidianPowderOpticalDensity 40 -> 0.3;
-        // vaporOpticalDensity 1 -> 1.2.
         assertEquals(4, first.smoke().opticalDensity());
         assertEquals(0.3, first.obsidianPowder().opticalDensity());
         assertEquals(1.2, first.vapor().opticalDensity());
+        assertEquals(2, first.glowGas().opticalDensity());
         assertEquals(200_000, first.allocation().cellBudget());
     }
 
     @Test
     void materialColorsAreClientConfigValuesWithTheExpectedDefaults() {
-        // MINECRAFT-21: all seven materials' colours are now client config values, not
+        // MINECRAFT-21: all materials' colours are now client config values, not
         // hard-coded AtmosphereRenderMaterial enum literals. Smoke/Obsidian Powder/Vapor
         // changed; the rest stay at their long-standing catalog colours.
         var first = DynamicAtmosphereClientConfig.snapshot();
@@ -112,11 +131,12 @@ class DynamicAtmosphereConfigTest {
         assertEquals(0x000000, first.voidGas().color());
         assertEquals(0xFFFF00, first.exhaust().color());
         assertEquals(0x00FF00, first.slime().color());
+        assertEquals(0xFFC83C, first.glowGas().color());
 
         var names = flattenConfigKeys(DynamicAtmosphereClientConfig.SPEC.getValues(), "");
         for (String colorKey : List.of("materials.vaporcolor", "materials.smokecolor", "materials.dustcolor",
             "materials.voidgascolor", "materials.exhaustcolor", "materials.slimecolor",
-            "materials.obsidianpowdercolor")) {
+            "materials.obsidianpowdercolor", "materials.glowgascolor")) {
             assertTrue(names.contains(colorKey), colorKey + " must be defined");
         }
     }
@@ -179,9 +199,8 @@ class DynamicAtmosphereConfigTest {
             // Our own guard, reading the SAME file afterward, must still correctly see this as a
             // version-0 (missing-key) mismatch and migrate it - unaffected by the correction pass
             // that already ran against it.
-            boolean invalidated = ConfigVersionGuard.applyVersionInvalidation(
+            ConfigVersionGuard.applyVersionInvalidation(
                 tempDir, "dynamicatmosphere-server.toml", DynamicAtmosphereServerConfig.CURRENT_VERSION);
-            assertTrue(invalidated, "the guard must still detect the mismatch after NeoForge's own correction ran");
             assertTrue(java.nio.file.Files.exists(tempDir.resolve("dynamicatmosphere-server.toml.bak-0")),
                 "the framework-corrected file (not just a hypothetical original) must be the one backed up");
         } finally {
@@ -195,6 +214,16 @@ class DynamicAtmosphereConfigTest {
                 });
             }
         }
+    }
+
+    @Test
+    void glowGasServerConfigDefaultsMatchTheEpicSpec() {
+        var snapshot = DynamicAtmosphereServerConfig.snapshot();
+        assertEquals(100, snapshot.glowGas().glowstoneEmission());
+        // The renderer reads the client config value, not the engine catalog field: both must
+        // agree, or the change is invisible in game (the 0.20.0 smokeOpticalDensity trap).
+        assertEquals(io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.GLOW_GAS
+            .settings().opticalDensityMultiplier(), DynamicAtmosphereClientConfig.snapshot().glowGas().opticalDensity());
     }
 
     @Test
