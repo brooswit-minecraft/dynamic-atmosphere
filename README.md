@@ -154,7 +154,7 @@ units; capacity remains 0..1000.
 
 Install this version on **both server and client**, or in a single-player NeoForge
 instance. Earlier particle-only releases did not require a client installation;
-the new grid renderer and sync protocol do. **Protocol 10 requires updating both
+the new grid renderer and sync protocol do. **Protocol 11 requires updating both
 sides together; earlier-protocol clients cannot connect.** Large snapshots use
 512-cell packets and a completion marker. Snapshot scope and chunk freshness
 distinguish current observations from retained visual history. There is no
@@ -193,9 +193,9 @@ before upgrading.** It changes the world, not just the visual cache. Existing
 destructive-pressure warnings remain unchanged, and no data or world reset is
 required.
 
-## Seven Materials
+## Eight Materials
 
-`0.19.0-alpha.1` enables all seven independent materials, each with chunk-persisted
+`0.19.0-alpha.1` enabled all seven independent materials, each with chunk-persisted
 server amounts and separate client state. These are active MVP systems, not
 placeholders for future runtime support. Numeric defaults are initial tuning,
 not a claim of balance or measured performance. `0.20.0-alpha.1` moved every
@@ -213,6 +213,10 @@ emission sources, thresholds, and costs did not change.
 | Void Gas | 4 blocks | 200 ticks | Black | 4x |
 | Exhaust | 4 blocks | 200 ticks | Yellow | 1x |
 | Slime | 4 blocks | 200 ticks | Green | 4x |
+| Glow Gas | 4 blocks | 200 ticks | Warm gold (0xFFC83C) | 2x |
+
+Glow Gas (MINECRAFT-1 B2) is visual only: it carries no real block light and is
+rendered unlit, purely atmospheric haze colored to suggest glowstone's glow.
 
 Intervals are scheduled game ticks, subject to bounded work queues, not guaranteed
 wall-clock completion. Scheduled producer passes share a 300-tick cadence. All
@@ -227,7 +231,7 @@ Genuinely invalid or corrupt data — a missing `cells` array, a malformed tag,
 a decode failure — is handled differently: the original tag is retained and
 that chunk is skipped rather than silently truncated.
 Only Vapor uses the persistent
-client visual disk cache; the other six keep independent session-only visual caches.
+client visual disk cache; the other seven keep independent session-only visual caches.
 Legacy 8-block Smoke cells are split into aligned 4-block children on load. Integer
 remainders are distributed among children so total stored Smoke mass is preserved,
 and migrated chunks are saved in the new format.
@@ -309,6 +313,10 @@ and migrated chunks are saved in the new format.
   `netherGas.dangerousFullness` (default 50%) it also applies Poison. Movement
   and dissipation reuse the shared `heavyGas` rules above, alongside Void Gas,
   Obsidian Powder and Slime.
+- **Glow Gas (MINECRAFT-1 B2):** a bounded, palette-gated section scan of each
+  loaded-chunk producer check emits 100 units per glowstone block found; only
+  sections whose palette actually contains glowstone pay the scan. Visual
+  only — no entity effects, no spawn gating, no real block light.
 
 Producer hooks and effect scans are bounded and loaded-only; not every block or
 entity is sampled each tick. Effects requiring material cannot spend unavailable
@@ -544,7 +552,7 @@ via the existing lava-removal mixin hook; no mixin changes were needed.
 ## Fans and Configuration
 
 Fans affect cells up to 4x4x4, which now covers every material: Vapor, Smoke,
-Dust, Exhaust, Obsidian Powder, Void Gas, Slime, and Nether Gas. Void Gas and Slime previously used
+Dust, Exhaust, Obsidian Powder, Void Gas, Slime, Nether Gas, and Glow Gas. Void Gas and Slime previously used
 larger cells and were unaffected; they are fan-transportable as of `0.20.0-alpha.1`.
 
 When Create is installed, a rotating Encased Fan performs intake followed by output
@@ -573,7 +581,7 @@ general passive source; plain obsidian has its own `obsidianPowder.obsidianBlock
 (default 1), and crying obsidian has its own `obsidianPowder.cryingObsidianEmission`
 (default 1000).
 
-`runtime.simulationSkipChance` applies to all eight materials (default 0.75,
+`runtime.simulationSkipChance` applies to all nine materials (default 0.75,
 zero processes every due cell, one skips every due cell). It replaces the old
 Vapor-only `vapor.skipChance` setting; producer cadence is independent.
 

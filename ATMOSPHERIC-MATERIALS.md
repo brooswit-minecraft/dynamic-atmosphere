@@ -1,13 +1,13 @@
 # Multiple Atmospheric Materials
 
 This document describes the combined `0.16.1-alpha.1` atmospheric-material
-runtime. All eight materials are active, independently stored, independently
+runtime. All nine materials are active, independently stored, independently
 rendered, sparse, chunk-persisted server systems. Numeric values are configurable
 defaults, not permanent balance guarantees.
 
 ## Shared Runtime
 
-All eight materials share a 200-tick simulation cadence and a 300-tick scheduled
+All nine materials share a 200-tick simulation cadence and a 300-tick scheduled
 producer cadence. Work queues remain bounded, so those values schedule work but
 do not guarantee wall-clock completion under backlog. Entity and block event
 producers remain event-driven. Producer and effect queries use loaded data only
@@ -23,8 +23,9 @@ and never force chunks to load.
 | Slime | Green | 4x4x4 | 1x to V, 2x to 2V | 4x |
 | Obsidian Powder | Purple | 4x4x4 | Base cells only | 40x |
 | Nether Gas | Sickly green (0x6B8E23) | 4x4x4 | 1x to V, 2x to 2V | 4x |
+| Glow Gas | Gold (0xFFC83C) | 4x4x4 | Base cells only | 2x |
 
-All eight materials now share one render distance and one fade: full opacity
+All nine materials now share one render distance and one fade: full opacity
 out to `client.rendering.fadeStartFraction * maxDistance` (defaults 0.75 and
 `2 * V`), fading smoothly to fully transparent at `maxDistance`, nothing
 rendered beyond. There is no longer a per-material reach multiplier; the LOD
@@ -143,6 +144,13 @@ configured mild-fullness fraction apply a Confusion (Nausea) effect to nearby
 living entities; cells at or above the configured dangerous-fullness fraction
 also apply Poison. Movement and dissipation reuse the same generic heavy-gas
 rules as Void Gas, Obsidian Powder and Slime.
+
+### Glow Gas (MINECRAFT-1 B2)
+
+A bounded, palette-gated section scan of each loaded-chunk producer check emits
+100 units per glowstone block found; only sections whose palette actually
+contains glowstone pay the scan. Visual only — no entity effects, no spawn
+gating, no real block light.
 
 ## Dimension Configuration and Portal Transfer Sinks
 

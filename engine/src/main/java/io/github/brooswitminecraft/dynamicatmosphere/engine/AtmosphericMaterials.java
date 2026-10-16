@@ -47,9 +47,13 @@ public final class AtmosphericMaterials {
     public static final MaterialDefinition NETHER_GAS = new MaterialDefinition("nether_gas", SICKLY_GREEN,
         new MaterialSettings(CELL_SIZE, VOID_GAS_LOD, 1, OptionalDouble.of(1), 4),
         Set.of(NETHERRACK), Set.of());
+    /** MINECRAFT-1 (B2): visual only, 2x Vapor's optical density. */
+    public static final MaterialDefinition GLOW_GAS = new MaterialDefinition("glow_gas", GOLD,
+        new MaterialSettings(CELL_SIZE, DUST_LOD, 1, OptionalDouble.of(1), 2),
+        Set.of(GLOWSTONE), Set.of());
 
     public static final List<MaterialDefinition> ALL =
-        List.of(VAPOR, DUST, SMOKE, VOID_GAS, EXHAUST, SLIME, OBSIDIAN_POWDER, NETHER_GAS);
+        List.of(VAPOR, DUST, SMOKE, VOID_GAS, EXHAUST, SLIME, OBSIDIAN_POWDER, NETHER_GAS, GLOW_GAS);
 
     private AtmosphericMaterials() { }
 
