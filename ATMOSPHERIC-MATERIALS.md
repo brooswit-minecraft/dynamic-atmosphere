@@ -15,13 +15,19 @@ and never force chunks to load.
 
 | Material | Color | Base cell | LOD tiers | Optical density |
 | --- | --- | --- | --- | --- |
-| Vapor | Current fog color | 4x4x4 | 1x to V/2, 2x to V, 4x to 2V | 1x |
-| Smoke | Very dark brown (0x1F160F) | 4x4x4 | 1x to V/2, 2x to V, 4x to 2V | 2x |
+| Vapor | Current fog color | 4x4x4 | 1x to V/2, 2x to V, 4x to 2V | 1.2x |
+| Smoke | Very dark warm grey, not pure black (0x0D0A08) | 4x4x4 | 1x to V/2, 2x to V, 4x to 2V | 4x |
 | Dust | Brown | 4x4x4 | Base cells only | 1x |
 | Void Gas | Black | 4x4x4 | 1x to V, 2x to 2V | 4x |
 | Exhaust | Yellow | 4x4x4 | Base cells only | 1x |
 | Slime | Green | 4x4x4 | 1x to V, 2x to 2V | 4x |
-| Obsidian Powder | Purple | 4x4x4 | Base cells only | 40x |
+| Obsidian Powder | Dark purple cast, PROPOSED (0x1A1025) | 4x4x4 | Base cells only | 0.3x |
+
+MINECRAFT-21 (transferred from MINECRAFT-20) made every Color/Optical density
+value above a client config default (`client.materials.<material>Color` /
+`<material>OpticalDensity`) instead of a hard-coded enum literal; see
+README.md's "Seven Materials" section for the exact key names and the
+Smoke/Obsidian Powder/Vapor value changes.
 
 All seven materials now share one render distance and one fade: full opacity
 out to `client.rendering.fadeStartFraction * maxDistance` (defaults 0.75 and

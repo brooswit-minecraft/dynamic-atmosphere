@@ -6,6 +6,17 @@ import net.neoforged.fml.event.config.ModConfigEvent;
 /** Reloadable server gameplay and work-budget tuning. Structural grid formats are intentionally excluded. */
 public final class DynamicAtmosphereServerConfig {
     public static final String FILE_NAME = "dynamicatmosphere-server.toml";
+    /**
+     * Config-format revision for THIS file. MINECRAFT-21: on mismatch between this and the
+     * stored {@code configVersion}, ConfigVersionGuard preserves the old file as
+     * {@code dynamicatmosphere-server.toml.bak-<oldVersion>} and lets the file regenerate from
+     * defaults. This resets configuration; it does not merge old custom settings into new
+     * defaults. Deliberately NOT a {@link ModConfigSpec}-registered key — see
+     * {@link ConfigVersionGuard}'s class javadoc for why: a real spec entry would be invented
+     * and overwritten by NeoForge's own correct-and-write-back pass before this mod can ever
+     * read the file, defeating the whole mismatch check for anything but a first-ever write.
+     */
+    public static final int CURRENT_VERSION = 1;
     public static final ModConfigSpec SPEC;
 
     private static final IntOption SYNC_INTERVAL;

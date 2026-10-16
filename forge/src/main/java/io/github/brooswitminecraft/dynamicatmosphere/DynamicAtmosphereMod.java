@@ -4,15 +4,19 @@ import com.mojang.logging.LogUtils;
 import io.github.brooswitminecraft.dynamicatmosphere.engine.EngineInfo;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.storage.LevelResource;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.server.ServerAboutToStartEvent;
 import net.neoforged.fml.common.Mod;
 import org.slf4j.Logger;
 
+import java.nio.file.Path;
 import java.util.Optional;
 
 /**
@@ -29,6 +33,12 @@ public class DynamicAtmosphereMod {
     private static volatile ForgeAtmospherePrototype prototype;
 
     public DynamicAtmosphereMod(IEventBus modEventBus, ModContainer modContainer) {
+        // MINECRAFT-21: run the configVersion check BEFORE registerConfig, which is where
+        // NeoForge's ConfigTracker actually reads the file from disk. See ConfigVersionGuard.
+        ConfigVersionGuard.applyVersionInvalidation(FMLPaths.CONFIGDIR.get(),
+            DynamicAtmosphereServerConfig.FILE_NAME, DynamicAtmosphereServerConfig.CURRENT_VERSION);
+        ConfigVersionGuard.applyVersionInvalidation(FMLPaths.CONFIGDIR.get(),
+            DynamicAtmosphereClientConfig.FILE_NAME, DynamicAtmosphereClientConfig.CURRENT_VERSION);
         modContainer.registerConfig(ModConfig.Type.SERVER, DynamicAtmosphereServerConfig.SPEC,
             DynamicAtmosphereServerConfig.FILE_NAME);
         modContainer.registerConfig(ModConfig.Type.CLIENT, DynamicAtmosphereClientConfig.SPEC,
@@ -85,7 +95,39 @@ public class DynamicAtmosphereMod {
         NeoForge.EVENT_BUS.addListener(magmaLava::onChunkUnload);
         NeoForge.EVENT_BUS.addListener(magmaLava::onNeighborNotify);
         NeoForge.EVENT_BUS.addListener(magmaLava::onServerTick);
+        // MINECRAFT-21: the mod-construction-time ConfigVersionGuard calls above only ever see
+        // the global config/ directory. DynamicAtmosphereServerConfig is ModConfig.Type.SERVER,
+        // which NeoForge re-reads per-world from <world>/serverconfig/ once that directory holds
+        // an override. NOT a before-load hook (see ConfigVersionGuard's javadoc and
+        // onServerAboutToStart below for why no event priority can make it one); this listener
+        // instead detects the mismatch and explicitly corrects the already-loaded active spec.
+        NeoForge.EVENT_BUS.addListener(DynamicAtmosphereMod::onServerAboutToStart);
         LOGGER.info("[{}] bounded atmospheric grid enabled", MODID);
+    }
+
+    private static final LevelResource SERVERCONFIG = new LevelResource("serverconfig");
+
+    /**
+     * {@code ServerLifecycleHooks.handleServerAboutToStart} calls
+     * {@code ConfigTracker.loadConfigs(SERVER, globalConfigDir, worldServerConfigDir)}
+     * synchronously BEFORE constructing and posting this very event — confirmed by decompiling
+     * NeoForge 21.1's {@code ServerLifecycleHooks.class}. So by the time this listener runs, a
+     * stale per-world override has already been loaded into the active spec for this session.
+     * Per product direction, preserving an old session's in-memory values across that exact
+     * one-restart window is not a requirement — only new worlds/overrides matter going forward —
+     * so this just backs up/resets the file for the NEXT start, without forcing a same-session
+     * correction via NeoForge's broader (and {@code @Internal}, every-mod-affecting)
+     * {@code ConfigTracker.loadConfigs} reload.
+     */
+    private static void onServerAboutToStart(ServerAboutToStartEvent event) {
+        invalidateServerConfigAt(event.getServer().getWorldPath(SERVERCONFIG));
+    }
+
+    /** Package-visible for ConfigVersionGuardTest: proves the per-world wiring touches only the
+     * exact SERVER file/version this mod owns, in the exact directory handed to it. */
+    static void invalidateServerConfigAt(Path worldServerConfigDir) {
+        ConfigVersionGuard.applyVersionInvalidation(worldServerConfigDir,
+            DynamicAtmosphereServerConfig.FILE_NAME, DynamicAtmosphereServerConfig.CURRENT_VERSION);
     }
 
     /** Loaded-only live query for gameplay policy; unknown cells are never treated as dense. */
