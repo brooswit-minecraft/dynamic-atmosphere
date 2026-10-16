@@ -5,41 +5,55 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.MobSpawnType;
 import net.minecraft.world.entity.SpawnPlacements;
+import net.minecraft.world.entity.monster.Slime;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.levelgen.WorldgenRandom;
 
 /**
- * Loaded-only Slime production and high-density spawning.
+ * Loaded-only Slime production and dissipation-triggered spawning.
  *
  * <p>Amplified defaults (ATMO-24 C1): each scheduled loaded slime-chunk check
  * unconditionally (denominator 1) emits 64 units at a random position below
- * Y=40. At or above 75% fullness, one 1/32 roll may create one slime for 25%
- * of cell capacity, after at most eight loaded-only positions pass vanilla
- * spawn rules. The finite debit and one-spawn-per-callback limit prevent
- * duplicate runaway.</p>
+ * Y=40.</p>
+ *
+ * <p>MINECRAFT-18 removed the consumption-driven spawn that used to fire above
+ * 75% fullness on every processed cell, along with its now-dead
+ * {@code slime.spawnChanceDenominator}/{@code slime.spawnAttempts} config
+ * keys, per ATMO-22 comment 23227: "Slimes also shouldn't do that
+ * [consumption-spawn] behavior, just on dissipation there is an additional
+ * chance that a slime spawns. Size of the slime is based on how dense the
+ * slime for is there." A Slime spawn is now instead an additional, independent
+ * chance rolled at the same {@link HeavyGasDissipation} call site used for
+ * Void Gas and Obsidian Powder, each time a Slime cell actually loses material
+ * to dissipation. The spawned slime's size (vanilla small/medium/big = 1/2/4)
+ * is picked by the cell's amount/capacity density at the moment of
+ * dissipation, against configurable thresholds.</p>
  */
 public final class SlimeGameplay {
     static final int UNDERGROUND_AMOUNT = 64;
     static final int UNDERGROUND_CHANCE_DENOMINATOR = 1;
-    static final int HIGH_SPAWN_CHANCE_DENOMINATOR = 32;
-    static final int SPAWN_ATTEMPTS = 8;
+    static final int SMALL_SIZE = 1;
+    static final int MEDIUM_SIZE = 2;
+    static final int BIG_SIZE = 4;
     private static final long SLIME_SALT = 987234911L;
     private static final int VANILLA_UNDERGROUND_CEILING = 40;
-
-    record SpawnDecision(boolean spawn, int cost) {
-        static final SpawnDecision NONE = new SpawnDecision(false, 0);
-    }
 
     static boolean undergroundEmission(boolean slimeChunk, int roll) {
         return slimeChunk && roll == 0;
     }
 
-    static SpawnDecision spawnDecision(int amount, int capacity, int roll) {
-        if (amount <= 0 || capacity <= 0 || (long) amount * 4 < (long) capacity * 3 || roll != 0) {
-            return SpawnDecision.NONE;
-        }
-        return new SpawnDecision(true, Math.max(1, (capacity + 3) / 4));
+    static boolean dissipationSpawnRoll(int roll) {
+        return roll == 0;
+    }
+
+    /** Density is amount/capacity at the point of dissipation; ties go to the larger size. */
+    static int sizeForDensity(int amount, int capacity, double mediumDensityThreshold, double bigDensityThreshold) {
+        if (capacity <= 0) return SMALL_SIZE;
+        double density = (double) amount / capacity;
+        if (density >= bigDensityThreshold) return BIG_SIZE;
+        if (density >= mediumDensityThreshold) return MEDIUM_SIZE;
+        return SMALL_SIZE;
     }
 
     /** Called once per loaded chunk selected by the bounded producer schedule. */
@@ -59,18 +73,19 @@ public final class SlimeGameplay {
             new BlockPos(x, y, z), config.undergroundEmission());
     }
 
-    /** Called once for a processed Slime cell whose origin is already loaded. */
-    public void onProcessedCell(ServerLevel level, BlockPos cellOrigin) {
+    /**
+     * Called once for a Slime cell that just lost material to {@link HeavyGasDissipation}, with
+     * {@code amount}/{@code capacity} captured before that loss — the local density "at the point
+     * of dissipation" per ATMO-22 comment 23227.
+     */
+    public void onDissipation(ServerLevel level, BlockPos cellOrigin, int amount, int capacity) {
         DynamicAtmosphereServerConfig.Slime config = DynamicAtmosphereServerConfig.snapshot().slime();
-        DynamicAtmosphereMod.materialState(level, AtmosphereMaterial.SLIME, cellOrigin).ifPresent(state -> {
-            SpawnDecision decision = spawnDecision(state.amount(), state.capacity(),
-                level.random.nextInt(config.spawnChanceDenominator()));
-            if (!decision.spawn()) return;
-            BlockPos pos = findSpawnPosition(level, cellOrigin, config.spawnAttempts());
-            if (pos == null || !DynamicAtmosphereMod.consumeMaterial(
-                level, AtmosphereMaterial.SLIME, cellOrigin, decision.cost())) return;
-            EntityType.SLIME.spawn(level, pos, MobSpawnType.NATURAL);
-        });
+        if (!dissipationSpawnRoll(level.random.nextInt(config.dissipationSpawnChanceDenominator()))) return;
+        BlockPos pos = findSpawnPosition(level, cellOrigin, config.dissipationSpawnAttempts());
+        if (pos == null) return;
+        int size = sizeForDensity(amount, capacity, config.mediumDensityThreshold(), config.bigDensityThreshold());
+        Slime slime = EntityType.SLIME.spawn(level, pos, MobSpawnType.NATURAL);
+        if (slime != null) slime.setSize(size, true);
     }
 
     private static BlockPos findSpawnPosition(ServerLevel level, BlockPos origin, int attempts) {

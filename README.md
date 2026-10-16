@@ -252,9 +252,15 @@ and migrated chunks are saved in the new format.
   succeeds. Vapor and Exhaust can also grow eligible crops/saplings through
   normal bonemeal behavior: a 10% roll and 40-unit cost on successful growth.
 - **Slime:** vanilla-seeded slime chunks unconditionally produce 64 units
-  below Y=40 on every producer check. At 75% fullness or higher, a 1/32
-  processed-turn roll attempts a slime spawn with a quarter-capacity cost and
-  spawn checks.
+  below Y=40 on every producer check. MINECRAFT-18 removed the old
+  consumption-driven spawn (it used to fire above 75% fullness on every
+  processed cell). A Slime spawn is now an independent 1/32 roll each time a
+  cell actually loses material to `heavyGas` dissipation (below); the
+  spawned slime's size (vanilla small/medium/big = 1/2/4) is picked by that
+  cell's amount/capacity density at the moment of dissipation, against
+  configurable `mediumDensityThreshold`/`bigDensityThreshold` (default
+  0.25/0.75). No material is consumed by the spawn itself — the dissipation
+  loss is the only cost.
 - **Void Gas, Obsidian Powder and Slime dissipation:** like Smoke, each dissipates
   gradually via an independent processed-turn roll, reusing Smoke's own
   `dissipationAmount` (up to 40 units) as the cap. The chance is Smoke's own
