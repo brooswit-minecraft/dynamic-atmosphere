@@ -130,9 +130,9 @@ class AtmosphericDumpSafetyTest {
         ForgeAtmospherePrototype.DumpReport overworldReport = reports.get(Level.OVERWORLD);
         ForgeAtmospherePrototype.DumpReport netherReport = reports.get(Level.NETHER);
         assertEquals(3, overworldReport.vapor);
-        assertEquals(1, overworldReport.unreadable, "overworld skips only the unreadable ENDER_GAS material");
+        assertEquals(1, overworldReport.unreadable, "overworld skips only the unreadable OBSIDIAN_POWDER material");
         assertEquals(0, netherReport.vapor, "the nether fixture's unreadable vapor must not be counted as deleted");
-        assertEquals(2, netherReport.unreadable, "nether skips vapor plus the unreadable ENDER_GAS material");
+        assertEquals(2, netherReport.unreadable, "nether skips vapor plus the unreadable OBSIDIAN_POWDER material");
         assertTrue(overworldFixture.capacityCleared);
         assertTrue(netherFixture.capacityCleared);
     }
@@ -161,7 +161,7 @@ class AtmosphericDumpSafetyTest {
         public int deleteVapor() { return 3; }
         public boolean smokeReadable() { return true; }
         public int deleteSmoke() { return 2; }
-        public boolean materialReadable(AtmosphereMaterial material) { return material != AtmosphereMaterial.ENDER_GAS; }
+        public boolean materialReadable(AtmosphereMaterial material) { return material != AtmosphereMaterial.OBSIDIAN_POWDER; }
         public int deleteMaterial(AtmosphereMaterial material) { return material == AtmosphereMaterial.DUST ? 7 : 0; }
         public void clearCapacities() { capacityCleared = true; }
     }
