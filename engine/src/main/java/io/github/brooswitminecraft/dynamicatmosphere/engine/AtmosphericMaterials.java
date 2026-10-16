@@ -41,7 +41,8 @@ public final class AtmosphericMaterials {
     public static final MaterialDefinition OBSIDIAN_POWDER = new MaterialDefinition("obsidian_powder", PURPLE,
         new MaterialSettings(CELL_SIZE, DUST_LOD, 1, OptionalDouble.of(1), 40),
         Set.of(NETHER_PORTAL_BLOCKS_SLOWLY, ENDERMEN, ENDERMITES, ENDER_DRAGON,
-            ENDER_PEARL_USE, STANDING_IN_NETHER_PORTAL, SOUL_TORCHES, SOUL_FIRES, SOUL_SAND), Set.of());
+            ENDER_PEARL_USE, STANDING_IN_NETHER_PORTAL, SOUL_TORCHES, SOUL_FIRES, SOUL_SAND,
+            WITCH, SHULKER, ENDER_CHEST, CRYING_OBSIDIAN), Set.of());
     public static final MaterialDefinition ZOMBIE_FOG = new MaterialDefinition("zombie_fog", GRAY,
         new MaterialSettings(CELL_SIZE, VOID_GAS_LOD, 1, OptionalDouble.of(1), 4),
         Set.of(ZOMBIE_DEATHS), Set.of());

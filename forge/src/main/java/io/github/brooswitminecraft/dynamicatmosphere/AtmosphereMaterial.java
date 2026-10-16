@@ -2,6 +2,7 @@ package io.github.brooswitminecraft.dynamicatmosphere;
 
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.server.level.ServerLevel;
 
 /** Additional atmospheric materials introduced after the dedicated Vapor and Smoke formats. */
 public enum AtmosphereMaterial {
@@ -64,5 +65,20 @@ public enum AtmosphereMaterial {
         if (tick < 0) throw new IllegalArgumentException("tick must be non-negative");
         int interval = DynamicAtmosphereServerConfig.snapshot().runtime().producerIntervalTicks();
         return Math.multiplyExact(Math.floorDiv(tick, interval) + 1, (long) interval);
+    }
+
+    /**
+     * MINECRAFT-1 (B1): the preferred resting height ("home") this material's cells drift toward.
+     * Dust, Obsidian Powder, Void Gas, Exhaust and Zombie Fog rest on the dimension's own bottom
+     * (structural, not configurable, same as every other ground-hugging gas/fog introduced here);
+     * Slime rests at an absolute, configurable height clamped to the dimension's build range.
+     */
+    public int home(ServerLevel level) {
+        var snapshot = DynamicAtmosphereServerConfig.snapshot();
+        return switch (this) {
+            case DUST, OBSIDIAN_POWDER, VOID_GAS, EXHAUST, ZOMBIE_FOG -> level.getMinBuildHeight();
+            case SLIME -> Math.clamp(snapshot.slime().preferredHeight(),
+                level.getMinBuildHeight(), level.getMaxBuildHeight());
+        };
     }
 }

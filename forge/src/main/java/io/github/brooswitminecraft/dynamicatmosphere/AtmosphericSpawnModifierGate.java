@@ -6,6 +6,7 @@ import io.github.brooswitminecraft.dynamicatmosphere.engine.event.SpawnModifier;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.MobSpawnType;
 import net.neoforged.neoforge.event.entity.living.MobSpawnEvent;
 
 import java.util.List;
@@ -30,6 +31,7 @@ final class AtmosphericSpawnModifierGate {
     );
 
     static void onSpawnPlacementCheck(MobSpawnEvent.SpawnPlacementCheck event) {
+        if (!appliesTo(event.getSpawnType())) return;
         if (!(event.getLevel().getLevel() instanceof ServerLevel level)) return;
         BlockPos pos = event.getPos();
         String entityId = BuiltInRegistries.ENTITY_TYPE.getKey(event.getEntityType()).toString();
@@ -51,17 +53,17 @@ final class AtmosphericSpawnModifierGate {
 
     /**
      * Folds one modifier's roll into the running decision. A vanilla placement check starts
-     * as {@code DEFAULT} (vanilla's own predicate decides) and only becomes {@code FAIL} when
-     * something -- vanilla itself, or an earlier gate such as {@link VaporHostileSpawnGate} --
-     * has explicitly denied it; {@code DEFAULT} is therefore NOT "already allowed" the way an
-     * explicit {@code SUCCEED} is -- treating it as such (as an earlier version of this gate
-     * did) silently skips the override-deny roll for the ordinary case where vanilla's own
-     * predicate was always going to fail, since nothing had set {@code FAIL} yet. Overriding
-     * must also set {@code SUCCEED}, never {@code DEFAULT}: resetting an explicit {@code FAIL}
-     * back to {@code DEFAULT} only asks vanilla to decide again, which can discard another
-     * gate's deliberate denial without actually forcing the spawn through. Suppression is the
-     * mirror image: anything other than an explicit {@code FAIL} is still "could still spawn",
-     * so it may be knocked down to {@code FAIL}.
+     * as {@code DEFAULT} (vanilla's own predicate decides), and override-deny exists only to
+     * rescue THAT ordinary case -- where nothing has explicitly decided the outcome yet and
+     * vanilla's own predicate was going to fail. It must fire on {@code DEFAULT} only: an
+     * explicit {@code FAIL} is a deliberate denial, whether from vanilla's own earlier-evaluated
+     * predicate or from another gate such as {@link VaporHostileSpawnGate}, and this modifier
+     * has no business overriding someone else's veto -- that is the whole difference between
+     * "nobody has decided yet" and "somebody decided no". Suppression is the mirror image but
+     * asymmetric on purpose: it may knock down anything short of an explicit {@code FAIL}
+     * (so both {@code DEFAULT} and an explicit {@code SUCCEED}), because suppressing a spawn
+     * that would otherwise happen is this gate's own prerogative, not a veto of another gate's
+     * decision.
      *
      * <p>Package-private for {@code AtmosphericSpawnModifierGateTest}: a plain
      * {@code Result}-in/{@code Result}-out function has no Minecraft world/level dependency, so
@@ -72,7 +74,7 @@ final class AtmosphericSpawnModifierGate {
         SpawnModifier modifier,
         double roll
     ) {
-        if (current != MobSpawnEvent.SpawnPlacementCheck.Result.SUCCEED
+        if (current == MobSpawnEvent.SpawnPlacementCheck.Result.DEFAULT
             && AtmosphericEventEngine.shouldOverrideDeny(modifier, roll)) {
             return MobSpawnEvent.SpawnPlacementCheck.Result.SUCCEED;
         }
@@ -81,6 +83,15 @@ final class AtmosphericSpawnModifierGate {
             return MobSpawnEvent.SpawnPlacementCheck.Result.FAIL;
         }
         return current;
+    }
+
+    /**
+     * Mirrors {@link VaporHostileSpawnGate}'s own source guard: this gate only has business
+     * with ordinary world spawning, never commands, eggs, spawners or other explicit sources.
+     * Package-private for {@code AtmosphericSpawnModifierGateTest}.
+     */
+    static boolean appliesTo(MobSpawnType spawnType) {
+        return spawnType == MobSpawnType.NATURAL || spawnType == MobSpawnType.CHUNK_GENERATION;
     }
 
     private AtmosphericSpawnModifierGate() { }

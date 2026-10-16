@@ -23,8 +23,13 @@ class DynamicAtmosphereConfigTest {
         assertEquals(0.75, first.runtime().simulationSkipChance());
         assertEquals(100, first.obsidianPowder().portalBlockEmission());
         assertEquals(256, first.vapor().rainCloudHeight());
-        assertEquals(0.75, first.verticalMovement().emptyTowardCloudlineChance());
-        assertEquals(0.25, first.verticalMovement().fullTowardCloudlineChance());
+        assertEquals(120, first.vapor().netherCloudlineHeight());
+        assertEquals(16, first.vapor().endCloudlineBlocksBelowTop());
+        assertEquals(2, first.verticalMovement().deadBand());
+        assertEquals(0.40, first.verticalMovement().w());
+        assertEquals(0.10, first.verticalMovement().driftFraction());
+        assertEquals(144, first.smoke().preferredHeight());
+        assertEquals(64, first.slime().preferredHeight());
         assertEquals(24, first.vapor().highTerrainBlocksAboveSeaLevel());
         assertEquals(200, first.runtime().simulationIntervalTicks());
         assertEquals(300, first.runtime().producerIntervalTicks());
@@ -59,6 +64,21 @@ class DynamicAtmosphereConfigTest {
         assertEquals(0.002, first.slimePrecipitation().snowChance());
         assertEquals(0.04, first.slimePrecipitation().snowMaterialCost());
         assertEquals(8, first.slimePrecipitation().surfaceSearchAttempts());
+    }
+
+    @Test
+    void onlyAbsoluteHomedMaterialsHaveAPreferredHeightKey() {
+        // MINECRAFT-1 (B1): Dust, Void Gas, Exhaust and Obsidian Powder rest on the dimension's
+        // own bottom, which is structural, not a tunable number, so they get no preferredHeight
+        // key at all. Smoke and Slime rest at an absolute height and do get one.
+        var names = flattenConfigKeys(DynamicAtmosphereServerConfig.SPEC.getValues(), "");
+        for (String expected : List.of("smoke.preferredheight", "slime.preferredheight")) {
+            assertTrue(names.contains(expected), expected + " must be defined");
+        }
+        for (String absent : List.of("dust.preferredheight", "voidgas.preferredheight",
+            "exhaust.preferredheight", "obsidianpowder.preferredheight")) {
+            assertFalse(names.contains(absent), absent + " must not be defined");
+        }
     }
 
     @Test
