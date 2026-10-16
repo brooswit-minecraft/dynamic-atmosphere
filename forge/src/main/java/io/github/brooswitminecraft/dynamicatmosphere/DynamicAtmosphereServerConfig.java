@@ -95,6 +95,8 @@ public final class DynamicAtmosphereServerConfig {
 
     private static final IntOption GLOW_GAS_GLOWSTONE;
 
+    private static final DoubleOption NETHER_FOG_MAX_CONDENSATION_CHANCE;
+
     private static final DoubleOption HEAVY_GAS_DISSIPATION_FACTOR;
 
     private static final IntOption ENDER_MOB;
@@ -260,6 +262,17 @@ public final class DynamicAtmosphereServerConfig {
         // MINECRAFT-1 (B2): Glow Gas's home is a literal Y=0, not configurable.
         builder.pop();
 
+        builder.push("netherFog");
+        // No worldRestart/gameRestart marker is applied in this section: NeoForge's default is RestartType.NONE.
+        // MINECRAFT-1 (B3): per-harvest/condensation amount is NOT a config key here -- it is
+        // always exactly one full block's worth of capacity (AtmosphereMaterial.capacityForAirBlocks(1)),
+        // shared by both directions of the lava<->fog cycle so the cycle neither drains nor floods lava.
+        builder.comment("Maximum chance per processed turn that a high-fullness Nether Fog cell places a",
+            "lava source back, mirroring Vapor's own maxCondensationChance.");
+        NETHER_FOG_MAX_CONDENSATION_CHANCE = decimal(builder, "maxCondensationChance", 0.10, 0, 1);
+        // MINECRAFT-1 (B3): Nether Fog's home is the dimension's own bottom; see the note under dust.
+        builder.pop();
+
         builder.push("heavyGas");
         // Shared by Void Gas, Obsidian Powder and Slime: their dissipation chance is Smoke's own
         // dissipationChance() divided by this factor, keeping Smoke's dissipationAmount() as maxLoss.
@@ -360,6 +373,7 @@ public final class DynamicAtmosphereServerConfig {
                 ENDER_PEARL_IMPACT.get(), ENDER_MOB_INTERVAL.get(),
                 ENDER_PORTAL_INTERVAL.get(), ENDER_PORTAL_BLOCK.get()),
             new GlowGas(GLOW_GAS_GLOWSTONE.get()),
+            new NetherFog(NETHER_FOG_MAX_CONDENSATION_CHANCE.get()),
             new PlantGrowth(PLANT_CHANCE.get(), PLANT_COST.get()),
             new Integrations(CREATE_FAN_RPM_COEFFICIENT.get(), CREATE_FAN_INTERVAL.get(), CREATE_FAN_CHUNK_BUDGET.get()),
             new HeavyGas(HEAVY_GAS_DISSIPATION_FACTOR.get()),
@@ -406,7 +420,8 @@ public final class DynamicAtmosphereServerConfig {
     }
 
     public record Snapshot(RuntimeTuning runtime, Vapor vapor, VerticalMovement verticalMovement, Smoke smoke, Dust dust, VoidGas voidGas,
-                           Exhaust exhaust, Slime slime, ObsidianPowder obsidianPowder, GlowGas glowGas, PlantGrowth plantGrowth,
+                           Exhaust exhaust, Slime slime, ObsidianPowder obsidianPowder, GlowGas glowGas,
+                           NetherFog netherFog, PlantGrowth plantGrowth,
                            Integrations integrations, HeavyGas heavyGas, Magma magma) { }
     public record RuntimeTuning(int syncIntervalTicks, int fullSnapshotIntervalTicks,
                                 int simulationIntervalTicks, int producerIntervalTicks,
@@ -454,6 +469,8 @@ public final class DynamicAtmosphereServerConfig {
                            int portalBlockEmission) { }
     /** MINECRAFT-1 (B2): Glow Gas's home is a literal Y=0, not configurable. */
     public record GlowGas(int glowstoneEmission) { }
+    /** MINECRAFT-1 (B3): Nether Fog's home is the dimension's own bottom, not configurable. */
+    public record NetherFog(double maxCondensationChance) { }
     public record PlantGrowth(double chance, int cost) { }
     public record Integrations(double createFanTransportPerRpm, int createFanIntervalTicks,
                                int maxFanChunksPerTick) { }

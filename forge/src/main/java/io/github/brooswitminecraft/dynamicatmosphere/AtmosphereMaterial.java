@@ -11,7 +11,8 @@ public enum AtmosphereMaterial {
     VOID_GAS("void_gas"),
     EXHAUST("exhaust"),
     SLIME("slime"),
-    GLOW_GAS("glow_gas");
+    GLOW_GAS("glow_gas"),
+    NETHER_FOG("nether_fog");
 
     public static final StreamCodec<RegistryFriendlyByteBuf, AtmosphereMaterial> STREAM_CODEC =
         new StreamCodec<>() {
@@ -68,15 +69,15 @@ public enum AtmosphereMaterial {
     }
 
     /**
-     * MINECRAFT-1 (B1/B2): the preferred resting height ("home") this material's cells drift
-     * toward. Dust, Obsidian Powder, Void Gas and Exhaust rest on the dimension's own bottom
-     * (structural, not configurable); Slime rests at an absolute, configurable height clamped to
-     * the dimension's build range; Glow Gas rests at a literal Y=0, not configurable.
+     * MINECRAFT-1 (B1/B2/B3): the preferred resting height ("home") this material's cells drift
+     * toward. Dust, Obsidian Powder, Void Gas, Exhaust and Nether Fog rest on the dimension's own
+     * bottom (structural, not configurable); Slime rests at an absolute, configurable height
+     * clamped to the dimension's build range; Glow Gas rests at a literal Y=0, not configurable.
      */
     public int home(ServerLevel level) {
         var snapshot = DynamicAtmosphereServerConfig.snapshot();
         return switch (this) {
-            case DUST, OBSIDIAN_POWDER, VOID_GAS, EXHAUST -> level.getMinBuildHeight();
+            case DUST, OBSIDIAN_POWDER, VOID_GAS, EXHAUST, NETHER_FOG -> level.getMinBuildHeight();
             case SLIME -> Math.clamp(snapshot.slime().preferredHeight(),
                 level.getMinBuildHeight(), level.getMaxBuildHeight());
             case GLOW_GAS -> Math.clamp(0, level.getMinBuildHeight(), level.getMaxBuildHeight());

@@ -154,7 +154,7 @@ units; capacity remains 0..1000.
 
 Install this version on **both server and client**, or in a single-player NeoForge
 instance. Earlier particle-only releases did not require a client installation;
-the new grid renderer and sync protocol do. **Protocol 11 requires updating both
+the new grid renderer and sync protocol do. **Protocol 12 requires updating both
 sides together; earlier-protocol clients cannot connect.** Large snapshots use
 512-cell packets and a completion marker. Snapshot scope and chunk freshness
 distinguish current observations from retained visual history. There is no
@@ -193,7 +193,7 @@ before upgrading.** It changes the world, not just the visual cache. Existing
 destructive-pressure warnings remain unchanged, and no data or world reset is
 required.
 
-## Eight Materials
+## Nine Materials
 
 `0.19.0-alpha.1` enabled all seven independent materials, each with chunk-persisted
 server amounts and separate client state. These are active MVP systems, not
@@ -214,9 +214,22 @@ emission sources, thresholds, and costs did not change.
 | Exhaust | 4 blocks | 200 ticks | Yellow | 1x |
 | Slime | 4 blocks | 200 ticks | Green | 4x |
 | Glow Gas | 4 blocks | 200 ticks | Warm gold (0xFFC83C) | 2x |
+| Nether Fog | 4 blocks | 200 ticks | Very dark red (0x400000) | 1x |
 
 Glow Gas (MINECRAFT-1 B2) is visual only: it carries no real block light and is
 rendered unlit, purely atmospheric haze colored to suggest glowstone's glow.
+
+Nether Fog (MINECRAFT-1 B3) harvests and condenses lava, ultraWarm dimensions
+only: a bounded, palette-gated random check consumes one lava source block per
+pass into fog equal to one full block's capacity share, and at high fullness a
+cell places one lava source back into a random air block in itself, at exactly
+the same cost. Both directions share one constant, so the cycle neither drains
+nor floods lava over any number of round trips. No explosions either way: both
+are direct block-state writes, the same technique the existing magma-regrowth
+feature uses. The existing Smoke "lava disappeared" emission is deliberately
+not fired for a Nether Fog harvest. Known physics: gas cannot move down out of
+a cell containing fluid, so Nether Fog pools on the surface of a Nether lava
+sea rather than reaching the bedrock beneath it -- accepted, not a bug.
 
 Intervals are scheduled game ticks, subject to bounded work queues, not guaranteed
 wall-clock completion. Scheduled producer passes share a 300-tick cadence. All
@@ -231,7 +244,7 @@ Genuinely invalid or corrupt data — a missing `cells` array, a malformed tag,
 a decode failure — is handled differently: the original tag is retained and
 that chunk is skipped rather than silently truncated.
 Only Vapor uses the persistent
-client visual disk cache; the other seven keep independent session-only visual caches.
+client visual disk cache; the other eight keep independent session-only visual caches.
 Legacy 8-block Smoke cells are split into aligned 4-block children on load. Integer
 remainders are distributed among children so total stored Smoke mass is preserved,
 and migrated chunks are saved in the new format.

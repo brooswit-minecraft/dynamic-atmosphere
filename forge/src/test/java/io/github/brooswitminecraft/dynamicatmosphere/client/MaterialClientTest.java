@@ -61,7 +61,8 @@ class MaterialClientTest {
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.VOID_GAS,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.EXHAUST,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.SLIME,
-            io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.GLOW_GAS);
+            io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.GLOW_GAS,
+            io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.NETHER_FOG);
         var materials = AtmosphereRenderMaterial.values();
         for (int i = 0; i < materials.length; i++) {
             assertEquals(definitions.get(i).settings().opticalDensityMultiplier(), materials[i].opticalDensityMultiplier);
@@ -296,7 +297,7 @@ class MaterialClientTest {
     }
 
     @Test
-    void allEightSessionIdsKeepCoincidentCellsIndependent() {
+    void allNineSessionIdsKeepCoincidentCellsIndependent() {
         var sessions = new java.util.EnumMap<AtmosphereRenderMaterial, MaterialClientSession>(AtmosphereRenderMaterial.class);
         for (var material : AtmosphereRenderMaterial.values()) {
             var session = new MaterialClientSession(material);
@@ -305,7 +306,7 @@ class MaterialClientTest {
                 List.of(new AtmosphereClientCache.Chunk(0, 0)), List.of(update(0, 100 + material.ordinal())));
             sessions.put(material, session);
         }
-        assertEquals(8, sessions.size());
+        assertEquals(9, sessions.size());
         for (var material : AtmosphereRenderMaterial.values()) {
             sessions.get(material).receive(WORLD, DIMENSION, false, false, List.of(), List.of(update(0, 0)));
             for (var other : AtmosphereRenderMaterial.values()) {
