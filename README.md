@@ -596,28 +596,43 @@ it: it re-emits the same amount at a linked destination. This is the whole of
 cross-dimension atmosphere; there is no separate "portal pollution" feature,
 and no scenario-specific Java logic backs it.
 
+- **Verified destinations only:** the sink remembers every portal block
+  position its own loaded-chunk scan has observed, per dimension, replacing
+  each chunk's remembered positions whenever that chunk is rescanned (so a
+  destroyed portal falls out of the cache next time its chunk is visited). A
+  transfer only ever proceeds against a position this cache already
+  contains — never a freshly computed or guessed one. The vanilla 8:1
+  Nether/Overworld coordinate scale is only a search anchor: vanilla's own
+  portal linking can place the real exit at a displaced X/Y/Z, so a Nether
+  transfer looks for the nearest already-observed portal within
+  `PortalTransferSink.NETHER_LINK_SEARCH_RADIUS` (128 blocks) of the scaled
+  anchor in the destination dimension, not the raw anchor itself. If nothing
+  verified is nearby, the transfer is declined for that pass rather than
+  emitting into unrelated terrain.
 - **Nether portals:** a Nether Gas cell at a Nether portal block transfers up
   to `portalTransferSink.throughputPerPortalBlock` units (default 64) per
-  producer pass to the linked position on the other side, using the vanilla
-  8:1 Nether/Overworld coordinate scale (Nether coordinates are Overworld
-  coordinates divided by 8). A poorly ventilated Nether portal room becoming
-  hazardous is emergent: it falls out of Nether Gas's own Netherrack source,
-  this transfer, and ordinary destination-side emission — nothing scenario-specific
+  producer pass to the nearest verified portal position on the other side
+  (see above). A poorly ventilated Nether portal room becoming hazardous is
+  emergent: it falls out of Nether Gas's own Netherrack source, this
+  transfer, and ordinary destination-side emission — nothing scenario-specific
   was added for it.
 - **End portals:** every generic-grid material (Dust, Obsidian Powder, Void
   Gas, Exhaust, Slime, Nether Gas) near an End portal block transfers into The
-  End at the same throughput, where the dimension configuration below makes
-  it dissipate almost immediately. This makes an activated End portal a
-  practical pollution-disposal mechanism, the same way routing factory smoke
-  into one is: an emergent use of normal atmospheric rules, not an industrial
-  feature in its own right.
-- **Never forces a load:** emitting into the destination only succeeds
-  against an already-loaded, already-tracked chunk. If the destination isn't
-  reachable this pass, the transfer is skipped entirely — the source material
-  is left in place (nothing is consumed until the matching emit succeeds) and
-  retried on a later pass. A portal links two independently simulated
-  regions; this sink intentionally never forces either one to stay active
-  just because the other is.
+  End's own verified exit-portal position at the same throughput — The End's
+  portal is not coordinate-linked to the source at all, unlike the Nether, so
+  any already-observed End portal position is used — where the dimension
+  configuration below makes it dissipate almost immediately. This makes an
+  activated End portal a practical pollution-disposal mechanism, the same way
+  routing factory smoke into one is: an emergent use of normal atmospheric
+  rules, not an industrial feature in its own right.
+- **Never forces a load:** besides never resolving a destination it hasn't
+  already observed, emitting into that destination also only succeeds
+  against an already-loaded, already-tracked chunk. If either check fails
+  this pass, the transfer is skipped entirely — the source material is left
+  in place (nothing is consumed until the matching emit succeeds) and retried
+  on a later pass. A portal links two independently simulated regions; this
+  sink intentionally never forces either one to stay active just because the
+  other is.
 - **Out of scope for this mechanism:** Smoke and Vapor use a separate legacy
   grid without a public cross-grid consume API; transferring them through
   portals is left to a follow-up.

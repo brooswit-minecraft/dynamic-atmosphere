@@ -76,7 +76,7 @@ public enum AtmosphereMaterial {
     public int home(ServerLevel level) {
         var snapshot = DynamicAtmosphereServerConfig.snapshot();
         return switch (this) {
-            case DUST, OBSIDIAN_POWDER, VOID_GAS, EXHAUST -> level.getMinBuildHeight();
+            case DUST, OBSIDIAN_POWDER, VOID_GAS, EXHAUST, NETHER_GAS -> level.getMinBuildHeight();
             case SLIME -> Math.clamp(snapshot.slime().preferredHeight(),
                 level.getMinBuildHeight(), level.getMaxBuildHeight());
         };

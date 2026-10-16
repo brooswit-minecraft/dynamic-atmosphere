@@ -149,12 +149,16 @@ rules as Void Gas, Obsidian Powder and Slime.
 Phase 4 adds two small, generic mechanisms rather than per-scenario logic:
 
 - **Portal Transfer Sink**: a Nether portal block consumes Nether Gas from its
-  own cell and re-emits the same amount at the linked destination, using the
-  vanilla 8:1 Nether/Overworld coordinate scale. An End portal block drains
-  every generic-grid material (Dust, Obsidian Powder, Void Gas, Exhaust,
-  Slime, Nether Gas) near it into The End. A transfer never forces a chunk or
-  dimension to load; if the destination chunk is not already loaded, the
-  attempt is skipped and retried on a later producer pass, so material is
+  own cell and re-emits the same amount at a verified destination, resolved
+  from portal positions the sink has itself already observed while scanning
+  loaded chunks (the vanilla 8:1 Nether/Overworld coordinate scale is only a
+  search anchor for that lookup, within a 128-block radius, since vanilla's
+  own portal linking can place the real exit at a displaced X/Y/Z). An End
+  portal block drains every generic-grid material (Dust, Obsidian Powder,
+  Void Gas, Exhaust, Slime, Nether Gas) near it into The End's own verified
+  exit-portal position. If no verified destination is known, or its chunk is
+  not already loaded, the attempt is skipped and retried on a later producer
+  pass — nothing is ever emitted into unrelated terrain, and material is
   never destroyed by a skipped transfer. Smoke and Vapor use a separate
   legacy grid without a public cross-grid consume API and are out of scope
   for this mechanism.
