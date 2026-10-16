@@ -23,7 +23,7 @@ public record MaterialDefinition(
     }
 
     // Named colors preserve the specification without selecting unspecified RGB values.
-    public enum Color { CURRENT_FOG, BROWN, DARK_BROWN, BLACK, YELLOW, GREEN, PURPLE }
+    public enum Color { CURRENT_FOG, BROWN, DARK_BROWN, BLACK, YELLOW, GREEN, PURPLE, GRAY }
 
     public enum Producer {
         EXISTING_VAPOR_RULES, SNOW_ICE_SURFACE,
@@ -34,7 +34,8 @@ public record MaterialDefinition(
         LIVING_MOBS_RANDOMLY, CREEPERS_FREQUENTLY, PLAYER_DAMAGE, MOB_DAMAGE,
         UNDERGROUND_SLIME_CHUNKS_RANDOMLY,
         NETHER_PORTAL_BLOCKS_SLOWLY, ENDERMEN, ENDERMITES, ENDER_DRAGON,
-        ENDER_PEARL_USE, STANDING_IN_NETHER_PORTAL, SOUL_TORCHES, SOUL_FIRES, SOUL_SAND
+        ENDER_PEARL_USE, STANDING_IN_NETHER_PORTAL, SOUL_TORCHES, SOUL_FIRES, SOUL_SAND,
+        ZOMBIE_DEATHS
     }
 
     public enum Transformation { WATER, GRAVEL, ZOMBIE, SLIME }

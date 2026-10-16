@@ -23,6 +23,7 @@ public final class DynamicAtmosphereClientConfig {
     private static final DoubleOption EXHAUST_DENSITY;
     private static final DoubleOption SLIME_DENSITY;
     private static final DoubleOption OBSIDIAN_POWDER_DENSITY;
+    private static final DoubleOption ZOMBIE_FOG_DENSITY;
 
     private static final IntOption CELL_BUDGET;
     private static volatile Snapshot cached;
@@ -53,6 +54,7 @@ public final class DynamicAtmosphereClientConfig {
         EXHAUST_DENSITY = decimal(builder, "exhaustOpticalDensity", 1, 0, 1000);
         SLIME_DENSITY = decimal(builder, "slimeOpticalDensity", 4, 0, 1000);
         OBSIDIAN_POWDER_DENSITY = decimal(builder, "obsidianPowderOpticalDensity", 40, 0, 1000);
+        ZOMBIE_FOG_DENSITY = decimal(builder, "zombieFogOpticalDensity", 4, 0, 1000);
         builder.pop();
 
         builder.push("allocation");
@@ -85,6 +87,7 @@ public final class DynamicAtmosphereClientConfig {
             new Material(EXHAUST_DENSITY.get()),
             new Material(SLIME_DENSITY.get()),
             new Material(OBSIDIAN_POWDER_DENSITY.get()),
+            new Material(ZOMBIE_FOG_DENSITY.get()),
             new Allocation(CELL_BUDGET.get())
         );
     }
@@ -154,7 +157,7 @@ public final class DynamicAtmosphereClientConfig {
                            double maxDistanceMultiplier, double fadeStartFraction,
                            Material vapor, Material smoke,
                            Material dust, Material voidGas, Material exhaust, Material slime,
-                           Material obsidianPowder, Allocation allocation) { }
+                           Material obsidianPowder, Material zombieFog, Allocation allocation) { }
     public record Material(double opticalDensity) { }
     public record Allocation(int cellBudget) { }
 
