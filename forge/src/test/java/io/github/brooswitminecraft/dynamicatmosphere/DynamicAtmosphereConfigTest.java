@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DynamicAtmosphereConfigTest {
     @Test
@@ -32,20 +33,36 @@ class DynamicAtmosphereConfigTest {
         assertEquals(32, first.integrations().maxFanChunksPerTick());
         assertEquals(12.0, first.heavyGas().dissipationFactor());
         assertEquals(0.1, first.magma().breakLavaChance());
-        assertEquals(true, first.voidGas().surfaceSpawnEligibleOverworldOnly());
     }
 
     @Test
     void removedVoidGasSpawnKeysAreNoLongerDefined() {
         // MINECRAFT-17: the consumption-driven zombie spawn (and these two keys) are removed.
-        // Slime keeps its own identically-named spawnChanceDenominator/spawnAttempts keys, so
-        // this checks the voidGas-qualified path rather than a bare substring match.
-        var names = DynamicAtmosphereServerConfig.SPEC.getValues().valueMap().keySet().stream()
-            .map(Object::toString).collect(java.util.stream.Collectors.toSet());
-        for (String removed : List.of("voidGas.spawnChanceDenominator", "voidGas.spawnAttempts")) {
-            assertFalse(names.stream().anyMatch(n -> n.toLowerCase(java.util.Locale.ROOT)
-                .contains(removed.toLowerCase(java.util.Locale.ROOT))), removed + " must no longer be defined");
+        // Slime keeps its own identically-named spawnChanceDenominator/spawnAttempts keys under
+        // its own section, so a bare leaf-name match would pass even if voidGas's own keys were
+        // reintroduced (slime's match alone would satisfy it); this flattens the spec into full
+        // dotted paths first so the assertion is against the voidGas-qualified path specifically.
+        var names = flattenConfigKeys(DynamicAtmosphereServerConfig.SPEC.getValues(), "");
+        assertTrue(names.contains("voidgas.bottomemission"), "sanity: voidGas section keys must use a dotted path");
+        assertTrue(names.contains("slime.spawnchancedenominator"), "sanity: slime keeps its own spawn keys");
+        for (String removed : List.of("voidgas.spawnchancedenominator", "voidgas.spawnattempts")) {
+            assertFalse(names.contains(removed), removed + " must no longer be defined");
         }
+    }
+
+    private static java.util.Set<String> flattenConfigKeys(
+        com.electronwill.nightconfig.core.UnmodifiableConfig config, String prefix
+    ) {
+        var result = new java.util.HashSet<String>();
+        config.valueMap().forEach((key, value) -> {
+            String path = (prefix.isEmpty() ? "" : prefix + ".") + key.toLowerCase(java.util.Locale.ROOT);
+            if (value instanceof com.electronwill.nightconfig.core.UnmodifiableConfig nested) {
+                result.addAll(flattenConfigKeys(nested, path));
+            } else {
+                result.add(path);
+            }
+        });
+        return result;
     }
 
     @Test

@@ -62,9 +62,23 @@ class VaporHostileSpawnGateTest {
     }
 
     @Test
-    void netherAndEndMonstersAreNeverGatedByVapor() {
+    void denseAtmosphereIsVaporOrVoidGasEither() {
+        // MINECRAFT-17: the actual Vapor-OR-Void-Gas composition onSpawnPlacementCheck wires
+        // into evaluate()'s single denseAtmosphere boolean, not just the decision table above.
+        assertEquals(true, VaporHostileSpawnGate.denseAtmosphere(true, false));
+        assertEquals(true, VaporHostileSpawnGate.denseAtmosphere(false, true));
+        assertEquals(true, VaporHostileSpawnGate.denseAtmosphere(true, true));
+        assertEquals(false, VaporHostileSpawnGate.denseAtmosphere(false, false));
+    }
+
+    @Test
+    void netherAndEndMonstersAreNeverGatedByVaporOrVoidGas() {
         // ATMO-9: no qualifying terrain above and zero Vapor must still pass through
-        // outside the Overworld — the gate has no business there at all.
+        // outside the Overworld — the gate has no business there at all. MINECRAFT-17
+        // generalized the third argument to Vapor-OR-Void-Gas, and per Brooswit's explicit
+        // product decision on PR #60, Void Gas eligibility is Overworld-only too, with no
+        // broader/configurable option: `overworld = false` must still mean PASS_THROUGH no
+        // matter how denseAtmosphere was computed, including when it is true.
         assertEquals(PASS_THROUGH, VaporHostileSpawnGate.evaluate(
             MobSpawnType.NATURAL, MobCategory.MONSTER, false, false, false));
         assertEquals(PASS_THROUGH, VaporHostileSpawnGate.evaluate(

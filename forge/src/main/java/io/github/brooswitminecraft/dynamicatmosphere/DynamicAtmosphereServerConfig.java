@@ -67,7 +67,6 @@ public final class DynamicAtmosphereServerConfig {
     private static final IntOption VOID_GAS_BOTTOM;
     private static final IntOption VOID_GAS_BOTTOM_DENOMINATOR;
     private static final IntOption VOID_GAS_BREAD;
-    private static final BooleanOption VOID_GAS_SURFACE_SPAWN_OVERWORLD_ONLY;
 
     private static final IntOption EXHAUST_PASSIVE;
     private static final IntOption EXHAUST_LIVING_DENOMINATOR;
@@ -182,12 +181,6 @@ public final class DynamicAtmosphereServerConfig {
         VOID_GAS_BOTTOM = integer(builder, "bottomEmission", 64, 0, 1_000_000);
         VOID_GAS_BOTTOM_DENOMINATOR = integer(builder, "bottomChanceDenominator", 1, 1, 1_000_000);
         VOID_GAS_BREAD = integer(builder, "breedingBread", 3, 0, 64);
-        // No worldRestart/gameRestart marker: NeoForge's default RestartType.NONE applies.
-        // Dimension scope for Void Gas's VaporHostileSpawnGate surface-spawn eligibility
-        // (MINECRAFT-17/ATMO-22) is an explicit open question (ATMO-22 comment 23231, reserved
-        // for Brooswit) — this flag, not a hard-coded assumption, is what answers it. Default
-        // true matches the epic's working assumption and the existing Overworld-only Vapor gate.
-        VOID_GAS_SURFACE_SPAWN_OVERWORLD_ONLY = bool(builder, "surfaceSpawnEligibleOverworldOnly", true);
         builder.pop();
 
         builder.push("exhaust");
@@ -292,8 +285,7 @@ public final class DynamicAtmosphereServerConfig {
                 DUST_WALK_INTERVAL.get(), DUST_RUN_INTERVAL.get(), FALLING_BLOCK.get(), GRAVEL_CHANCE.get(),
                 DUST_DISSIPATION_CHANCE.get(), DUST_DISSIPATION_AMOUNT.get()),
             new VoidGas(VOID_GAS_HOSTILE_DEATH.get(), VOID_GAS_NETHERRACK.get(), VOID_GAS_BOTTOM.get(),
-                VOID_GAS_BOTTOM_DENOMINATOR.get(), VOID_GAS_BREAD.get(),
-                VOID_GAS_SURFACE_SPAWN_OVERWORLD_ONLY.get()),
+                VOID_GAS_BOTTOM_DENOMINATOR.get(), VOID_GAS_BREAD.get()),
             new Exhaust(EXHAUST_PASSIVE.get(), EXHAUST_LIVING_DENOMINATOR.get(),
                 EXHAUST_CREEPER_DENOMINATOR.get(), EXHAUST_DAMAGE_PER_POINT.get(), EXHAUST_DAMAGE_MAX.get(),
                 EXHAUST_MIN_FULLNESS.get(), EXHAUST_MAX_FULLNESS.get(), EXHAUST_MIN_DAMAGE.get(),
@@ -317,10 +309,6 @@ public final class DynamicAtmosphereServerConfig {
 
     static double validDouble(Double value, double fallback, double min, double max) {
         return value != null && Double.isFinite(value) && value >= min && value <= max ? value : fallback;
-    }
-
-    private static BooleanOption bool(ModConfigSpec.Builder builder, String name, boolean fallback) {
-        return new BooleanOption(builder.define(name, fallback), fallback);
     }
 
     private static IntOption integer(ModConfigSpec.Builder builder, String name, int fallback, int min, int max) {
@@ -347,17 +335,6 @@ public final class DynamicAtmosphereServerConfig {
         double get() {
             try {
                 return validDouble(value.get(), fallback, min, max);
-            } catch (IllegalStateException ignored) {
-                return fallback;
-            }
-        }
-    }
-
-    private record BooleanOption(ModConfigSpec.BooleanValue value, boolean fallback) {
-        boolean get() {
-            try {
-                Boolean configured = value.get();
-                return configured == null ? fallback : configured;
             } catch (IllegalStateException ignored) {
                 return fallback;
             }
@@ -396,8 +373,7 @@ public final class DynamicAtmosphereServerConfig {
                        int runIntervalTicks, int fallingBlockEmission, double gravelChance,
                        double dissipationChance, int dissipationAmount) { }
     public record VoidGas(int hostileDeathEmission, int netherrackEmission, int bottomEmission,
-                          int bottomChanceDenominator, int breedingBread,
-                          boolean surfaceSpawnEligibleOverworldOnly) { }
+                          int bottomChanceDenominator, int breedingBread) { }
     public record Exhaust(int passiveEmission, int livingChanceDenominator, int creeperChanceDenominator,
                           int damageEmissionPerPoint, int maxDamageEmission, double suffocationMinFullness,
                           double suffocationMaxFullness, double suffocationMinDamage,

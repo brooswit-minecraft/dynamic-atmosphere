@@ -241,11 +241,9 @@ and migrated chunks are saved in the new format.
   damage path was added in its place. Instead, a Void Gas cell strictly more than
   half full makes its position eligible for the Vapor surface-spawn rule above, the
   same way a more-than-half-full Vapor cell is — monsters there spawn under vanilla
-  control instead of being denied. Whether this eligibility is Overworld-only (like
-  the Vapor rule) or applies in every dimension is governed by the new
-  `voidGas.surfaceSpawnEligibleOverworldOnly` key (default `true`, matching Vapor);
-  Brooswit has not confirmed the dimension scope, so this is a configurable default,
-  not a hard-coded assumption.
+  control instead of being denied. This eligibility is Overworld-only, like the
+  Vapor rule itself (Brooswit's explicit product decision on MINECRAFT-17); there is
+  no configurable or broader-dimension option.
 - **Exhaust:** passive living-mob emissions use a 1/128 chance, or 1/16 for
   creepers, adding 1 unit. Damage emits four units per damage point, rounded up
   and capped at 64; Exhaust's own damage does not recursively emit.
