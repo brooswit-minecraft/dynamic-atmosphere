@@ -53,4 +53,24 @@ class ConfigVersionGuardTest {
         ConfigVersionGuard.applyVersionInvalidation(dir, "dynamicatmosphere-server.toml", 1);
         assertEquals(0, dir.toFile().list().length, "nothing to invalidate when the file does not exist yet");
     }
+
+    @Test
+    void repeatedSameOldVersionInvalidationPreservesBothOriginals(@TempDir Path dir) throws IOException {
+        // A prior migration (or a retried server start) may have already left a
+        // .bak-0 behind; a second mismatch at the same old version must not clobber it.
+        Path existingBackup = dir.resolve("dynamicatmosphere-server.toml.bak-0");
+        Files.writeString(existingBackup, "configVersion = 0\nsyncIntervalTicks = 111\n");
+
+        Path file = dir.resolve("dynamicatmosphere-server.toml");
+        Files.writeString(file, "configVersion = 0\nsyncIntervalTicks = 222\n");
+        ConfigVersionGuard.applyVersionInvalidation(dir, "dynamicatmosphere-server.toml", 1);
+
+        assertTrue(Files.readString(existingBackup).contains("syncIntervalTicks = 111"),
+            "the pre-existing backup must be left untouched");
+        Path secondBackup = dir.resolve("dynamicatmosphere-server.toml.bak-0-2");
+        assertTrue(Files.exists(secondBackup), "a colliding backup must fall back to a free suffix");
+        assertTrue(Files.readString(secondBackup).contains("syncIntervalTicks = 222"),
+            "the newly-backed-up file's own content must be preserved under the free suffix");
+        assertFalse(Files.exists(file), "original file must still be moved away");
+    }
 }

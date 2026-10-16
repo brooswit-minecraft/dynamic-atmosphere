@@ -4,6 +4,7 @@ import com.mojang.logging.LogUtils;
 import io.github.brooswitminecraft.dynamicatmosphere.engine.EngineInfo;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.storage.LevelResource;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.fml.ModContainer;
@@ -11,9 +12,11 @@ import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.server.ServerAboutToStartEvent;
 import net.neoforged.fml.common.Mod;
 import org.slf4j.Logger;
 
+import java.nio.file.Path;
 import java.util.Optional;
 
 /**
@@ -88,7 +91,26 @@ public class DynamicAtmosphereMod {
         NeoForge.EVENT_BUS.addListener(magmaLava::onChunkUnload);
         NeoForge.EVENT_BUS.addListener(magmaLava::onNeighborNotify);
         NeoForge.EVENT_BUS.addListener(magmaLava::onServerTick);
+        // MINECRAFT-21: the mod-construction-time ConfigVersionGuard calls above only ever see
+        // the global config/ directory. DynamicAtmosphereServerConfig is ModConfig.Type.SERVER,
+        // which NeoForge re-reads per-world from <world>/serverconfig/ once that directory holds
+        // an override (ServerLifecycleHooks.handleServerAboutToStart). HIGHEST priority so this
+        // runs before NeoForge's own internal per-world config reload for the same event.
+        NeoForge.EVENT_BUS.addListener(EventPriority.HIGHEST, DynamicAtmosphereMod::onServerAboutToStart);
         LOGGER.info("[{}] bounded atmospheric grid enabled", MODID);
+    }
+
+    private static final LevelResource SERVERCONFIG = new LevelResource("serverconfig");
+
+    private static void onServerAboutToStart(ServerAboutToStartEvent event) {
+        invalidateServerConfigAt(event.getServer().getWorldPath(SERVERCONFIG));
+    }
+
+    /** Package-visible for ConfigVersionGuardTest: proves the per-world wiring touches only the
+     * exact SERVER file/version this mod owns, in the exact directory handed to it. */
+    static void invalidateServerConfigAt(Path worldServerConfigDir) {
+        ConfigVersionGuard.applyVersionInvalidation(worldServerConfigDir,
+            DynamicAtmosphereServerConfig.FILE_NAME, DynamicAtmosphereServerConfig.CURRENT_VERSION);
     }
 
     /** Loaded-only live query for gameplay policy; unknown cells are never treated as dense. */
