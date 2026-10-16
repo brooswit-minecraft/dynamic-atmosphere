@@ -135,7 +135,18 @@ class DynamicAtmosphereConfigTest {
         assertEquals(0.75, first.fadeStartFraction());
         assertEquals(2, first.smoke().opticalDensity());
         assertEquals(40, first.obsidianPowder().opticalDensity());
+        assertEquals(2, first.glowGas().opticalDensity());
         assertEquals(200_000, first.allocation().cellBudget());
+    }
+
+    @Test
+    void glowGasServerConfigDefaultsMatchTheEpicSpec() {
+        var snapshot = DynamicAtmosphereServerConfig.snapshot();
+        assertEquals(100, snapshot.glowGas().glowstoneEmission());
+        // The renderer reads the client config value, not the engine catalog field: both must
+        // agree, or the change is invisible in game (the 0.20.0 smokeOpticalDensity trap).
+        assertEquals(io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.GLOW_GAS
+            .settings().opticalDensityMultiplier(), DynamicAtmosphereClientConfig.snapshot().glowGas().opticalDensity());
     }
 
     @Test

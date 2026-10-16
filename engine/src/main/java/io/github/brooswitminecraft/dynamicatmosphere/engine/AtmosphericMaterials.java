@@ -46,9 +46,13 @@ public final class AtmosphericMaterials {
     public static final MaterialDefinition ZOMBIE_FOG = new MaterialDefinition("zombie_fog", GRAY,
         new MaterialSettings(CELL_SIZE, VOID_GAS_LOD, 1, OptionalDouble.of(1), 4),
         Set.of(ZOMBIE_DEATHS), Set.of());
+    /** MINECRAFT-1 (B2): visual only, 2x Vapor's optical density. */
+    public static final MaterialDefinition GLOW_GAS = new MaterialDefinition("glow_gas", GOLD,
+        new MaterialSettings(CELL_SIZE, DUST_LOD, 1, OptionalDouble.of(1), 2),
+        Set.of(GLOWSTONE), Set.of());
 
     public static final List<MaterialDefinition> ALL =
-        List.of(VAPOR, DUST, SMOKE, VOID_GAS, EXHAUST, SLIME, OBSIDIAN_POWDER, ZOMBIE_FOG);
+        List.of(VAPOR, DUST, SMOKE, VOID_GAS, EXHAUST, SLIME, OBSIDIAN_POWDER, ZOMBIE_FOG, GLOW_GAS);
 
     private AtmosphericMaterials() { }
 

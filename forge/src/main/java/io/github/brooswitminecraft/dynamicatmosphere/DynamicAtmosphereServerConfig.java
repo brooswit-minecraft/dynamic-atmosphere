@@ -93,6 +93,8 @@ public final class DynamicAtmosphereServerConfig {
     private static final DoubleOption SLIME_BIG_DENSITY_THRESHOLD;
     private static final IntOption SLIME_PREFERRED_HEIGHT;
 
+    private static final IntOption GLOW_GAS_GLOWSTONE;
+
     private static final DoubleOption HEAVY_GAS_DISSIPATION_FACTOR;
 
     private static final IntOption ENDER_MOB;
@@ -278,6 +280,13 @@ public final class DynamicAtmosphereServerConfig {
         SLIME_PREFERRED_HEIGHT = integer(builder, "preferredHeight", 64, -2048, 2048);
         builder.pop();
 
+        builder.push("glowGas");
+        // No worldRestart/gameRestart marker is applied in this section: NeoForge's default is RestartType.NONE.
+        builder.comment("Emission per glowstone block found by the bounded, palette-gated section scan.");
+        GLOW_GAS_GLOWSTONE = integer(builder, "glowstoneEmission", 100, 0, 1_000_000);
+        // MINECRAFT-1 (B2): Glow Gas's home is a literal Y=0, not configurable.
+        builder.pop();
+
         builder.push("heavyGas");
         // Shared by Void Gas, Obsidian Powder and Slime: their dissipation chance is Smoke's own
         // dissipationChance() divided by this factor, keeping Smoke's dissipationAmount() as maxLoss.
@@ -450,6 +459,7 @@ public final class DynamicAtmosphereServerConfig {
                 CRYING_OBSIDIAN.get(), ENDER_PEARL_USE.get(),
                 ENDER_PEARL_IMPACT.get(), ENDER_MOB_INTERVAL.get(),
                 ENDER_PORTAL_INTERVAL.get(), ENDER_PORTAL_BLOCK.get()),
+            new GlowGas(GLOW_GAS_GLOWSTONE.get()),
             new PlantGrowth(PLANT_CHANCE.get(), PLANT_COST.get()),
             new Integrations(CREATE_FAN_RPM_COEFFICIENT.get(), CREATE_FAN_INTERVAL.get(), CREATE_FAN_CHUNK_BUDGET.get()),
             new HeavyGas(HEAVY_GAS_DISSIPATION_FACTOR.get()),
@@ -506,7 +516,7 @@ public final class DynamicAtmosphereServerConfig {
     }
 
     public record Snapshot(RuntimeTuning runtime, Vapor vapor, VerticalMovement verticalMovement, Smoke smoke, Dust dust, VoidGas voidGas,
-                           Exhaust exhaust, Slime slime, ObsidianPowder obsidianPowder, PlantGrowth plantGrowth,
+                           Exhaust exhaust, Slime slime, ObsidianPowder obsidianPowder, GlowGas glowGas, PlantGrowth plantGrowth,
                            Integrations integrations, HeavyGas heavyGas, Magma magma,
                            Lightning lightning, GhastSpawn ghastSpawn, ZombieFog zombieFog,
                            SlimePrecipitation slimePrecipitation) { }
@@ -554,6 +564,8 @@ public final class DynamicAtmosphereServerConfig {
                            int pearlUseEmission, int pearlImpactEmission,
                            int mobIntervalTicks, int portalIntervalTicks,
                            int portalBlockEmission) { }
+    /** MINECRAFT-1 (B2): Glow Gas's home is a literal Y=0, not configurable. */
+    public record GlowGas(int glowstoneEmission) { }
     public record PlantGrowth(double chance, int cost) { }
     public record Integrations(double createFanTransportPerRpm, int createFanIntervalTicks,
                                int maxFanChunksPerTick) { }
