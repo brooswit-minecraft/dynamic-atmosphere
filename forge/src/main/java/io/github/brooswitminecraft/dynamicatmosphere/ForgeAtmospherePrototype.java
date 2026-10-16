@@ -135,6 +135,7 @@ final class ForgeAtmospherePrototype {
             voidGasGameplay.onPassiveBlockSample(level, pos, chunk.getBlockState(pos));
         });
         registerMaterialProducer(AtmosphereMaterial.SLIME, slimeGameplay::onLoadedChunkProducerCheck);
+        registerMaterialProducer(AtmosphereMaterial.GLOW_GAS, this::sampleGlowGasChunk);
     }
 
     private static Map<AtmosphereMaterial, AtmosphereGrid<ResourceKey<Level>>> createMaterialGrids() {
@@ -622,6 +623,30 @@ final class ForgeAtmospherePrototype {
             + level.random.nextInt(level.getMaxBuildHeight() - level.getMinBuildHeight());
         BlockPos sample = new BlockPos(x, y, z);
         obsidianPowderGameplay.onPassiveBlockSample(level, sample, chunk.getBlockState(sample));
+    }
+
+    /**
+     * MINECRAFT-1 (B2): palette-gates loaded sections; only sections actually containing
+     * glowstone pay the bounded 4096-block scan. Emits a fixed amount per glowstone block found.
+     */
+    private void sampleGlowGasChunk(ServerLevel level, LevelChunk chunk) {
+        int amount = DynamicAtmosphereServerConfig.snapshot().glowGas().glowstoneEmission();
+        LevelChunkSection[] sections = chunk.getSections();
+        for (int sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
+            LevelChunkSection section = sections[sectionIndex];
+            if (!section.maybeHas(block -> block.is(Blocks.GLOWSTONE))) continue;
+            int sectionY = SectionPos.sectionToBlockCoord(chunk.getSectionYFromSectionIndex(sectionIndex));
+            for (int localY = 0; localY < 16; localY++) {
+                for (int localZ = 0; localZ < 16; localZ++) {
+                    for (int localX = 0; localX < 16; localX++) {
+                        if (!section.getBlockState(localX, localY, localZ).is(Blocks.GLOWSTONE)) continue;
+                        BlockPos pos = new BlockPos(chunk.getPos().getMinBlockX() + localX,
+                            sectionY + localY, chunk.getPos().getMinBlockZ() + localZ);
+                        emitMaterial(level, AtmosphereMaterial.GLOW_GAS, pos, amount);
+                    }
+                }
+            }
+        }
     }
 
     private boolean isMaterialProducerChunkActive(

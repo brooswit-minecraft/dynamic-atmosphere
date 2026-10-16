@@ -43,8 +43,13 @@ public final class AtmosphericMaterials {
         Set.of(NETHER_PORTAL_BLOCKS_SLOWLY, ENDERMEN, ENDERMITES, ENDER_DRAGON,
             ENDER_PEARL_USE, STANDING_IN_NETHER_PORTAL, SOUL_TORCHES, SOUL_FIRES, SOUL_SAND,
             WITCH, SHULKER, ENDER_CHEST, CRYING_OBSIDIAN), Set.of());
+    /** MINECRAFT-1 (B2): visual only, 2x Vapor's optical density. */
+    public static final MaterialDefinition GLOW_GAS = new MaterialDefinition("glow_gas", GOLD,
+        new MaterialSettings(CELL_SIZE, DUST_LOD, 1, OptionalDouble.of(1), 2),
+        Set.of(GLOWSTONE), Set.of());
 
-    public static final List<MaterialDefinition> ALL = List.of(VAPOR, DUST, SMOKE, VOID_GAS, EXHAUST, SLIME, OBSIDIAN_POWDER);
+    public static final List<MaterialDefinition> ALL =
+        List.of(VAPOR, DUST, SMOKE, VOID_GAS, EXHAUST, SLIME, OBSIDIAN_POWDER, GLOW_GAS);
 
     private AtmosphericMaterials() { }
 
