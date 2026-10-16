@@ -1155,9 +1155,11 @@ final class ForgeAtmospherePrototype {
         if (fired.isEmpty()) return false;
         int cost = Math.max(1, (int) Math.round(fired.get().materialCost() * capacity));
         if (cell.amount() < cost) return false;
+        var outcomes = new java.util.ArrayList<Boolean>();
         for (var action : fired.get().actions()) {
-            AtmosphericActionExecutor.execute(level, origin, action);
+            outcomes.add(AtmosphericActionExecutor.execute(level, origin, action));
         }
+        if (!AtmosphericActionExecutor.allActionsSucceeded(outcomes)) return false;
         smokeGrid.set(key, cell.amount() - cost, serverTicks, capacity);
         return true;
     }
@@ -1197,7 +1199,7 @@ final class ForgeAtmospherePrototype {
             BlockPos target = PrecipitationTargeting.findSurface(level, origin, AtmosphereMaterial.SLIME.cellSize(),
                 rule.direction(), config.surfaceSearchAttempts());
             if (target == null) return false;
-            AtmosphericActionExecutor.execute(level, target, fired.get().action());
+            if (!AtmosphericActionExecutor.execute(level, target, fired.get().action())) return false;
             materialGrid.set(key, current.amount() - cost, serverTicks, capacity);
             return true;
         }
@@ -1230,9 +1232,15 @@ final class ForgeAtmospherePrototype {
         if (fired.isEmpty()) return false;
         int cost = Math.max(1, (int) Math.round(fired.get().materialCost() * capacity));
         if (cell.amount() < cost) return false;
+        // Actionless by design (spec section 26): this loop runs zero times, so
+        // allActionsSucceeded is vacuously true and the sink always debits its cost -- the
+        // same success-gating pattern other events use, applied here for consistency,
+        // degenerates to a no-op.
+        var outcomes = new java.util.ArrayList<Boolean>();
         for (var action : fired.get().actions()) {
-            AtmosphericActionExecutor.execute(level, origin, action);
+            outcomes.add(AtmosphericActionExecutor.execute(level, origin, action));
         }
+        if (!AtmosphericActionExecutor.allActionsSucceeded(outcomes)) return false;
         materialGrid.set(key, cell.amount() - cost, serverTicks, capacity);
         return true;
     }
@@ -1507,9 +1515,11 @@ final class ForgeAtmospherePrototype {
             io.github.brooswitminecraft.dynamicatmosphere.engine.event.PrecipitationDirection.DOWN,
             tuning().lightning().surfaceSearchAttempts());
         if (target == null) return false;
+        var outcomes = new java.util.ArrayList<Boolean>();
         for (var action : fired.get().actions()) {
-            AtmosphericActionExecutor.execute(level, target, action);
+            outcomes.add(AtmosphericActionExecutor.execute(level, target, action));
         }
+        if (!AtmosphericActionExecutor.allActionsSucceeded(outcomes)) return false;
         grid.set(key, cell.amount() - cost, serverTicks, capacity);
         return true;
     }
