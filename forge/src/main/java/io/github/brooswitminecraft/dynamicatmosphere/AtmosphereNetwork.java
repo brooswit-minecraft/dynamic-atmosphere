@@ -19,9 +19,9 @@ public final class AtmosphereNetwork {
     }
 
     static void register(RegisterPayloadHandlersEvent event) {
-        // MINECRAFT-1 (B2): bumped 10 -> 11 for the new Glow Gas material (AtmosphereMaterial
+        // MINECRAFT-1 (B3): bumped 11 -> 12 for the new Nether Fog material (AtmosphereMaterial
         // adds an ordinal; a client/server running different protocol versions must not connect).
-        var registrar = event.registrar("11");
+        var registrar = event.registrar("12");
         registrar.playToClient(AtmosphereGridPayload.TYPE, AtmosphereGridPayload.STREAM_CODEC,
             (payload, context) -> clientReceiver.accept(payload, context.connection()));
         registrar.playToClient(SmokeGridPayload.TYPE, SmokeGridPayload.STREAM_CODEC,

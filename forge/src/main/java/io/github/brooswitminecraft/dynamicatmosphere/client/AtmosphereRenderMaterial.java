@@ -22,7 +22,9 @@ enum AtmosphereRenderMaterial {
     VOID_GAS(1, 0x000000, 4), EXHAUST(0, 0xFFFF00, 1),
     SLIME(1, 0x00FF00, 4),
     /** MINECRAFT-1 (B2): visual only, rendered unlit -- no real block light. */
-    GLOW_GAS(0, 0xFFC83C, 2);
+    GLOW_GAS(0, 0xFFC83C, 2),
+    /** MINECRAFT-1 (B3): very dark red; vapor-like root level, matching its vapor-like LOD. */
+    NETHER_FOG(2, 0x400000, 1);
 
     final int cellSize = AtmosphereGridLayout.CELL_SIZE;
     final int rootLevel;
@@ -51,6 +53,7 @@ enum AtmosphereRenderMaterial {
             case SLIME -> config.slime();
             case OBSIDIAN_POWDER -> config.obsidianPowder();
             case GLOW_GAS -> config.glowGas();
+            case NETHER_FOG -> config.netherFog();
         };
     }
 

@@ -55,6 +55,7 @@ public class DynamicAtmosphereMod {
         // resolves it eagerly (NeoForgeMod.LAVA_TYPE.value()), not lazily.
         modEventBus.addListener((FMLCommonSetupEvent event) -> LavaIceInteractions.register());
         modEventBus.addListener(AtmosphereNetwork::register);
+        DynamicAtmosphereRegistry.register(modEventBus);
         ForgeAtmosphereStorage.register(modEventBus);
         ForgeAtmosphereCapacity.register(modEventBus);
         ForgeSmokeStorage.register(modEventBus);

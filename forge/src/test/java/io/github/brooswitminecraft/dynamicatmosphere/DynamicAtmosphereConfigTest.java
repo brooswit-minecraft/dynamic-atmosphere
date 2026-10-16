@@ -115,6 +115,7 @@ class DynamicAtmosphereConfigTest {
         assertEquals(0.3, first.obsidianPowder().opticalDensity());
         assertEquals(1.2, first.vapor().opticalDensity());
         assertEquals(2, first.glowGas().opticalDensity());
+        assertEquals(1, first.netherFog().opticalDensity());
         assertEquals(200_000, first.allocation().cellBudget());
     }
 
@@ -224,6 +225,32 @@ class DynamicAtmosphereConfigTest {
         // agree, or the change is invisible in game (the 0.20.0 smokeOpticalDensity trap).
         assertEquals(io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.GLOW_GAS
             .settings().opticalDensityMultiplier(), DynamicAtmosphereClientConfig.snapshot().glowGas().opticalDensity());
+    }
+
+    @Test
+    void netherFogServerConfigDefaultsMatchTheEpicSpec() {
+        var snapshot = DynamicAtmosphereServerConfig.snapshot();
+        assertEquals(0.10, snapshot.netherFog().maxCondensationChance());
+        assertEquals(io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.NETHER_FOG
+            .settings().opticalDensityMultiplier(), DynamicAtmosphereClientConfig.snapshot().netherFog().opticalDensity());
+        // MINECRAFT-1 (B3): one full block's capacity share at the production cell size (4),
+        // pinned down numerically so a change here is deliberate. ForgeAtmospherePrototype's
+        // harvest (sampleNetherFogChunk) and condensation (condenseNetherFog) both call this
+        // exact same method for their amount, which is what keeps the lava<->fog cycle from
+        // draining or flooding lava over repeated round trips -- not a value independently
+        // duplicated in two places.
+        assertEquals(15, AtmosphereMaterial.NETHER_FOG.capacityForAirBlocks(1));
+    }
+
+    @Test
+    void endSandAndEndOnlyEnderGasServerConfigDefaultsMatchTheEpicSpec() {
+        var snapshot = DynamicAtmosphereServerConfig.snapshot();
+        // MINECRAFT-1 (B4): End-only Ender Gas (Obsidian Powder) production and condensation.
+        assertEquals(200, snapshot.obsidianPowder().endEmission());
+        assertEquals(0.10, snapshot.obsidianPowder().endGateChance());
+        assertEquals(0.10, snapshot.obsidianPowder().endSandCondensationChance());
+        // End Sand's own rise interval -- read by the registered block, not simulation code.
+        assertEquals(20, snapshot.endSand().riseIntervalTicks());
     }
 
     @Test

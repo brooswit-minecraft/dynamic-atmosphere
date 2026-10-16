@@ -106,6 +106,8 @@ public final class DynamicAtmosphereServerConfig {
 
     private static final IntOption GLOW_GAS_GLOWSTONE;
 
+    private static final DoubleOption NETHER_FOG_MAX_CONDENSATION_CHANCE;
+
     private static final DoubleOption HEAVY_GAS_DISSIPATION_FACTOR;
 
     private static final IntOption ENDER_MOB;
@@ -118,6 +120,11 @@ public final class DynamicAtmosphereServerConfig {
     private static final IntOption ENDER_PEARL_IMPACT;
     private static final IntOption ENDER_MOB_INTERVAL;
     private static final IntOption ENDER_PORTAL_INTERVAL;
+    private static final IntOption ENDER_END;
+    private static final DoubleOption ENDER_END_GATE_CHANCE;
+    private static final DoubleOption ENDER_END_SAND_CONDENSATION_CHANCE;
+
+    private static final IntOption END_SAND_RISE_INTERVAL;
 
     private static final DoubleOption PLANT_CHANCE;
     private static final IntOption PLANT_COST;
@@ -271,6 +278,17 @@ public final class DynamicAtmosphereServerConfig {
         // MINECRAFT-1 (B2): Glow Gas's home is a literal Y=0, not configurable.
         builder.pop();
 
+        builder.push("netherFog");
+        // No worldRestart/gameRestart marker is applied in this section: NeoForge's default is RestartType.NONE.
+        // MINECRAFT-1 (B3): per-harvest/condensation amount is NOT a config key here -- it is
+        // always exactly one full block's worth of capacity (AtmosphereMaterial.capacityForAirBlocks(1)),
+        // shared by both directions of the lava<->fog cycle so the cycle neither drains nor floods lava.
+        builder.comment("Maximum chance per processed turn that a high-fullness Nether Fog cell places a",
+            "lava source back, mirroring Vapor's own maxCondensationChance.");
+        NETHER_FOG_MAX_CONDENSATION_CHANCE = decimal(builder, "maxCondensationChance", 0.10, 0, 1);
+        // MINECRAFT-1 (B3): Nether Fog's home is the dimension's own bottom; see the note under dust.
+        builder.pop();
+
         builder.push("heavyGas");
         // Shared by Void Gas, Obsidian Powder and Slime: their dissipation chance is Smoke's own
         // dissipationChance() divided by this factor, keeping Smoke's dissipationAmount() as maxLoss.
@@ -302,6 +320,22 @@ public final class DynamicAtmosphereServerConfig {
         ENDER_PORTAL_INTERVAL = integer(builder, "portalIntervalTicks", 20, 1, 72000);
         // MINECRAFT-1 (B1): Obsidian Powder's (Ender Gas's) home is the dimension's own bottom;
         // see the note under dust.
+        builder.comment("MINECRAFT-1 (B4): End-only emission near the dimension's build-height",
+            "ceiling, per loaded End chunk per producer pass that clears endGateChance.");
+        ENDER_END = integer(builder, "endEmission", 200, 0, 1_000_000);
+        builder.comment("MINECRAFT-1 (B4): chance, per loaded End chunk per producer pass, that the",
+            "End-only emission above actually fires (mirrors Vapor's own producerChance).");
+        ENDER_END_GATE_CHANCE = decimal(builder, "endGateChance", 0.10, 0, 1);
+        builder.comment("MINECRAFT-1 (B4): maximum chance per processed turn that a dense Ender Gas",
+            "cell condenses into End Sand; End only (mirrors Vapor's own maxCondensationChance).");
+        ENDER_END_SAND_CONDENSATION_CHANCE = decimal(builder, "endSandCondensationChance", 0.10, 0, 1);
+        builder.pop();
+
+        builder.push("endSand");
+        // No worldRestart/gameRestart marker is applied in this section: NeoForge's default is RestartType.NONE.
+        builder.comment("Ticks between each 1-block rise. Baked into the block's own scheduled",
+            "ticks, so a live edit takes effect the next time a given End Sand block ticks.");
+        END_SAND_RISE_INTERVAL = integer(builder, "riseIntervalTicks", 20, 1, 72000);
         builder.pop();
 
         builder.push("plantGrowth");
@@ -369,8 +403,11 @@ public final class DynamicAtmosphereServerConfig {
             new ObsidianPowder(ENDER_MOB.get(), ENDER_PORTAL.get(), OBSIDIAN_PASSIVE.get(), OBSIDIAN_BLOCK.get(),
                 CRYING_OBSIDIAN.get(), ENDER_PEARL_USE.get(),
                 ENDER_PEARL_IMPACT.get(), ENDER_MOB_INTERVAL.get(),
-                ENDER_PORTAL_INTERVAL.get(), ENDER_PORTAL_BLOCK.get()),
+                ENDER_PORTAL_INTERVAL.get(), ENDER_PORTAL_BLOCK.get(),
+                ENDER_END.get(), ENDER_END_GATE_CHANCE.get(), ENDER_END_SAND_CONDENSATION_CHANCE.get()),
             new GlowGas(GLOW_GAS_GLOWSTONE.get()),
+            new NetherFog(NETHER_FOG_MAX_CONDENSATION_CHANCE.get()),
+            new EndSand(END_SAND_RISE_INTERVAL.get()),
             new PlantGrowth(PLANT_CHANCE.get(), PLANT_COST.get()),
             new Integrations(CREATE_FAN_RPM_COEFFICIENT.get(), CREATE_FAN_INTERVAL.get(), CREATE_FAN_CHUNK_BUDGET.get()),
             new HeavyGas(HEAVY_GAS_DISSIPATION_FACTOR.get()),
@@ -417,7 +454,8 @@ public final class DynamicAtmosphereServerConfig {
     }
 
     public record Snapshot(RuntimeTuning runtime, Vapor vapor, VerticalMovement verticalMovement, Smoke smoke, Dust dust, VoidGas voidGas,
-                           Exhaust exhaust, Slime slime, ObsidianPowder obsidianPowder, GlowGas glowGas, PlantGrowth plantGrowth,
+                           Exhaust exhaust, Slime slime, ObsidianPowder obsidianPowder, GlowGas glowGas,
+                           NetherFog netherFog, EndSand endSand, PlantGrowth plantGrowth,
                            Integrations integrations, HeavyGas heavyGas, Magma magma) { }
     public record RuntimeTuning(int syncIntervalTicks, int fullSnapshotIntervalTicks,
                                 int simulationIntervalTicks, int producerIntervalTicks,
@@ -462,9 +500,14 @@ public final class DynamicAtmosphereServerConfig {
                                  int obsidianBlockEmission, int cryingObsidianEmission,
                            int pearlUseEmission, int pearlImpactEmission,
                            int mobIntervalTicks, int portalIntervalTicks,
-                           int portalBlockEmission) { }
+                           int portalBlockEmission, int endEmission, double endGateChance,
+                           double endSandCondensationChance) { }
     /** MINECRAFT-1 (B2): Glow Gas's home is a literal Y=0, not configurable. */
     public record GlowGas(int glowstoneEmission) { }
+    /** MINECRAFT-1 (B3): Nether Fog's home is the dimension's own bottom, not configurable. */
+    public record NetherFog(double maxCondensationChance) { }
+    /** MINECRAFT-1 (B4): the first config section whose key is read by a registered Block, not simulation code. */
+    public record EndSand(int riseIntervalTicks) { }
     public record PlantGrowth(double chance, int cost) { }
     public record Integrations(double createFanTransportPerRpm, int createFanIntervalTicks,
                                int maxFanChunksPerTick) { }
