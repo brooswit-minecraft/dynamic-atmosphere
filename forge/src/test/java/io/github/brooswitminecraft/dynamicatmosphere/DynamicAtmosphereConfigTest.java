@@ -33,20 +33,36 @@ class DynamicAtmosphereConfigTest {
         assertEquals(32, first.integrations().maxFanChunksPerTick());
         assertEquals(12.0, first.heavyGas().dissipationFactor());
         assertEquals(0.1, first.magma().breakLavaChance());
+        assertEquals(32, first.slime().dissipationSpawnChanceDenominator());
+        assertEquals(8, first.slime().dissipationSpawnAttempts());
+        assertEquals(0.25, first.slime().mediumDensityThreshold());
+        assertEquals(0.75, first.slime().bigDensityThreshold());
     }
 
     @Test
     void removedVoidGasSpawnKeysAreNoLongerDefined() {
         // MINECRAFT-17: the consumption-driven zombie spawn (and these two keys) are removed.
-        // Slime keeps its own identically-named spawnChanceDenominator/spawnAttempts keys under
-        // its own section, so a bare leaf-name match would pass even if voidGas's own keys were
-        // reintroduced (slime's match alone would satisfy it); this flattens the spec into full
-        // dotted paths first so the assertion is against the voidGas-qualified path specifically.
+        // This flattens the spec into full dotted paths so the assertion is against the
+        // voidGas-qualified path specifically, not a bare leaf-name match.
         var names = flattenConfigKeys(DynamicAtmosphereServerConfig.SPEC.getValues(), "");
         assertTrue(names.contains("voidgas.bottomemission"), "sanity: voidGas section keys must use a dotted path");
-        assertTrue(names.contains("slime.spawnchancedenominator"), "sanity: slime keeps its own spawn keys");
         for (String removed : List.of("voidgas.spawnchancedenominator", "voidgas.spawnattempts")) {
             assertFalse(names.contains(removed), removed + " must no longer be defined");
+        }
+    }
+
+    @Test
+    void removedSlimeConsumptionSpawnKeysAreReplacedByDissipationSpawnKeys() {
+        // MINECRAFT-18: the consumption-driven spawn (and these two keys) are removed in favor
+        // of a dissipation-triggered spawn with its own chance/attempts keys plus density
+        // thresholds that pick the spawned slime's size.
+        var names = flattenConfigKeys(DynamicAtmosphereServerConfig.SPEC.getValues(), "");
+        for (String removed : List.of("slime.spawnchancedenominator", "slime.spawnattempts")) {
+            assertFalse(names.contains(removed), removed + " must no longer be defined");
+        }
+        for (String added : List.of("slime.dissipationspawnchancedenominator", "slime.dissipationspawnattempts",
+            "slime.mediumdensitythreshold", "slime.bigdensitythreshold")) {
+            assertTrue(names.contains(added), added + " must be defined");
         }
     }
 

@@ -838,8 +838,11 @@ final class ForgeAtmospherePrototype {
                     dissipateHeavyGas(cellLevel, materialGrid, key, capacityAt);
                 }
                 if (material == AtmosphereMaterial.SLIME) {
-                    slimeGameplay.onProcessedCell(cellLevel, origin);
-                    dissipateHeavyGas(cellLevel, materialGrid, key, capacityAt);
+                    var preDissipationCell = materialGrid.get(key);
+                    if (dissipateHeavyGas(cellLevel, materialGrid, key, capacityAt) > 0 && preDissipationCell != null) {
+                        slimeGameplay.onDissipation(cellLevel, origin,
+                            preDissipationCell.amount(), preDissipationCell.capacity());
+                    }
                 }
                 if (material == AtmosphereMaterial.OBSIDIAN_POWDER) {
                     dissipateHeavyGas(cellLevel, materialGrid, key, capacityAt);
@@ -886,20 +889,25 @@ final class ForgeAtmospherePrototype {
         }
     }
 
-    /** Void Gas, Obsidian Powder and Slime dissipation, shared via {@link HeavyGasDissipation}. */
-    private void dissipateHeavyGas(
+    /**
+     * Void Gas, Obsidian Powder and Slime dissipation, shared via {@link HeavyGasDissipation}.
+     * Returns the amount actually lost (0 if the cell was absent or the roll missed), so Slime
+     * can gate its dissipation-triggered spawn on a real loss.
+     */
+    private int dissipateHeavyGas(
         ServerLevel level,
         AtmosphereGrid<ResourceKey<Level>> materialGrid,
         AtmosphereGrid.CellKey<ResourceKey<Level>> key,
         ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacityAt
     ) {
-        if (level == null) return;
+        if (level == null) return 0;
         var cell = materialGrid.get(key);
-        if (cell == null) return;
+        if (cell == null) return 0;
         int loss = HeavyGasDissipation.amount(cell.amount(), tuning().heavyGas().dissipationFactor(), level.random::nextDouble);
         if (loss > 0) {
             materialGrid.set(key, cell.amount() - loss, serverTicks, capacityAt.applyAsInt(key));
         }
+        return loss;
     }
 
     DustGameplay dustGameplay() { return dustGameplay; }

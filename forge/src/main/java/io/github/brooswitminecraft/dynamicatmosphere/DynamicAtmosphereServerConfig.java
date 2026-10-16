@@ -82,8 +82,10 @@ public final class DynamicAtmosphereServerConfig {
 
     private static final IntOption SLIME_UNDERGROUND;
     private static final IntOption SLIME_UNDERGROUND_DENOMINATOR;
-    private static final IntOption SLIME_SPAWN_DENOMINATOR;
-    private static final IntOption SLIME_SPAWN_ATTEMPTS;
+    private static final IntOption SLIME_DISSIPATION_SPAWN_DENOMINATOR;
+    private static final IntOption SLIME_DISSIPATION_SPAWN_ATTEMPTS;
+    private static final DoubleOption SLIME_MEDIUM_DENSITY_THRESHOLD;
+    private static final DoubleOption SLIME_BIG_DENSITY_THRESHOLD;
 
     private static final DoubleOption HEAVY_GAS_DISSIPATION_FACTOR;
 
@@ -198,10 +200,21 @@ public final class DynamicAtmosphereServerConfig {
         builder.pop();
 
         builder.push("slime");
+        // No worldRestart/gameRestart marker is applied in this section: NeoForge's default is RestartType.NONE.
         SLIME_UNDERGROUND = integer(builder, "undergroundEmission", 64, 0, 1_000_000);
         SLIME_UNDERGROUND_DENOMINATOR = integer(builder, "undergroundChanceDenominator", 1, 1, 1_000_000);
-        SLIME_SPAWN_DENOMINATOR = integer(builder, "spawnChanceDenominator", 32, 1, 1_000_000);
-        SLIME_SPAWN_ATTEMPTS = integer(builder, "spawnAttempts", 8, 1, 1024);
+        builder.comment("Chance, as 1/denominator, that a Slime spawns when a cell actually loses material to",
+            "heavyGas dissipation (MINECRAFT-18; replaces the removed consumption-driven spawn).");
+        SLIME_DISSIPATION_SPAWN_DENOMINATOR = integer(builder, "dissipationSpawnChanceDenominator", 32, 1, 1_000_000);
+        builder.comment("Loaded-only spawn-position attempts tried per dissipation-triggered spawn roll.");
+        SLIME_DISSIPATION_SPAWN_ATTEMPTS = integer(builder, "dissipationSpawnAttempts", 8, 1, 1024);
+        builder.comment("Local amount/capacity density, at the point of dissipation, at or above which the",
+            "spawned slime is medium (size 2) instead of small (size 1).");
+        SLIME_MEDIUM_DENSITY_THRESHOLD = decimal(builder, "mediumDensityThreshold", 0.25, 0, 1);
+        builder.comment("Local amount/capacity density, at the point of dissipation, at or above which the",
+            "spawned slime is big (size 4) instead of medium. Must be configured at or above",
+            "mediumDensityThreshold to behave as intended; this is not cross-validated.");
+        SLIME_BIG_DENSITY_THRESHOLD = decimal(builder, "bigDensityThreshold", 0.75, 0, 1);
         builder.pop();
 
         builder.push("heavyGas");
@@ -291,7 +304,8 @@ public final class DynamicAtmosphereServerConfig {
                 EXHAUST_MIN_FULLNESS.get(), EXHAUST_MAX_FULLNESS.get(), EXHAUST_MIN_DAMAGE.get(),
                 EXHAUST_MAX_DAMAGE.get(), EXHAUST_MIN_COST.get(), EXHAUST_MAX_COST.get()),
             new Slime(SLIME_UNDERGROUND.get(), SLIME_UNDERGROUND_DENOMINATOR.get(),
-                SLIME_SPAWN_DENOMINATOR.get(), SLIME_SPAWN_ATTEMPTS.get()),
+                SLIME_DISSIPATION_SPAWN_DENOMINATOR.get(), SLIME_DISSIPATION_SPAWN_ATTEMPTS.get(),
+                SLIME_MEDIUM_DENSITY_THRESHOLD.get(), SLIME_BIG_DENSITY_THRESHOLD.get()),
             new ObsidianPowder(ENDER_MOB.get(), ENDER_PORTAL.get(), OBSIDIAN_PASSIVE.get(), OBSIDIAN_BLOCK.get(),
                 CRYING_OBSIDIAN.get(), ENDER_PEARL_USE.get(),
                 ENDER_PEARL_IMPACT.get(), ENDER_MOB_INTERVAL.get(),
@@ -380,7 +394,8 @@ public final class DynamicAtmosphereServerConfig {
                           double suffocationMaxDamage, double suffocationMinCostFraction,
                           double suffocationMaxCostFraction) { }
     public record Slime(int undergroundEmission, int undergroundChanceDenominator,
-                        int spawnChanceDenominator, int spawnAttempts) { }
+                        int dissipationSpawnChanceDenominator, int dissipationSpawnAttempts,
+                        double mediumDensityThreshold, double bigDensityThreshold) { }
     public record ObsidianPowder(int mobEmission, int portalOccupantEmission, int passiveBlockEmission,
                                  int obsidianBlockEmission, int cryingObsidianEmission,
                            int pearlUseEmission, int pearlImpactEmission,
