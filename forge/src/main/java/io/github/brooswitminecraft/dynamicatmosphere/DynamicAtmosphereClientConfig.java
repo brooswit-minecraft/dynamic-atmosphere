@@ -24,6 +24,7 @@ public final class DynamicAtmosphereClientConfig {
     private static final DoubleOption SLIME_DENSITY;
     private static final DoubleOption OBSIDIAN_POWDER_DENSITY;
     private static final DoubleOption GLOW_GAS_DENSITY;
+    private static final DoubleOption NETHER_FOG_DENSITY;
 
     private static final IntOption CELL_BUDGET;
     private static volatile Snapshot cached;
@@ -57,6 +58,8 @@ public final class DynamicAtmosphereClientConfig {
         // MINECRAFT-1 (B2): 2x Vapor's optical density (see the catalog default in AtmosphericMaterials).
         // The renderer reads this client-config value, not the catalog field -- both must match.
         GLOW_GAS_DENSITY = decimal(builder, "glowGasOpticalDensity", 2, 0, 1000);
+        // MINECRAFT-1 (B3): vapor-like default; see the catalog default in AtmosphericMaterials.
+        NETHER_FOG_DENSITY = decimal(builder, "netherFogOpticalDensity", 1, 0, 1000);
         builder.pop();
 
         builder.push("allocation");
@@ -90,6 +93,7 @@ public final class DynamicAtmosphereClientConfig {
             new Material(SLIME_DENSITY.get()),
             new Material(OBSIDIAN_POWDER_DENSITY.get()),
             new Material(GLOW_GAS_DENSITY.get()),
+            new Material(NETHER_FOG_DENSITY.get()),
             new Allocation(CELL_BUDGET.get())
         );
     }
@@ -159,7 +163,8 @@ public final class DynamicAtmosphereClientConfig {
                            double maxDistanceMultiplier, double fadeStartFraction,
                            Material vapor, Material smoke,
                            Material dust, Material voidGas, Material exhaust, Material slime,
-                           Material obsidianPowder, Material glowGas, Allocation allocation) { }
+                           Material obsidianPowder, Material glowGas, Material netherFog,
+                           Allocation allocation) { }
     public record Material(double opticalDensity) { }
     public record Allocation(int cellBudget) { }
 
