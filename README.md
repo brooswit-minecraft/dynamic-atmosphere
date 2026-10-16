@@ -231,6 +231,22 @@ not fired for a Nether Fog harvest. Known physics: gas cannot move down out of
 a cell containing fluid, so Nether Fog pools on the surface of a Nether lava
 sea rather than reaching the bedrock beneath it -- accepted, not a bug.
 
+Ender Gas (Obsidian Powder) gains a third, End-only production path
+(MINECRAFT-1 B4): near the dimension's build-height ceiling, a 10%-by-default
+chunk gate (`obsidianPowder.endGateChance`) mirrors Vapor's own producer
+pattern before emitting `obsidianPowder.endEmission` (default 200) per loaded
+End chunk per pass. At high fullness, a dense Ender Gas cell in the End
+occasionally condenses into **End Sand** -- the mod's first registered block
+and item (`dynamicatmosphere:end_sand`, ID frozen: renaming it later is
+breaking for sickos). End Sand rises one block every
+`endSand.riseIntervalTicks` (default 20) ticks; when something blocks the
+block above, it simply stops rising and resumes the moment that's no longer
+true, and is deleted outright rather than placed if a rise would cross the
+dimension's build-height ceiling. It's mineable and drops itself. Player-placed
+End Sand rises exactly the same way as condensed End Sand -- both go through
+the same placement hook. The block's current texture is a flat placeholder
+purple; real block art is a follow-up.
+
 Intervals are scheduled game ticks, subject to bounded work queues, not guaranteed
 wall-clock completion. Scheduled producer passes share a 300-tick cadence. All
 materials have a configurable 75% due-check skip; Vapor retains condensation.

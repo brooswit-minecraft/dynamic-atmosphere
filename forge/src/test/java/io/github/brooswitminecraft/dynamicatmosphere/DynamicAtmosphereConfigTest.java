@@ -144,6 +144,17 @@ class DynamicAtmosphereConfigTest {
     }
 
     @Test
+    void endSandAndEndOnlyEnderGasServerConfigDefaultsMatchTheEpicSpec() {
+        var snapshot = DynamicAtmosphereServerConfig.snapshot();
+        // MINECRAFT-1 (B4): End-only Ender Gas (Obsidian Powder) production and condensation.
+        assertEquals(200, snapshot.obsidianPowder().endEmission());
+        assertEquals(0.10, snapshot.obsidianPowder().endGateChance());
+        assertEquals(0.10, snapshot.obsidianPowder().endSandCondensationChance());
+        // End Sand's own rise interval -- read by the registered block, not simulation code.
+        assertEquals(20, snapshot.endSand().riseIntervalTicks());
+    }
+
+    @Test
     void oldPerMaterialReachKeysAreNoLongerDefined() {
         var names = DynamicAtmosphereClientConfig.SPEC.getValues().valueMap().keySet().stream()
             .map(Object::toString).collect(java.util.stream.Collectors.toSet());

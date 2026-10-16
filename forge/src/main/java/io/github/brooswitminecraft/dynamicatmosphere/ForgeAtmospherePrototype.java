@@ -127,6 +127,7 @@ final class ForgeAtmospherePrototype {
 
     ForgeAtmospherePrototype() {
         registerMaterialProducer(AtmosphereMaterial.OBSIDIAN_POWDER, this::sampleObsidianPowderChunk);
+        registerMaterialProducer(AtmosphereMaterial.OBSIDIAN_POWDER, this::sampleEndEnderGasChunk);
         registerMaterialProducer(AtmosphereMaterial.VOID_GAS, (level, chunk) -> {
             voidGasGameplay.onLoadedChunkProducerCheck(level, chunk);
             int x = chunk.getPos().getMinBlockX() + level.random.nextInt(16);
@@ -765,6 +766,73 @@ final class ForgeAtmospherePrototype {
         return true;
     }
 
+    /**
+     * MINECRAFT-1 (B4): End only, near the dimension's build-height ceiling. A chunk gate
+     * mirrors Vapor's own producerChance; the fixed near-the-top Y mirrors Void Gas's own
+     * literal world-bottom producer convention.
+     */
+    private void sampleEndEnderGasChunk(ServerLevel level, LevelChunk chunk) {
+        if (level.dimension() != Level.END) return;
+        var config = DynamicAtmosphereServerConfig.snapshot().obsidianPowder();
+        if (!AtmosphereProducerSchedule.passesChance(config.endGateChance(), level.random.nextDouble())) return;
+        int x = chunk.getPos().getMinBlockX() + level.random.nextInt(16);
+        int z = chunk.getPos().getMinBlockZ() + level.random.nextInt(16);
+        BlockPos pos = new BlockPos(x, level.getMaxBuildHeight() - 1, z);
+        emitMaterial(level, AtmosphereMaterial.OBSIDIAN_POWDER, pos, config.endEmission());
+    }
+
+    /**
+     * MINECRAFT-1 (B4): End only. At high fullness, a dense Ender Gas cell occasionally
+     * condenses into an End Sand block at a reservoir-sampled air position in the cell; the
+     * placed block schedules its own first rise tick the same way a player placement would
+     * (EndSandBlock.onPlace), so condensed and player-placed End Sand behave identically.
+     */
+    private boolean condenseEndSand(
+        ServerLevel level,
+        AtmosphereGrid<ResourceKey<Level>> materialGrid,
+        AtmosphereGrid.CellKey<ResourceKey<Level>> key,
+        ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacityAt
+    ) {
+        if (level == null || level.dimension() != Level.END) return false;
+        var cell = materialGrid.get(key);
+        int capacity = capacityAt.applyAsInt(key);
+        if (cell == null || capacity <= 0) return false;
+        if (!AtmosphereCondensation.shouldCondense(cell.amount(), capacity, level.random.nextDouble(),
+            DynamicAtmosphereServerConfig.snapshot().obsidianPowder().endSandCondensationChance())) {
+            return false;
+        }
+
+        int size = AtmosphereMaterial.OBSIDIAN_POWDER.cellSize();
+        BlockPos origin = materialCellOrigin(AtmosphereMaterial.OBSIDIAN_POWDER, key);
+        if (!level.hasChunkAt(origin)) return false;
+        // Vanilla placement notifies neighboring blocks; defer at unloaded edges.
+        for (int dx = -16; dx <= 16; dx += 16) {
+            for (int dz = -16; dz <= 16; dz += 16) {
+                if (!level.hasChunkAt(origin.offset(dx, 0, dz))) return false;
+            }
+        }
+        BlockPos chosen = null;
+        int airBlocks = 0;
+        BlockPos.MutableBlockPos probe = new BlockPos.MutableBlockPos();
+        // Reservoir sampling chooses uniformly among air blocks without allocating a list.
+        for (int x = 0; x < size; x++) {
+            for (int y = 0; y < size; y++) {
+                for (int z = 0; z < size; z++) {
+                    probe.set(origin.getX() + x, origin.getY() + y, origin.getZ() + z);
+                    if (!level.isOutsideBuildHeight(probe) && level.getBlockState(probe).isAir()
+                        && level.random.nextInt(++airBlocks) == 0) chosen = probe.immutable();
+                }
+            }
+        }
+        if (chosen == null
+            || !level.setBlockAndUpdate(chosen, DynamicAtmosphereRegistry.END_SAND_BLOCK.get().defaultBlockState())) {
+            return false;
+        }
+        int consumed = AtmosphereCondensation.consumedAmount(cell.amount());
+        materialGrid.set(key, cell.amount() - consumed, serverTicks, capacityAt.applyAsInt(key));
+        return true;
+    }
+
     private boolean isMaterialProducerChunkActive(
         MinecraftServer server, ChunkKey key, AtmosphereMaterial material
     ) {
@@ -984,6 +1052,9 @@ final class ForgeAtmospherePrototype {
                 }
                 if (material == AtmosphereMaterial.OBSIDIAN_POWDER) {
                     dissipateHeavyGas(cellLevel, materialGrid, key, capacityAt);
+                    if (condenseEndSand(cellLevel, materialGrid, key, capacityAt)) {
+                        capacities.clear();
+                    }
                 }
                 if (material == AtmosphereMaterial.EXHAUST) {
                     int size = material.cellSize();
