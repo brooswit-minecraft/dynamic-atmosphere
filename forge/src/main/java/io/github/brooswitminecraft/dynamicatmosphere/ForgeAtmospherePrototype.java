@@ -335,13 +335,113 @@ final class ForgeAtmospherePrototype {
         materialSyncPlanners.values().forEach(SmokeSyncPlanner::clear);
     }
 
-    private void registerCommands(CommandDispatcher<CommandSourceStack> dispatcher) {
+    // Package-visible so the disposable command-tree fixture tests cover the
+    // actual Brigadier wiring, rather than a parallel helper representation.
+    void registerCommands(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(Commands.literal("dynamicatmosphere")
-            .requires(source -> source.hasPermission(2))
+            .requires(source -> source.hasPermission(AtmosphericDumpSafety.REQUIRED_PERMISSION_LEVEL))
             .then(Commands.literal("status").executes(context -> status(context.getSource())))
             .then(Commands.literal("demo").executes(context -> demo(context.getSource())))
+            .then(Commands.literal("delete-material-data")
+                .executes(context -> explainDeleteMaterialData(context.getSource()))
+                .then(Commands.literal(AtmosphericDumpSafety.CONFIRM_LITERAL)
+                    .executes(context -> deleteLoadedMaterialData(context.getSource()))))
             .then(Commands.literal("smoke")
                 .then(Commands.literal("status").executes(context -> smokeStatus(context.getSource())))));
+    }
+
+    /**
+     * This deliberately requires a second, literal confirmation.  The command is
+     * temporary operational tooling, so its first invocation must never mutate a
+     * world merely because a console operator pasted the command root.
+     */
+    private int explainDeleteMaterialData(CommandSourceStack source) {
+        source.sendSuccess(() -> Component.literal(AtmosphericDumpSafety.confirmationMessage()), false);
+        return 0;
+    }
+
+    /**
+     * Safely removes data the mod has already imported from loaded chunks.  NeoForge
+     * exposes attachments through a ChunkAccess only; it has no public region scan
+     * API for unloaded chunks.  Do not substitute raw region-file mutation here: it
+     * would risk overwriting unrelated or unreadable payloads.
+     */
+    private int deleteLoadedMaterialData(CommandSourceStack source) {
+        var dimensionedTargets = new ArrayList<Map.Entry<ResourceKey<Level>, AtmosphericDumpSafety.LoadedChunkTarget>>();
+        for (var entry : chunks.entrySet()) {
+            ChunkKey key = entry.getKey();
+            ChunkState state = entry.getValue();
+            ServerLevel level = source.getServer().getLevel(key.dimension());
+            if (level == null || level.getChunkSource().getChunkNow(key.x(), key.z()) != state.chunk) {
+                continue;
+            }
+            dimensionedTargets.add(Map.entry(key.dimension(), toLoadedChunkTarget(state)));
+        }
+        Map<ResourceKey<Level>, DumpReport> report =
+            AtmosphericDumpSafety.cleanLoadedChunksByDimension(dimensionedTargets);
+
+        AtmosphericDumpSafety.clearRuntimeState(
+            pendingLoads::clear,
+            producerSchedule::clear,
+            fanSchedule::clear,
+            smokeProducerSchedule::clear,
+            () -> materialProducerSchedules.values().forEach(AtmosphereProducerSchedule::clear),
+            syncPlanner::clear,
+            smokeSyncPlanner::clear,
+            () -> materialSyncPlanners.values().forEach(SmokeSyncPlanner::clear));
+
+        source.sendSuccess(() -> Component.literal(
+            "Deleted loaded Dynamic Atmosphere data only: " + formatDumpReport(report)
+                + ". Unloaded persisted chunk attachments were NOT scanned or deleted: "
+                + "NeoForge's supported attachment API requires an already-loaded ChunkAccess; "
+                + "no raw region files were modified."), true);
+        return 1;
+    }
+
+    private AtmosphericDumpSafety.LoadedChunkTarget toLoadedChunkTarget(ChunkState state) {
+        return new AtmosphericDumpSafety.LoadedChunkTarget() {
+            public boolean vaporReadable() { return state.readable; }
+            public int deleteVapor() {
+                int cells = state.cells.size();
+                ForgeAtmosphereStorage.write(state.chunk, List.of());
+                state.cells.keySet().forEach(grid::remove);
+                state.cells.clear();
+                return cells;
+            }
+            public boolean smokeReadable() { return state.smokeReadable; }
+            public int deleteSmoke() {
+                int cells = state.smokeCells.size();
+                ForgeSmokeStorage.write(state.chunk, List.of());
+                state.smokeCells.keySet().forEach(smokeGrid::remove);
+                state.smokeCells.clear();
+                return cells;
+            }
+            public boolean materialReadable(AtmosphereMaterial material) { return state.materialReadable.contains(material); }
+            public int deleteMaterial(AtmosphereMaterial material) {
+                var cells = state.materialCells.get(material);
+                int count = cells.size();
+                ForgeMaterialStorage.write(state.chunk, material, List.of());
+                cells.keySet().forEach(materialGrids.get(material)::remove);
+                cells.clear();
+                return count;
+            }
+            public void clearCapacities() {
+                ForgeAtmosphereCapacity.clear(state.chunk);
+                ForgeSmokeCapacity.clear(state.chunk);
+                ForgeMaterialCapacity.clear(state.chunk);
+            }
+        };
+    }
+
+    static String formatDumpReport(Map<ResourceKey<Level>, DumpReport> report) {
+        if (report.isEmpty()) return "no loaded Dynamic Atmosphere chunks";
+        return report.entrySet().stream()
+            .sorted(Map.Entry.comparingByKey(Comparator.comparing(key -> key.location().toString())))
+            .map(entry -> entry.getKey().location() + " {vapor=" + entry.getValue().vapor
+                + ", smoke=" + entry.getValue().smoke
+                + ", materials=" + entry.getValue().materials
+                + ", unreadableSkipped=" + entry.getValue().unreadable + "}")
+            .reduce((left, right) -> left + "; " + right).orElseThrow();
     }
 
     private int status(CommandSourceStack source) {
@@ -1706,6 +1806,13 @@ final class ForgeAtmospherePrototype {
     }
 
     private record ChunkKey(ResourceKey<Level> dimension, int x, int z) {
+    }
+
+    static final class DumpReport {
+        int vapor;
+        int smoke;
+        int unreadable;
+        final Map<AtmosphereMaterial, Integer> materials = new EnumMap<>(AtmosphereMaterial.class);
     }
 
     private static final class ChunkState {
