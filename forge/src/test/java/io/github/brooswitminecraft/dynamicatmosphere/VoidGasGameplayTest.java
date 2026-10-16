@@ -23,23 +23,22 @@ class VoidGasGameplayTest {
 
     @Test
     void tenThroughTwentyFivePercentReadiesVillagerForFivePercentCurrentCost() {
-        var atTen = VoidGasGameplay.effectFor(100, 1_000, 1);
-        var atTwentyFive = VoidGasGameplay.effectFor(250, 1_000, 1);
+        var atTen = VoidGasGameplay.effectFor(100, 1_000);
+        var atTwentyFive = VoidGasGameplay.effectFor(250, 1_000);
         assertTrue(atTen.villagerBand());
         assertEquals(5, atTen.cost());
         assertTrue(atTwentyFive.villagerBand());
         assertEquals(13, atTwentyFive.cost());
-        assertEquals(VoidGasGameplay.CellEffect.NONE, VoidGasGameplay.effectFor(99, 1_000, 0));
-        assertEquals(VoidGasGameplay.CellEffect.NONE, VoidGasGameplay.effectFor(251, 1_000, 1));
+        assertEquals(VoidGasGameplay.CellEffect.NONE, VoidGasGameplay.effectFor(99, 1_000));
+        assertEquals(VoidGasGameplay.CellEffect.NONE, VoidGasGameplay.effectFor(251, 1_000));
     }
 
     @Test
-    void highDensitySpawnIsChanceGatedAndHasFiniteQuarterCapacityCost() {
-        var spawn = VoidGasGameplay.effectFor(750, 1_000, 0);
-        assertTrue(spawn.spawnZombie());
-        assertEquals(250, spawn.cost());
-        assertEquals(VoidGasGameplay.CellEffect.NONE, VoidGasGameplay.effectFor(749, 1_000, 0));
-        assertEquals(VoidGasGameplay.CellEffect.NONE, VoidGasGameplay.effectFor(750, 1_000, 1));
-        assertEquals(VoidGasGameplay.CellEffect.NONE, VoidGasGameplay.effectFor(100, 0, 0));
+    void highFullnessNoLongerProducesAnEffect() {
+        // MINECRAFT-17: the consumption-driven zombie spawn above 75% fullness is removed.
+        // A full cell now only affects VaporHostileSpawnGate surface-spawn eligibility.
+        assertEquals(VoidGasGameplay.CellEffect.NONE, VoidGasGameplay.effectFor(750, 1_000));
+        assertEquals(VoidGasGameplay.CellEffect.NONE, VoidGasGameplay.effectFor(1_000, 1_000));
+        assertEquals(VoidGasGameplay.CellEffect.NONE, VoidGasGameplay.effectFor(100, 0));
     }
 }

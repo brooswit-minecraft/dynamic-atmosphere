@@ -66,8 +66,6 @@ public final class DynamicAtmosphereServerConfig {
     private static final IntOption VOID_GAS_NETHERRACK;
     private static final IntOption VOID_GAS_BOTTOM;
     private static final IntOption VOID_GAS_BOTTOM_DENOMINATOR;
-    private static final IntOption VOID_GAS_SPAWN_DENOMINATOR;
-    private static final IntOption VOID_GAS_SPAWN_ATTEMPTS;
     private static final IntOption VOID_GAS_BREAD;
 
     private static final IntOption EXHAUST_PASSIVE;
@@ -182,8 +180,6 @@ public final class DynamicAtmosphereServerConfig {
         VOID_GAS_NETHERRACK = integer(builder, "netherrackEmission", 16, 0, 1_000_000);
         VOID_GAS_BOTTOM = integer(builder, "bottomEmission", 64, 0, 1_000_000);
         VOID_GAS_BOTTOM_DENOMINATOR = integer(builder, "bottomChanceDenominator", 1, 1, 1_000_000);
-        VOID_GAS_SPAWN_DENOMINATOR = integer(builder, "spawnChanceDenominator", 32, 1, 1_000_000);
-        VOID_GAS_SPAWN_ATTEMPTS = integer(builder, "spawnAttempts", 8, 1, 1024);
         VOID_GAS_BREAD = integer(builder, "breedingBread", 3, 0, 64);
         builder.pop();
 
@@ -289,8 +285,7 @@ public final class DynamicAtmosphereServerConfig {
                 DUST_WALK_INTERVAL.get(), DUST_RUN_INTERVAL.get(), FALLING_BLOCK.get(), GRAVEL_CHANCE.get(),
                 DUST_DISSIPATION_CHANCE.get(), DUST_DISSIPATION_AMOUNT.get()),
             new VoidGas(VOID_GAS_HOSTILE_DEATH.get(), VOID_GAS_NETHERRACK.get(), VOID_GAS_BOTTOM.get(),
-                VOID_GAS_BOTTOM_DENOMINATOR.get(), VOID_GAS_SPAWN_DENOMINATOR.get(),
-                VOID_GAS_SPAWN_ATTEMPTS.get(), VOID_GAS_BREAD.get()),
+                VOID_GAS_BOTTOM_DENOMINATOR.get(), VOID_GAS_BREAD.get()),
             new Exhaust(EXHAUST_PASSIVE.get(), EXHAUST_LIVING_DENOMINATOR.get(),
                 EXHAUST_CREEPER_DENOMINATOR.get(), EXHAUST_DAMAGE_PER_POINT.get(), EXHAUST_DAMAGE_MAX.get(),
                 EXHAUST_MIN_FULLNESS.get(), EXHAUST_MAX_FULLNESS.get(), EXHAUST_MIN_DAMAGE.get(),
@@ -378,8 +373,7 @@ public final class DynamicAtmosphereServerConfig {
                        int runIntervalTicks, int fallingBlockEmission, double gravelChance,
                        double dissipationChance, int dissipationAmount) { }
     public record VoidGas(int hostileDeathEmission, int netherrackEmission, int bottomEmission,
-                          int bottomChanceDenominator, int spawnChanceDenominator,
-                          int spawnAttempts, int breedingBread) { }
+                          int bottomChanceDenominator, int breedingBread) { }
     public record Exhaust(int passiveEmission, int livingChanceDenominator, int creeperChanceDenominator,
                           int damageEmissionPerPoint, int maxDamageEmission, double suffocationMinFullness,
                           double suffocationMaxFullness, double suffocationMinDamage,

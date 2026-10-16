@@ -8,10 +8,12 @@ import net.neoforged.neoforge.event.entity.living.MobSpawnEvent;
 
 /**
  * Denies hostile spawning without qualifying overhead terrain unless the local vapor cell is
- * strictly more than half full. Overworld only: Vapor does not gate Nether or
- * End monster spawns. Applies uniformly to every monster-category entity
- * type, including Endermen — there is no per-entity-type carve-out. This
- * gate never consumes vapor and never forces a chunk load. Commands, eggs,
+ * strictly more than half full, or (MINECRAFT-17/ATMO-22) a sufficiently full Void Gas cell
+ * makes the position eligible the same way. Overworld only, for both materials: per Brooswit's
+ * explicit product decision on MINECRAFT-17 PR #60, Void Gas eligibility does not extend to
+ * other dimensions, and there is no configurable or broader option. Applies uniformly to every
+ * monster-category entity type, including Endermen -- there is no per-entity-type carve-out.
+ * This gate never consumes vapor or Void Gas and never forces a chunk load. Commands, eggs,
  * spawners, and underground spawning retain their normal behavior.
  */
 public final class VaporHostileSpawnGate {
@@ -26,28 +28,32 @@ public final class VaporHostileSpawnGate {
         MobCategory category,
         boolean overworld,
         boolean qualifyingTerrainAbove,
-        boolean vaporMoreThanHalfFull
+        boolean denseAtmosphere
     ) {
         if (!overworld || !appliesTo(spawnType, category) || qualifyingTerrainAbove) {
             return Decision.PASS_THROUGH;
         }
-        return vaporMoreThanHalfFull ? Decision.PASS_THROUGH : Decision.DENY;
+        return denseAtmosphere ? Decision.PASS_THROUGH : Decision.DENY;
     }
 
     /**
      * Same decision, keyed by entity type rather than category. Lets tests exercise the exact
      * entity type an event carries (e.g. {@code EntityType.ENDERMAN}) and confirm it collapses
-     * to the same category-based decision as any other monster — no entity type is special-cased.
+     * to the same category-based decision as any other monster -- no entity type is special-cased.
      */
     static Decision evaluate(
         MobSpawnType spawnType,
         EntityType<?> entityType,
         boolean overworld,
         boolean qualifyingTerrainAbove,
-        boolean vaporMoreThanHalfFull
+        boolean denseAtmosphere
     ) {
-        return evaluate(
-            spawnType, entityType.getCategory(), overworld, qualifyingTerrainAbove, vaporMoreThanHalfFull);
+        return evaluate(spawnType, entityType.getCategory(), overworld, qualifyingTerrainAbove, denseAtmosphere);
+    }
+
+    /** True if either material alone would satisfy the gate's "dense enough" bar. */
+    static boolean denseAtmosphere(boolean vaporMoreThanHalfFull, boolean voidGasMoreThanHalfFull) {
+        return vaporMoreThanHalfFull || voidGasMoreThanHalfFull;
     }
 
     public static void onSpawnPlacementCheck(MobSpawnEvent.SpawnPlacementCheck event) {
@@ -64,9 +70,10 @@ public final class VaporHostileSpawnGate {
 
         var pos = event.getPos();
         boolean qualifyingTerrainAbove = VaporOverheadTerrain.hasQualifyingTerrainAbove(level, pos);
-        boolean vaporMoreThanHalfFull = !qualifyingTerrainAbove
-            && DynamicAtmosphereMod.isVaporMoreThanHalfFull(level, pos);
-        if (evaluate(spawnType, entityType, true, qualifyingTerrainAbove, vaporMoreThanHalfFull) == Decision.DENY) {
+        boolean denseAtmosphere = !qualifyingTerrainAbove && denseAtmosphere(
+            DynamicAtmosphereMod.isVaporMoreThanHalfFull(level, pos),
+            DynamicAtmosphereMod.isMaterialMoreThanHalfFull(level, AtmosphereMaterial.VOID_GAS, pos));
+        if (evaluate(spawnType, entityType, true, qualifyingTerrainAbove, denseAtmosphere) == Decision.DENY) {
             event.setResult(MobSpawnEvent.SpawnPlacementCheck.Result.FAIL);
         }
     }
