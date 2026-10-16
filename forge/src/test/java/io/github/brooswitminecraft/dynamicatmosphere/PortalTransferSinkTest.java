@@ -75,4 +75,39 @@ class PortalTransferSinkTest {
         assertEquals(10, PortalTransferSink.plan(10, 64, true).amount());
         assertEquals(64, PortalTransferSink.plan(1000, 64, true).amount());
     }
+
+    @Test
+    void filterStaleKeepsOnlyCandidatesThePredicateAcceptsInjectedAdapter() {
+        var destroyedButLoaded = new BlockPos(1, 64, 1);
+        var stillValidAndLoaded = new BlockPos(2, 64, 2);
+        var unloadedUnverifiable = new BlockPos(3, 64, 3);
+        // Fake adapter: "loaded" positions are verified directly; an unloaded one can't be
+        // checked without forcing a load, so filterStale must trust it (keep it) regardless.
+        var loadedAndValid = java.util.Set.of(stillValidAndLoaded);
+        var loadedPositions = java.util.Set.of(destroyedButLoaded, stillValidAndLoaded);
+        var kept = PortalTransferSink.filterStale(
+            List.of(destroyedButLoaded, stillValidAndLoaded, unloadedUnverifiable),
+            pos -> !loadedPositions.contains(pos) || loadedAndValid.contains(pos));
+        assertEquals(java.util.Set.of(stillValidAndLoaded, unloadedUnverifiable), java.util.Set.copyOf(kept));
+    }
+
+    @Test
+    void filterStaleDropsNothingWhenEveryCandidatePassesThePredicate() {
+        var a = new BlockPos(1, 64, 1);
+        var b = new BlockPos(2, 64, 2);
+        assertEquals(java.util.Set.of(a, b), java.util.Set.copyOf(PortalTransferSink.filterStale(List.of(a, b), pos -> true)));
+    }
+
+    @Test
+    void acceptedAmountMeasuresTheDestinationsOwnBeforeAfterDeltaNotThePlannedAmount() {
+        // A near-full destination can clamp an emit short of what was requested while
+        // DynamicAtmosphereMod#emitMaterial still reports success for the partial addition.
+        assertEquals(10, PortalTransferSink.acceptedAmount(990, 1000));
+        assertEquals(0, PortalTransferSink.acceptedAmount(1000, 1000));
+    }
+
+    @Test
+    void acceptedAmountNeverGoesNegativeEvenIfSomethingElseDrainedTheCellConcurrently() {
+        assertEquals(0, PortalTransferSink.acceptedAmount(1000, 400));
+    }
 }

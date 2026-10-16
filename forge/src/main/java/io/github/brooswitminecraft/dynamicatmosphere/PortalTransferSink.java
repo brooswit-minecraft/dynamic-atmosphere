@@ -8,6 +8,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 
 import java.util.Collection;
@@ -16,6 +17,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Predicate;
 
 /**
  * Phase 4 (design brief section 32): "A Transfer Sink consumes material locally but does
@@ -44,15 +46,26 @@ import java.util.Set;
  * <p><b>Verified destinations, never a forced load:</b> this class remembers every portal
  * block position its own loaded-chunk scan has observed, per dimension, replacing each chunk's
  * remembered positions whenever that chunk is rescanned (so a destroyed portal falls out of the
- * cache the next time its chunk is visited). A transfer only proceeds against a position this
- * cache already contains -- never a freshly computed/guessed one, and never one that requires
- * loading or generating anything. {@link DynamicAtmosphereMod#emitMaterial} also independently
- * only succeeds against an already-loaded, already-tracked destination chunk, so an unreachable
- * destination simply fails the emit for this pass. The source is only debited after a successful
- * emit, so a declined or failed transfer never destroys material -- it is retried on a later
- * producer pass instead. A portal links two independently simulated regions; nothing here forces
- * either one to stay active just because the other is (design brief section 50's "ONE THING TO
- * WATCH").</p>
+ * cache the next time its chunk is visited). That alone still leaves a window: a portal destroyed
+ * in a still-loaded chunk stays cached until that chunk's own next scheduled scan. So before
+ * selecting a candidate, any one of them whose chunk is CURRENTLY loaded is re-checked live
+ * against the expected block right now ({@link #liveCandidates}) -- a candidate only survives
+ * that check if it is still the expected portal block, or if its chunk isn't loaded at all (and
+ * therefore can't be verified without forcing a load, so it is trusted from the cache instead).
+ * A transfer only proceeds against a surviving position -- never a freshly computed/guessed one,
+ * and never one that requires loading or generating anything.</p>
+ *
+ * <p><b>Conservation under a partial/clamped emit:</b> {@link DynamicAtmosphereMod#emitMaterial}
+ * returns a boolean, but the underlying grid can clamp an emit short of what was requested while
+ * still reporting success (e.g. a near-full destination). The actual accepted amount is therefore
+ * measured from the destination's own before/after state ({@link #acceptedAmount}), and only that
+ * much is ever debited from the source -- never the full planned amount regardless of what
+ * actually landed. If the source debit itself then fails, the accepted amount is rolled back out
+ * of the destination so material is never duplicated. An unreachable destination (chunk not
+ * already loaded/tracked) simply fails the emit for this pass, so a declined or failed transfer
+ * never destroys material either -- it is retried on a later producer pass instead. A portal links
+ * two independently simulated regions; nothing here forces either one to stay active just because
+ * the other is (design brief section 50's "ONE THING TO WATCH").</p>
  */
 public final class PortalTransferSink {
     static final int NETHER_PORTAL_COORDINATE_SCALE = 8;
@@ -150,6 +163,31 @@ public final class PortalTransferSink {
     }
 
     /**
+     * Pure, injectable filter dropping a candidate only when {@code isPlausible} says it can no
+     * longer be trusted (verified, via an already-loaded chunk, to no longer be the expected
+     * portal block). A candidate in a chunk that is not currently loaded cannot be verified
+     * without forcing a load, so it stays -- same "no-force-load" rule as everywhere else here.
+     */
+    static Collection<BlockPos> filterStale(Collection<BlockPos> candidates, Predicate<BlockPos> isPlausible) {
+        return candidates.stream().filter(isPlausible).toList();
+    }
+
+    /**
+     * Drops a known position only when its chunk is CURRENTLY loaded and the live block there no
+     * longer matches {@code expected}. Never forces a load to check -- an unloaded candidate is
+     * kept (unverifiable, trusted from the cache) rather than forced to resolve.
+     */
+    private Collection<BlockPos> liveCandidates(
+        ServerLevel destinationLevel, Collection<BlockPos> candidates, Predicate<BlockState> expected
+    ) {
+        return filterStale(candidates, pos -> {
+            ChunkPos chunkPos = new ChunkPos(pos);
+            LevelChunk chunk = destinationLevel.getChunkSource().getChunkNow(chunkPos.x, chunkPos.z);
+            return chunk == null || expected.test(chunk.getBlockState(pos));
+        });
+    }
+
+    /**
      * Pure transfer sizing, so source conservation is unit-testable without a live level:
      * nothing is planned when the source is empty, the throughput is non-positive, or no
      * destination was resolved -- the caller must then leave the source untouched.
@@ -165,6 +203,16 @@ public final class PortalTransferSink {
         return new TransferPlan(Math.min(sourceAmount, throughput));
     }
 
+    /**
+     * Pure, so partial/clamped-emit conservation is unit-testable without a live level: the
+     * destination grid can clamp an emit short of what was requested while still reporting
+     * success, so the actual amount accepted is measured from the destination's own before/after
+     * state rather than assumed to equal the planned amount.
+     */
+    static int acceptedAmount(int destinationBefore, int destinationAfter) {
+        return Math.max(0, destinationAfter - destinationBefore);
+    }
+
     private void transferNetherPortal(MinecraftServer server, ServerLevel level, BlockPos pos, int throughput) {
         ResourceKey<Level> destinationDimension;
         BlockPos anchor;
@@ -177,32 +225,48 @@ public final class PortalTransferSink {
         } else {
             return;
         }
-        Optional<BlockPos> destination = nearestWithinRadius(
-            anchor, knownPositions(knownNetherPortals, destinationDimension), NETHER_LINK_SEARCH_RADIUS);
+        ServerLevel destinationLevel = server.getLevel(destinationDimension);
+        if (destinationLevel == null) return;
+        var candidates = liveCandidates(destinationLevel,
+            knownPositions(knownNetherPortals, destinationDimension), state -> state.is(Blocks.NETHER_PORTAL));
+        Optional<BlockPos> destination = nearestWithinRadius(anchor, candidates, NETHER_LINK_SEARCH_RADIUS);
         if (destination.isEmpty()) return;
-        transfer(server, level, pos, destinationDimension, destination.get(), AtmosphereMaterial.NETHER_GAS, throughput);
+        transfer(level, pos, destinationLevel, destination.get(), AtmosphereMaterial.NETHER_GAS, throughput);
     }
 
     private void transferEndPortal(MinecraftServer server, ServerLevel level, BlockPos pos, int throughput) {
         if (level.dimension().equals(Level.END)) return;
-        Optional<BlockPos> destination = any(knownPositions(knownEndPortals, Level.END));
+        ServerLevel endLevel = server.getLevel(Level.END);
+        if (endLevel == null) return;
+        var candidates = liveCandidates(endLevel, knownPositions(knownEndPortals, Level.END), state -> state.is(Blocks.END_PORTAL));
+        Optional<BlockPos> destination = any(candidates);
         if (destination.isEmpty()) return;
         for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
-            transfer(server, level, pos, Level.END, destination.get(), material, throughput);
+            transfer(level, pos, endLevel, destination.get(), material, throughput);
         }
     }
 
     private void transfer(
-        MinecraftServer server, ServerLevel sourceLevel, BlockPos sourcePos,
-        ResourceKey<Level> destinationDimension, BlockPos destinationPos,
+        ServerLevel sourceLevel, BlockPos sourcePos,
+        ServerLevel destinationLevel, BlockPos destinationPos,
         AtmosphereMaterial material, int throughput
     ) {
         var sourceState = DynamicAtmosphereMod.materialState(sourceLevel, material, sourcePos);
-        ServerLevel destinationLevel = server.getLevel(destinationDimension);
-        var transferPlan = plan(sourceState.map(AtmosphereMaterialState::amount).orElse(0), throughput, destinationLevel != null);
+        var transferPlan = plan(sourceState.map(AtmosphereMaterialState::amount).orElse(0), throughput, true);
         if (!transferPlan.active()) return;
+        var destinationBefore = DynamicAtmosphereMod.materialState(destinationLevel, material, destinationPos);
+        if (destinationBefore.isEmpty()) return;
         if (!DynamicAtmosphereMod.emitMaterial(destinationLevel, material, destinationPos, transferPlan.amount())) return;
-        DynamicAtmosphereMod.consumeMaterial(sourceLevel, material, sourcePos, transferPlan.amount());
+        var destinationAfter = DynamicAtmosphereMod.materialState(destinationLevel, material, destinationPos);
+        int accepted = acceptedAmount(destinationBefore.get().amount(),
+            destinationAfter.map(AtmosphereMaterialState::amount).orElse(destinationBefore.get().amount()));
+        int debit = Math.min(transferPlan.amount(), accepted);
+        if (debit <= 0) return;
+        if (!DynamicAtmosphereMod.consumeMaterial(sourceLevel, material, sourcePos, debit) && accepted > 0) {
+            // The destination already accepted material but the source couldn't be debited:
+            // roll back the exact accepted amount so nothing is ever duplicated.
+            DynamicAtmosphereMod.consumeMaterial(destinationLevel, material, destinationPos, accepted);
+        }
     }
 
     private PortalTransferSink() { }
