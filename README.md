@@ -177,13 +177,29 @@ emission sources, thresholds, and costs did not change.
 
 | Material | Base cell edge | Scheduled simulation interval | Color | Optical density |
 | --- | --- | --- | --- | --- |
-| Vapor | 4 blocks | 200 ticks | Minecraft fog/horizon | 1x |
-| Smoke | 4 blocks | 200 ticks | Very dark brown (0x1F160F) | 2x |
-| Dust | 4 blocks | 200 ticks | Brown | 1x |
-| Obsidian Powder | 4 blocks | 200 ticks | Purple | 40x |
-| Void Gas | 4 blocks | 200 ticks | Black | 4x |
-| Exhaust | 4 blocks | 200 ticks | Yellow | 1x |
-| Slime | 4 blocks | 200 ticks | Green | 4x |
+| Vapor | 4 blocks | 200 ticks | Minecraft fog/horizon (`vaporColor` defined for config parity, unused by the renderer) | 1.2x |
+| Smoke | 4 blocks | 200 ticks | Very dark warm grey, deliberately not pure black (`smokeColor`, default `0x0D0A08`) | 4x |
+| Dust | 4 blocks | 200 ticks | Brown (`dustColor`, default `0x8B4513`) | 1x |
+| Obsidian Powder | 4 blocks | 200 ticks | Dark purple cast, PROPOSED pending in-game visual acceptance (`obsidianPowderColor`, default `0x1A1025`) | 0.3x |
+| Void Gas | 4 blocks | 200 ticks | Black (`voidGasColor`, default `0x000000`) | 4x |
+| Exhaust | 4 blocks | 200 ticks | Yellow (`exhaustColor`, default `0xFFFF00`) | 1x |
+| Slime | 4 blocks | 200 ticks | Green (`slimeColor`, default `0x00FF00`) | 4x |
+
+`0.22.0-alpha.1` (MINECRAFT-21, transferred from MINECRAFT-20) made all seven
+colours above client config values (`client.materials.<material>Color`,
+packed `0xRRGGBB`), where a hard-coded `AtmosphereRenderMaterial` enum literal
+used to be the only way to change one — retuning a colour previously required
+a full mod release. The renderer reads the live client config value, never the
+enum literal, for every material except Vapor, which always uses the current
+fog colour regardless of `vaporColor`. Smoke's optical density moved from `2x`
+to `4x` and its colour from `0x1F160F` to `0x0D0A08` — deliberately NOT pure
+black, so it stays visually distinct from Void Gas, the other material at `4x`
+density. Obsidian Powder's optical density moved from `40x` to `0.3x` and its
+colour from `0x800080` to a PROPOSED `0x1A1025`, pending in-game visual
+confirmation against Smoke and Void Gas at representative densities. Vapor's
+optical density moved from `1x` to `1.2x`; its colour is unchanged (and, per
+above, not actually read). Dust, Exhaust, and Slime are unchanged in both
+colour and optical density.
 
 Intervals are scheduled game ticks, subject to bounded work queues, not guaranteed
 wall-clock completion. Scheduled producer passes share a 300-tick cadence. All
@@ -551,6 +567,22 @@ without restarting. The client `allocation.cellBudget` setting is the exception
 and requires a game restart. Structural cell sizes, storage formats, and network
 protocol are intentionally not configurable and change only with a matching mod
 update on both sides.
+
+Both config files carry an internal `configVersion` key (MINECRAFT-21). On
+startup, before NeoForge reads either file, the mod compares that file's
+stored `configVersion` against its own current revision for that file
+(independently versioned per file). A pre-MINECRAFT-21 file with no
+`configVersion` key at all is treated as version `0`. On any mismatch, the
+old file is renamed in place to `<name>.toml.bak-<oldVersion>` (e.g.
+`dynamicatmosphere-server.toml.bak-0`) and a warning is logged naming the
+renamed path; NeoForge then finds no file at the original path and
+regenerates one from current defaults. **This resets that file's
+configuration — it does not merge old custom settings into the new
+defaults.** Re-apply any customization by hand from the backup file. This
+check only sees each file's copy under the global `config/` directory at
+mod-construction time; it does not reach a dedicated server's per-world
+`<world>/serverconfig/` override copy, if NeoForge has already created one
+from an earlier run.
 
 ## Lava and Magma
 

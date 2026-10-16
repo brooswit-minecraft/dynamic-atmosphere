@@ -9,6 +9,7 @@ import net.neoforged.bus.api.EventPriority;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.fml.common.Mod;
 import org.slf4j.Logger;
@@ -29,6 +30,12 @@ public class DynamicAtmosphereMod {
     private static volatile ForgeAtmospherePrototype prototype;
 
     public DynamicAtmosphereMod(IEventBus modEventBus, ModContainer modContainer) {
+        // MINECRAFT-21: run the configVersion check BEFORE registerConfig, which is where
+        // NeoForge's ConfigTracker actually reads the file from disk. See ConfigVersionGuard.
+        ConfigVersionGuard.applyVersionInvalidation(FMLPaths.CONFIGDIR.get(),
+            DynamicAtmosphereServerConfig.FILE_NAME, DynamicAtmosphereServerConfig.CURRENT_VERSION);
+        ConfigVersionGuard.applyVersionInvalidation(FMLPaths.CONFIGDIR.get(),
+            DynamicAtmosphereClientConfig.FILE_NAME, DynamicAtmosphereClientConfig.CURRENT_VERSION);
         modContainer.registerConfig(ModConfig.Type.SERVER, DynamicAtmosphereServerConfig.SPEC,
             DynamicAtmosphereServerConfig.FILE_NAME);
         modContainer.registerConfig(ModConfig.Type.CLIENT, DynamicAtmosphereClientConfig.SPEC,

@@ -91,9 +91,44 @@ class DynamicAtmosphereConfigTest {
         assertEquals(4096, first.selectionWorkPerTick());
         assertEquals(2, first.maxDistanceMultiplier());
         assertEquals(0.75, first.fadeStartFraction());
-        assertEquals(2, first.smoke().opticalDensity());
-        assertEquals(40, first.obsidianPowder().opticalDensity());
+        // MINECRAFT-21: smokeOpticalDensity 2 -> 4; obsidianPowderOpticalDensity 40 -> 0.3;
+        // vaporOpticalDensity 1 -> 1.2.
+        assertEquals(4, first.smoke().opticalDensity());
+        assertEquals(0.3, first.obsidianPowder().opticalDensity());
+        assertEquals(1.2, first.vapor().opticalDensity());
         assertEquals(200_000, first.allocation().cellBudget());
+    }
+
+    @Test
+    void materialColorsAreClientConfigValuesWithTheExpectedDefaults() {
+        // MINECRAFT-21: all seven materials' colours are now client config values, not
+        // hard-coded AtmosphereRenderMaterial enum literals. Smoke/Obsidian Powder/Vapor
+        // changed; the rest stay at their long-standing catalog colours.
+        var first = DynamicAtmosphereClientConfig.snapshot();
+        assertEquals(0x0D0A08, first.smoke().color(), "Smoke: deliberately NOT pure black");
+        assertEquals(0x1A1025, first.obsidianPowder().color(), "Obsidian Powder: PROPOSED, pending visual acceptance");
+        assertEquals(0x000000, first.vapor().color());
+        assertEquals(0x8B4513, first.dust().color());
+        assertEquals(0x000000, first.voidGas().color());
+        assertEquals(0xFFFF00, first.exhaust().color());
+        assertEquals(0x00FF00, first.slime().color());
+
+        var names = flattenConfigKeys(DynamicAtmosphereClientConfig.SPEC.getValues(), "");
+        for (String colorKey : List.of("materials.vaporcolor", "materials.smokecolor", "materials.dustcolor",
+            "materials.voidgascolor", "materials.exhaustcolor", "materials.slimecolor",
+            "materials.obsidianpowdercolor")) {
+            assertTrue(names.contains(colorKey), colorKey + " must be defined");
+        }
+    }
+
+    @Test
+    void configVersionKeyIsDefinedOnBothConfigsAtTheCurrentRevision() {
+        var serverNames = flattenConfigKeys(DynamicAtmosphereServerConfig.SPEC.getValues(), "");
+        var clientNames = flattenConfigKeys(DynamicAtmosphereClientConfig.SPEC.getValues(), "");
+        assertTrue(serverNames.contains("configversion"), "server configVersion key must be defined");
+        assertTrue(clientNames.contains("configversion"), "client configVersion key must be defined");
+        assertTrue(DynamicAtmosphereServerConfig.CURRENT_VERSION >= 1);
+        assertTrue(DynamicAtmosphereClientConfig.CURRENT_VERSION >= 1);
     }
 
     @Test

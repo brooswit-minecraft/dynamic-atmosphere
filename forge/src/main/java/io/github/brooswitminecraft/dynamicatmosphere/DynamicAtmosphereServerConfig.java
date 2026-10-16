@@ -6,8 +6,16 @@ import net.neoforged.fml.event.config.ModConfigEvent;
 /** Reloadable server gameplay and work-budget tuning. Structural grid formats are intentionally excluded. */
 public final class DynamicAtmosphereServerConfig {
     public static final String FILE_NAME = "dynamicatmosphere-server.toml";
+    /**
+     * Config-format revision for THIS file. MINECRAFT-21: on mismatch between this and the
+     * stored `configVersion`, ConfigVersionGuard preserves the old file as
+     * `dynamicatmosphere-server.toml.bak-<oldVersion>` and lets NeoForge regenerate defaults.
+     * This resets configuration; it does not merge old custom settings into new defaults.
+     */
+    public static final int CURRENT_VERSION = 1;
     public static final ModConfigSpec SPEC;
 
+    private static final IntOption CONFIG_VERSION;
     private static final IntOption SYNC_INTERVAL;
     private static final IntOption FULL_SNAPSHOT_INTERVAL;
     private static final IntOption SIMULATION_INTERVAL;
@@ -112,6 +120,9 @@ public final class DynamicAtmosphereServerConfig {
 
     static {
         ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
+        builder.comment("Internal config-format revision. Do not edit by hand: a mismatch between this",
+            "and the mod's current revision triggers a one-time backup-and-reset of this file.");
+        CONFIG_VERSION = integer(builder, "configVersion", CURRENT_VERSION, 0, Integer.MAX_VALUE);
         builder.push("runtime");
         SYNC_INTERVAL = integer(builder, "syncIntervalTicks", 20, 1, 1200);
         FULL_SNAPSHOT_INTERVAL = integer(builder, "fullSnapshotIntervalTicks", 200, 1, 72000);
