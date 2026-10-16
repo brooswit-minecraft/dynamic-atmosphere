@@ -706,15 +706,13 @@ final class ForgeAtmospherePrototype {
 
     private void advanceSimulation(MinecraftServer server) {
         var capacities = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer>();
-        var verticalDirections = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, FillBiasedVerticalMovement.Direction>();
         ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacityAt = key ->
             capacities.computeIfAbsent(key, candidate -> capacityAt(server.getLevel(candidate.dimension()), candidate));
         BiPredicate<AtmosphereGrid.CellKey<ResourceKey<Level>>,
             AtmosphereGrid.CellKey<ResourceKey<Level>>> canTransfer =
-                (source, destination) -> canTransferDown(server, source, destination, false)
-                    && allowsVerticalMovement(source, destination, verticalDirections);
+                (source, destination) -> canTransferDown(server, source, destination, false);
         var spread = grid.spread(serverTicks, capacityAt, key -> {
-            rememberVerticalMovement(server, grid, key, AtmosphereGrid.CELL_SIZE, capacityAt, verticalDirections);
+            applyPreferredHeightDrift(server, grid, key, AtmosphereGrid.CELL_SIZE, this::vaporHome, capacityAt, canTransfer);
             growPlants(server.getLevel(key.dimension()), grid, key, AtmosphereGrid.CELL_SIZE, capacityAt);
             capacities.clear();
             if (condense(server.getLevel(key.dimension()), key, capacityAt.applyAsInt(key))) capacities.clear();
@@ -792,16 +790,16 @@ final class ForgeAtmospherePrototype {
 
     private void advanceSmokeSimulation(MinecraftServer server) {
         var capacities = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer>();
-        var verticalDirections = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, FillBiasedVerticalMovement.Direction>();
         ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacityAt = key ->
             capacities.computeIfAbsent(key,
                 candidate -> smokeCapacityAt(server.getLevel(candidate.dimension()), candidate));
         BiPredicate<AtmosphereGrid.CellKey<ResourceKey<Level>>,
             AtmosphereGrid.CellKey<ResourceKey<Level>>> canTransfer =
-                (source, destination) -> canTransferDown(server, source, destination, true)
-                    && allowsVerticalMovement(source, destination, verticalDirections);
+                (source, destination) -> canTransferDown(server, source, destination, true);
         var spread = smokeGrid.spread(serverTicks, capacityAt, key -> {
-            rememberVerticalMovement(server, smokeGrid, key, SmokeGridLayout.CELL_SIZE, capacityAt, verticalDirections);
+            applyPreferredHeightDrift(server, smokeGrid, key, SmokeGridLayout.CELL_SIZE,
+                level -> Math.clamp(tuning().smoke().preferredHeight(), level.getMinBuildHeight(), level.getMaxBuildHeight()),
+                capacityAt, canTransfer);
             ServerLevel level = server.getLevel(key.dimension());
             var cell = smokeGrid.get(key);
             if (level == null || cell == null) return;
@@ -825,17 +823,16 @@ final class ForgeAtmospherePrototype {
     private void advanceMaterialSimulations(MinecraftServer server) {
         for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
             var capacities = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer>();
-            var verticalDirections = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, FillBiasedVerticalMovement.Direction>();
             ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacityAt = key ->
                 capacities.computeIfAbsent(key,
                     candidate -> materialCapacityAt(server.getLevel(candidate.dimension()), material, candidate));
             AtmosphereGrid<ResourceKey<Level>> materialGrid = materialGrids.get(material);
             BiPredicate<AtmosphereGrid.CellKey<ResourceKey<Level>>,
                 AtmosphereGrid.CellKey<ResourceKey<Level>>> canTransfer =
-                    (source, destination) -> canMaterialTransferDown(server, material, source, destination)
-                        && allowsVerticalMovement(source, destination, verticalDirections);
+                    (source, destination) -> canMaterialTransferDown(server, material, source, destination);
             var spread = materialGrid.spread(serverTicks, capacityAt, key -> {
-                rememberVerticalMovement(server, materialGrid, key, material.cellSize(), capacityAt, verticalDirections);
+                applyPreferredHeightDrift(server, materialGrid, key, material.cellSize(), material::home,
+                    capacityAt, canTransfer);
                 ServerLevel cellLevel = server.getLevel(key.dimension());
                 if (cellLevel == null) return;
                 BlockPos origin = materialCellOrigin(material, key);
@@ -1608,13 +1605,33 @@ final class ForgeAtmospherePrototype {
             && ForgeMaterialCapacity.get(state.chunk, material).downwardBarrier(source.x(), source.y(), source.z()) == 0;
     }
 
-    private void rememberVerticalMovement(
+    /**
+     * MINECRAFT-1 (B1): Vapor's preferred resting height (home), per dimension. Overworld uses the
+     * existing rainCloudHeight; the Nether and End have no rain clouds, so they get their own
+     * configured cloudline instead.
+     */
+    private int vaporHome(ServerLevel level) {
+        var vapor = tuning().vapor();
+        if (level.dimension() == Level.NETHER) return vapor.netherCloudlineHeight();
+        if (level.dimension() == Level.END) return level.getMaxBuildHeight() - vapor.endCloudlineBlocksBelowTop();
+        return vapor.rainCloudHeight();
+    }
+
+    /**
+     * MINECRAFT-1 (B1): moves {@code driftFraction} of the cell's amount toward (if thin) or away
+     * from (if dense) its material's home, split up/down by {@link PreferredHeightDrift}. Runs in
+     * beforeSpread, independent of the later equalization step. Any amount that can't be delivered
+     * (no room, or the downward barrier blocks it) simply stays in the source cell.
+     */
+    private void applyPreferredHeightDrift(
         MinecraftServer server,
         AtmosphereGrid<ResourceKey<Level>> target,
         AtmosphereGrid.CellKey<ResourceKey<Level>> key,
         int cellSize,
+        ToIntFunction<ServerLevel> homeAt,
         ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacityAt,
-        Map<AtmosphereGrid.CellKey<ResourceKey<Level>>, FillBiasedVerticalMovement.Direction> directions
+        BiPredicate<AtmosphereGrid.CellKey<ResourceKey<Level>>,
+            AtmosphereGrid.CellKey<ResourceKey<Level>>> canTransferDownBarrier
     ) {
         if (!DimensionAtmosphereConfigs.forDimension(key.dimension()).honorPreferredAltitude()) return;
         ServerLevel level = server.getLevel(key.dimension());
@@ -1622,21 +1639,50 @@ final class ForgeAtmospherePrototype {
         int capacity = capacityAt.applyAsInt(key);
         if (level == null || cell == null || capacity <= 0) return;
         var movement = tuning().verticalMovement();
-        int cloudlineCell = Math.floorDiv(tuning().vapor().rainCloudHeight(), cellSize);
-        directions.put(key, FillBiasedVerticalMovement.choose(key.y(), cloudlineCell, cell.amount(), capacity,
-            movement.emptyTowardCloudlineChance(), movement.fullTowardCloudlineChance(), level.random::nextDouble));
+        // home, deadBand and w are all specified in blocks; compare against the cell's own
+        // origin in block units too, rather than converting home down to cell units, so a
+        // configured deadBand of N blocks stays exactly N blocks regardless of cellSize.
+        int home = homeAt.applyAsInt(level);
+        var split = PreferredHeightDrift.split(home, cellOriginY(key.y(), cellSize), cell.amount(), capacity,
+            movement.w(), movement.deadBand(), movement.driftFraction());
+        if (split.up() > 0) {
+            var upKey = new AtmosphereGrid.CellKey<>(key.dimension(), key.x(), key.y() + 1, key.z());
+            transferPreferredHeightDrift(target, key, upKey, split.up(), capacityAt);
+        }
+        if (split.down() > 0) {
+            var downKey = new AtmosphereGrid.CellKey<>(key.dimension(), key.x(), key.y() - 1, key.z());
+            if (canTransferDownBarrier.test(key, downKey)) {
+                transferPreferredHeightDrift(target, key, downKey, split.down(), capacityAt);
+            }
+        }
     }
 
-    private static boolean allowsVerticalMovement(
+    /**
+     * MINECRAFT-1 (B1): the block Y of a cell's own origin, for comparing against a home/deadBand
+     * that are both specified in blocks. Package-private and Minecraft-free so the unit
+     * conversion itself — not just {@link PreferredHeightDrift}'s formula — is directly testable.
+     */
+    static int cellOriginY(int cellY, int cellSize) {
+        return cellY * cellSize;
+    }
+
+    private void transferPreferredHeightDrift(
+        AtmosphereGrid<ResourceKey<Level>> target,
         AtmosphereGrid.CellKey<ResourceKey<Level>> source,
         AtmosphereGrid.CellKey<ResourceKey<Level>> destination,
-        Map<AtmosphereGrid.CellKey<ResourceKey<Level>>, FillBiasedVerticalMovement.Direction> directions
+        int amount,
+        ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacityAt
     ) {
-        var direction = directions.get(source);
-        if (direction == null || destination.y() == source.y()) return true;
-        return destination.y() > source.y()
-            ? direction == FillBiasedVerticalMovement.Direction.UP
-            : direction == FillBiasedVerticalMovement.Direction.DOWN;
+        int destinationCapacity = capacityAt.applyAsInt(destination);
+        if (destinationCapacity <= 0) return;
+        var sourceCell = target.get(source);
+        if (sourceCell == null) return;
+        var destinationCell = target.get(destination);
+        int destinationAmount = destinationCell == null ? 0 : destinationCell.amount();
+        int moved = Math.min(amount, Math.max(0, destinationCapacity - destinationAmount));
+        if (moved <= 0) return;
+        target.set(source, sourceCell.amount() - moved, serverTicks, capacityAt.applyAsInt(source));
+        target.set(destination, destinationAmount + moved, serverTicks, destinationCapacity);
     }
 
     private void importPendingChunks(MinecraftServer server) {

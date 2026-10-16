@@ -55,7 +55,7 @@ class AtmosphericMaterialsTest {
     void producerIdentitiesRemainDistinctWithoutRatesOrActivation() {
         assertEquals(Set.of(MaterialDefinition.Producer.EXISTING_VAPOR_RULES,
             MaterialDefinition.Producer.SNOW_ICE_SURFACE), AtmosphericMaterials.VAPOR.producers());
-        assertEquals(List.of(2, 6, 7, 2, 4, 1, 9, 1),
+        assertEquals(List.of(2, 6, 7, 2, 4, 1, 13, 1),
             AtmosphericMaterials.ALL.stream().map(m -> m.producers().size()).toList());
         var identities = new HashSet<MaterialDefinition.Producer>();
         AtmosphericMaterials.ALL.forEach(m -> identities.addAll(m.producers()));

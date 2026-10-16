@@ -90,21 +90,50 @@ material. The fluid-tick scope includes Flowing Fluids 1.0.6's injected movement
 and always clears on return or exception. Direct bucket/removal, block replacement,
 and scheduled atmospheric evaporation outside transport still emit by humidity.
 
-### Fill-biased vertical movement
+### Preferred resting heights and fill-biased vertical movement
 
-Every atmosphere cell (Vapor, Smoke, and all named material grids) chooses a vertical
-distribution direction on each selected simulation turn after fan transport has run.
-With fill fraction `f = clamp(amount / capacity, 0, 1)`, the chance of choosing the
-direction toward the configured rain cloudline is
-`emptyTowardCloudlineChance + f * (fullTowardCloudlineChance - emptyTowardCloudlineChance)`.
-The downward chance is its complement. Defaults are 75% toward the cloudline when
-empty and 25% when full, deliberately leaving horizontal spreading available while
-making sparse cells buoyant and dense cells sink. Both endpoints are configurable in
-the server `verticalMovement` section. At or above the cloudline, “toward the
-cloudline” is downward, so both outcomes collapse to downward. Existing downward
-barriers still apply.
-This fix does not delete accumulated atmosphere or reset worlds; existing material
-and simulation backlog remain.
+Every atmosphere cell (Vapor, Smoke, and all named material grids) moves a small
+fraction of its own amount vertically on each selected simulation turn, after fan
+transport has run and before equalization. This is a direct transfer, not a bias
+on equalization: it conserves material, and any portion that can't be delivered —
+no room at the destination, or the downward barrier below (see below) — simply
+stays in the source cell rather than being forced through or discarded.
+
+Each material has its own **preferred resting height ("home")**, rather than all
+sharing one global cloudline:
+
+| Material | Home |
+| --- | --- |
+| Dust, Void Gas, Obsidian Powder (Ender Gas), Exhaust | the dimension's own bottom (its minimum build height) |
+| Slime | `slime.preferredHeight` (absolute, default 64, clamped to the dimension's build range) |
+| Smoke | `smoke.preferredHeight` (absolute, default 144, clamped to the dimension's build range) |
+| Vapor | the dimension's cloudline: `vapor.rainCloudHeight` in the Overworld, `vapor.netherCloudlineHeight` in the Nether, or `vapor.endCloudlineBlocksBelowTop` blocks below the End's build-height ceiling |
+
+A thin cell (low fill fraction) drifts toward its home; a dense cell sinks,
+continuously in fill. Let `h = sign(home - y)` (zero inside a `verticalMovement.deadBand`
+dead band around home) and `f = clamp(amount / capacity, 0, 1)`. The probability of
+moving toward the cloudline direction is
+`p_up = clamp01(0.5 + verticalMovement.w * ((1 - f) * h - f))`, and `p_down = 1 - p_up`.
+With the defaults (`w = 0.40`), a thin cell below home moves up with 90% probability
+and a dense cell anywhere moves up with only 10% probability; a cell within the dead
+band of home splits evenly when thin. Each turn moves
+`verticalMovement.driftFraction` (default 10%) of the cell's amount, split `p_up`/`p_down`
+as a deterministic expected value — any fractional remainder from rounding simply
+stays put, it is never randomly assigned or carried over.
+
+Existing downward barriers still apply to the down leg only: material cannot drift
+down out of a cell containing fluid or bedrock, though drifting into a cell that
+already contains liquid is allowed. There is no equivalent restriction on the up leg.
+
+A known consequence: Void Gas and Slime spawn mobs where the gas actually is, so
+their mob spawns follow these new heights — both now settle toward the dimension
+floor rather than toward the old shared cloudline.
+
+This change does not delete accumulated atmosphere or reset worlds; existing
+material and simulation backlog remain. It replaces the simpler global-cloudline
+gate this mod shipped previously (every material sharing Vapor's `rainCloudHeight`
+as a single bias on the existing equalization step) with the mechanism above,
+per the epic's own B1 specification.
 
 Exposed non-fluid ground also emits according to effective light: zero at light
 15, rising to 40 units per pass at light 0. This uses the day/night-adjusted sky
