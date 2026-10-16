@@ -8,6 +8,7 @@ import net.minecraft.world.level.storage.LevelResource;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.fml.ModContainer;
+import net.neoforged.fml.config.ConfigTracker;
 import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.neoforged.fml.loading.FMLPaths;
@@ -94,22 +95,46 @@ public class DynamicAtmosphereMod {
         // MINECRAFT-21: the mod-construction-time ConfigVersionGuard calls above only ever see
         // the global config/ directory. DynamicAtmosphereServerConfig is ModConfig.Type.SERVER,
         // which NeoForge re-reads per-world from <world>/serverconfig/ once that directory holds
-        // an override (ServerLifecycleHooks.handleServerAboutToStart). HIGHEST priority so this
-        // runs before NeoForge's own internal per-world config reload for the same event.
-        NeoForge.EVENT_BUS.addListener(EventPriority.HIGHEST, DynamicAtmosphereMod::onServerAboutToStart);
+        // an override. NOT a before-load hook (see ConfigVersionGuard's javadoc and
+        // onServerAboutToStart below for why no event priority can make it one); this listener
+        // instead detects the mismatch and explicitly corrects the already-loaded active spec.
+        NeoForge.EVENT_BUS.addListener(DynamicAtmosphereMod::onServerAboutToStart);
         LOGGER.info("[{}] bounded atmospheric grid enabled", MODID);
     }
 
     private static final LevelResource SERVERCONFIG = new LevelResource("serverconfig");
 
+    /**
+     * {@code ServerLifecycleHooks.handleServerAboutToStart} calls
+     * {@code ConfigTracker.loadConfigs(SERVER, globalConfigDir, worldServerConfigDir)}
+     * synchronously BEFORE constructing and posting this very event — confirmed by decompiling
+     * NeoForge 21.1's {@code ServerLifecycleHooks.class}. So by the time ANY listener for this
+     * event runs, including one at {@code EventPriority.HIGHEST}, the per-world file (stale or
+     * not) has already been loaded into the active in-memory spec for this session; renaming the
+     * file at that point only prevents the NEXT load, it does not undo this one. There is no
+     * earlier supported event to hook instead (the internal call happens inside NeoForge's own
+     * server-bootstrap code, not from a separately-postable event).
+     *
+     * <p>So: back up/remove the stale file as before (still correct — it stops the SAME stale
+     * values from being loaded again on every future start), and when that found a mismatch,
+     * explicitly re-run NeoForge's own public {@code ConfigTracker.loadConfigs(Type, Path, Path)}
+     * — the exact same method {@code handleServerAboutToStart} itself just called — now that the
+     * stale per-world file is gone, so it falls through to current global defaults and correctly
+     * updates the active spec (and this mod's config-reload listener refreshes its cache) for
+     * this session instead of running it stale until the next full restart.
+     */
     private static void onServerAboutToStart(ServerAboutToStartEvent event) {
-        invalidateServerConfigAt(event.getServer().getWorldPath(SERVERCONFIG));
+        Path worldServerConfigDir = event.getServer().getWorldPath(SERVERCONFIG);
+        if (invalidateServerConfigAt(worldServerConfigDir)) {
+            ConfigTracker.INSTANCE.loadConfigs(ModConfig.Type.SERVER, FMLPaths.CONFIGDIR.get(), worldServerConfigDir);
+        }
     }
 
     /** Package-visible for ConfigVersionGuardTest: proves the per-world wiring touches only the
-     * exact SERVER file/version this mod owns, in the exact directory handed to it. */
-    static void invalidateServerConfigAt(Path worldServerConfigDir) {
-        ConfigVersionGuard.applyVersionInvalidation(worldServerConfigDir,
+     * exact SERVER file/version this mod owns, in the exact directory handed to it, and reports
+     * whether it found (and corrected) a mismatch. */
+    static boolean invalidateServerConfigAt(Path worldServerConfigDir) {
+        return ConfigVersionGuard.applyVersionInvalidation(worldServerConfigDir,
             DynamicAtmosphereServerConfig.FILE_NAME, DynamicAtmosphereServerConfig.CURRENT_VERSION);
     }
 
