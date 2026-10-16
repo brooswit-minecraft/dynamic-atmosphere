@@ -23,7 +23,7 @@ class AtmosphericEventsTest {
         DynamicAtmosphereServerConfig.SlimePrecipitation slimePrecipitation
     ) {
         return new DynamicAtmosphereServerConfig.Snapshot(null, null, null, null, null, null, null, null, null, null,
-            null, null, null, null, lightning, ghastSpawn, zombieFog, slimePrecipitation);
+            null, null, null, null, null, null, lightning, ghastSpawn, zombieFog, slimePrecipitation);
     }
 
     @Test

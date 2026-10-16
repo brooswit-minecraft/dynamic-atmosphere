@@ -62,7 +62,8 @@ class MaterialClientTest {
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.EXHAUST,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.SLIME,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.ZOMBIE_FOG,
-            io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.GLOW_GAS);
+            io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.GLOW_GAS,
+            io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.NETHER_FOG);
         var materials = AtmosphereRenderMaterial.values();
         for (int i = 0; i < materials.length; i++) {
             assertEquals(definitions.get(i).settings().opticalDensityMultiplier(), materials[i].opticalDensityMultiplier);
@@ -297,7 +298,7 @@ class MaterialClientTest {
     }
 
     @Test
-    void allEightSessionIdsKeepCoincidentCellsIndependent() {
+    void allSessionIdsKeepCoincidentCellsIndependent() {
         var sessions = new java.util.EnumMap<AtmosphereRenderMaterial, MaterialClientSession>(AtmosphereRenderMaterial.class);
         for (var material : AtmosphereRenderMaterial.values()) {
             var session = new MaterialClientSession(material);

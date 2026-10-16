@@ -23,7 +23,7 @@ public record MaterialDefinition(
     }
 
     // Named colors preserve the specification without selecting unspecified RGB values.
-    public enum Color { CURRENT_FOG, BROWN, DARK_BROWN, BLACK, YELLOW, GREEN, PURPLE, GRAY, GOLD }
+    public enum Color { CURRENT_FOG, BROWN, DARK_BROWN, BLACK, YELLOW, GREEN, PURPLE, GRAY, GOLD, DARK_RED }
 
     public enum Producer {
         EXISTING_VAPOR_RULES, SNOW_ICE_SURFACE,
@@ -37,7 +37,8 @@ public record MaterialDefinition(
         ENDER_PEARL_USE, STANDING_IN_NETHER_PORTAL, SOUL_TORCHES, SOUL_FIRES, SOUL_SAND,
         ZOMBIE_DEATHS,
         WITCH, SHULKER, ENDER_CHEST, CRYING_OBSIDIAN,
-        GLOWSTONE
+        GLOWSTONE,
+        LAVA_SOURCE_HARVEST
     }
 
     public enum Transformation { WATER, GRAVEL, ZOMBIE, SLIME }

@@ -50,9 +50,13 @@ public final class AtmosphericMaterials {
     public static final MaterialDefinition GLOW_GAS = new MaterialDefinition("glow_gas", GOLD,
         new MaterialSettings(CELL_SIZE, DUST_LOD, 1, OptionalDouble.of(1), 2),
         Set.of(GLOWSTONE), Set.of());
+    /** MINECRAFT-1 (B3): very dark red, vapor-like LOD; home is the dimension's own bottom. */
+    public static final MaterialDefinition NETHER_FOG = new MaterialDefinition("nether_fog", DARK_RED,
+        settings(CELL_SIZE, VAPOR_LOD, 1, OptionalDouble.of(1)),
+        Set.of(LAVA_SOURCE_HARVEST), Set.of());
 
     public static final List<MaterialDefinition> ALL =
-        List.of(VAPOR, DUST, SMOKE, VOID_GAS, EXHAUST, SLIME, OBSIDIAN_POWDER, ZOMBIE_FOG, GLOW_GAS);
+        List.of(VAPOR, DUST, SMOKE, VOID_GAS, EXHAUST, SLIME, OBSIDIAN_POWDER, ZOMBIE_FOG, GLOW_GAS, NETHER_FOG);
 
     private AtmosphericMaterials() { }
 
