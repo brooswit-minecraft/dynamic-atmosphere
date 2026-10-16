@@ -568,21 +568,26 @@ and requires a game restart. Structural cell sizes, storage formats, and network
 protocol are intentionally not configurable and change only with a matching mod
 update on both sides.
 
-Both config files carry an internal `configVersion` key (MINECRAFT-21). On
-startup, before NeoForge reads either file, the mod compares that file's
-stored `configVersion` against its own current revision for that file
-(independently versioned per file). A pre-MINECRAFT-21 file with no
-`configVersion` key at all is treated as version `0`. On any mismatch, the
-old file is renamed in place to `<name>.toml.bak-<oldVersion>` (e.g.
-`dynamicatmosphere-server.toml.bak-0`) and a warning is logged naming the
-renamed path; NeoForge then finds no file at the original path and
-regenerates one from current defaults. **This resets that file's
+Both config files carry an internal `configVersion` marker (MINECRAFT-21).
+Deliberately NOT a regular settable option — it's a raw top-level key the mod
+manages itself, outside NeoForge's normal config spec, so NeoForge's own
+"fill in missing defaults" correction pass can never invent or overwrite it
+before the mod gets a chance to compare it (see `ConfigVersionGuard`'s class
+documentation in the source for why that distinction matters). Before a file
+is read, the mod compares its stored `configVersion` against its own current
+revision for that file (independently versioned per file). A pre-MINECRAFT-21
+file with no `configVersion` key at all is treated as version `0`. On any
+mismatch, the old file is renamed to `<name>.toml.bak-<oldVersion>` (e.g.
+`dynamicatmosphere-server.toml.bak-0`, never overwriting an existing backup —
+colliding names fall back to `-2`, `-3`, ...) and a warning is logged naming
+the renamed path; a fresh file carrying just the current `configVersion` is
+written in its place, so the config loader then regenerates every other key
+from current defaults around that marker. **This resets that file's
 configuration — it does not merge old custom settings into the new
 defaults.** Re-apply any customization by hand from the backup file. This
-check only sees each file's copy under the global `config/` directory at
-mod-construction time; it does not reach a dedicated server's per-world
-`<world>/serverconfig/` override copy, if NeoForge has already created one
-from an earlier run.
+runs both against the global `config/` directory at mod-construction time,
+and — for the server file specifically — against a dedicated server's actual
+per-world `<world>/serverconfig/` override, checked on every server start.
 
 ## Lava and Magma
 

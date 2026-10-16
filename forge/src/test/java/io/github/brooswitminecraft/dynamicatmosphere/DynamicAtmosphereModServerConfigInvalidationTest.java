@@ -36,10 +36,11 @@ class DynamicAtmosphereModServerConfigInvalidationTest {
         boolean invalidated = DynamicAtmosphereMod.invalidateServerConfigAt(worldServerConfigDir);
 
         assertTrue(invalidated, "caller must be told a mismatch happened, so it knows to reload the active spec");
-        assertFalse(Files.exists(serverFile), "the stale per-world override must be moved away");
         Path backup = worldServerConfigDir.resolve(DynamicAtmosphereServerConfig.FILE_NAME + ".bak-0");
         assertTrue(Files.exists(backup), "the stale per-world override must be preserved as a backup");
         assertTrue(Files.readString(backup).contains("syncIntervalTicks = 777"));
+        assertTrue(Files.readString(serverFile).contains("configVersion = " + DynamicAtmosphereServerConfig.CURRENT_VERSION),
+            "original path must be re-seeded with the marker, not left stale or absent");
     }
 
     @Test

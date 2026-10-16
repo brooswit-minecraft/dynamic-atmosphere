@@ -121,19 +121,32 @@ Added (server, same `[slime]` section), `RestartType.NONE`:
 
 ### Config-version invalidation (new mechanism)
 
-| Key | Default | File | RestartType |
+| Key | Default | File | Managed by |
 | --- | --- | --- | --- |
-| `configVersion` | `1` | `dynamicatmosphere-server.toml` (top level, independent revision counter) | `NONE` |
-| `configVersion` | `1` | `dynamicatmosphere-client.toml` (top level, independent revision counter) | `NONE` |
+| `configVersion` | `1` | `dynamicatmosphere-server.toml` (top level, independent revision counter) | `ConfigVersionGuard`, NOT `ModConfigSpec` |
+| `configVersion` | `1` | `dynamicatmosphere-client.toml` (top level, independent revision counter) | `ConfigVersionGuard`, NOT `ModConfigSpec` |
+
+`configVersion` is deliberately NOT a regular `ModConfigSpec`-registered
+option. PR review on this ticket caught that registering it normally would be
+actively wrong: NeoForge's own config loader fills in any *missing* spec-
+defined key with its default and writes that back to disk before this mod
+ever reads the file — which would silently stamp a genuinely stale,
+pre-MINECRAFT-21 file as already-current on the very load that should have
+reset it. Keeping it as a raw key the mod reads/writes itself sidesteps that
+entirely. See `ConfigVersionGuard`'s class javadoc (forge module) for the
+full mechanics.
 
 On a mismatch (including a pre-MINECRAFT-21 file with no `configVersion` key,
 treated as `0`), the mod renames the old file to `<name>.toml.bak-<oldVersion>`
-before NeoForge reads it, logs the renamed path, and lets the file regenerate
-from current defaults. **This resets that file's configuration; it does not
-merge old custom settings into the new defaults.** See `ConfigVersionGuard`
-(forge module) and the README "Server and client configuration locations"
-section for the exact mechanics and its one documented scope boundary (it does
-not reach a dedicated server's per-world `serverconfig` override copy).
+(collision-safe: never overwrites an existing backup) and writes a fresh file
+containing just the current marker in its place, so the config loader
+regenerates every other key from current defaults around it. **This resets
+that file's configuration; it does not merge old custom settings into the new
+defaults.** Checked against the global `config/` copy at mod load, and — for
+the server file specifically, since `runtime.simulationIntervalTicks` and the
+rest of that file stay per-world — against a dedicated server's actual
+per-world `<world>/serverconfig/` override, on every server start (see
+`DynamicAtmosphereMod.onServerAboutToStart`).
 
 ### Material colours become client config (new keys, all `[materials]`, `RestartType.NONE`, range `0x000000`-`0xFFFFFF`)
 

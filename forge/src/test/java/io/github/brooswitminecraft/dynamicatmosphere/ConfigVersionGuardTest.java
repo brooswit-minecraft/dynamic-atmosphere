@@ -20,11 +20,17 @@ class ConfigVersionGuardTest {
         boolean invalidated = ConfigVersionGuard.applyVersionInvalidation(dir, "dynamicatmosphere-server.toml", 1);
 
         assertTrue(invalidated, "a mismatch must be reported so callers can correct an already-loaded spec");
-        assertFalse(Files.exists(file), "original file must be moved away, not left in place");
         Path backup = dir.resolve("dynamicatmosphere-server.toml.bak-0");
         assertTrue(Files.exists(backup), "old file must be preserved under its old-version backup name");
         assertTrue(Files.readString(backup).contains("syncIntervalTicks = 999"),
             "backup must contain the original custom content, not a regenerated default");
+        // The original path is NOT left absent: it's replaced with a marker-only file, so
+        // NeoForge's own loader sees an "incomplete" file and regenerates every other key from
+        // current defaults around that marker instead of the file staying versionless forever.
+        assertTrue(Files.exists(file), "original path must be re-seeded with the version marker");
+        String reseeded = Files.readString(file);
+        assertTrue(reseeded.contains("configVersion = 1"));
+        assertFalse(reseeded.contains("syncIntervalTicks"), "the seeded file must carry ONLY the marker");
     }
 
     @Test
@@ -53,10 +59,14 @@ class ConfigVersionGuardTest {
     }
 
     @Test
-    void absentFileIsANoOp(@TempDir Path dir) {
+    void absentFileIsSeededWithJustTheVersionMarkerAndReportsNoMismatch(@TempDir Path dir) throws IOException {
         boolean invalidated = ConfigVersionGuard.applyVersionInvalidation(dir, "dynamicatmosphere-server.toml", 1);
-        assertFalse(invalidated);
-        assertEquals(0, dir.toFile().list().length, "nothing to invalidate when the file does not exist yet");
+
+        assertFalse(invalidated, "nothing existing to migrate when the file does not exist yet");
+        Path file = dir.resolve("dynamicatmosphere-server.toml");
+        assertTrue(Files.exists(file), "a version marker must be seeded so NeoForge's own fresh "
+            + "default file ends up carrying a configVersion too");
+        assertTrue(Files.readString(file).contains("configVersion = 1"));
     }
 
     @Test
@@ -77,6 +87,7 @@ class ConfigVersionGuardTest {
         assertTrue(Files.exists(secondBackup), "a colliding backup must fall back to a free suffix");
         assertTrue(Files.readString(secondBackup).contains("syncIntervalTicks = 222"),
             "the newly-backed-up file's own content must be preserved under the free suffix");
-        assertFalse(Files.exists(file), "original file must still be moved away");
+        assertTrue(Files.readString(file).contains("configVersion = 1"),
+            "original path must end up re-seeded with the marker, not left stale");
     }
 }
