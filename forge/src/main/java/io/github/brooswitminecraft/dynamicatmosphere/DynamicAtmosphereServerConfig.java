@@ -83,6 +83,7 @@ public final class DynamicAtmosphereServerConfig {
     private static final DoubleOption EXHAUST_MAX_DAMAGE;
     private static final DoubleOption EXHAUST_MIN_COST;
     private static final DoubleOption EXHAUST_MAX_COST;
+    private static final IntOption EXHAUST_CREEPER_SPAWN_CONSUMPTION;
 
     private static final IntOption SLIME_UNDERGROUND;
     private static final IntOption SLIME_UNDERGROUND_DENOMINATOR;
@@ -223,6 +224,10 @@ public final class DynamicAtmosphereServerConfig {
         EXHAUST_MIN_COST = decimal(builder, "suffocationMinCostFraction", 0.25, 0, 1);
         EXHAUST_MAX_COST = decimal(builder, "suffocationMaxCostFraction", 0.50, 0, 1);
         // MINECRAFT-1 (B1): Exhaust's home is the dimension's own bottom; see the note under dust.
+        builder.comment("Exhaust consumed from the local cell when the night-plus-local-Exhaust surface",
+            "Creeper spawn eligibility gate (MINECRAFT-2) allows a spawn through. Only charged for a",
+            "spawn this gate itself made eligible; below-ground spawning never reaches this gate.");
+        EXHAUST_CREEPER_SPAWN_CONSUMPTION = integer(builder, "creeperSpawnConsumption", 50, 0, 1_000_000);
         builder.pop();
 
         builder.push("slime");
@@ -335,7 +340,8 @@ public final class DynamicAtmosphereServerConfig {
             new Exhaust(EXHAUST_PASSIVE.get(), EXHAUST_LIVING_DENOMINATOR.get(),
                 EXHAUST_CREEPER_DENOMINATOR.get(), EXHAUST_DAMAGE_PER_POINT.get(), EXHAUST_DAMAGE_MAX.get(),
                 EXHAUST_MIN_FULLNESS.get(), EXHAUST_MAX_FULLNESS.get(), EXHAUST_MIN_DAMAGE.get(),
-                EXHAUST_MAX_DAMAGE.get(), EXHAUST_MIN_COST.get(), EXHAUST_MAX_COST.get()),
+                EXHAUST_MAX_DAMAGE.get(), EXHAUST_MIN_COST.get(), EXHAUST_MAX_COST.get(),
+                EXHAUST_CREEPER_SPAWN_CONSUMPTION.get()),
             new Slime(SLIME_UNDERGROUND.get(), SLIME_UNDERGROUND_DENOMINATOR.get(),
                 SLIME_DISSIPATION_SPAWN_DENOMINATOR.get(), SLIME_DISSIPATION_SPAWN_ATTEMPTS.get(),
                 SLIME_MEDIUM_DENSITY_THRESHOLD.get(), SLIME_BIG_DENSITY_THRESHOLD.get(),
@@ -427,7 +433,7 @@ public final class DynamicAtmosphereServerConfig {
                           int damageEmissionPerPoint, int maxDamageEmission, double suffocationMinFullness,
                           double suffocationMaxFullness, double suffocationMinDamage,
                           double suffocationMaxDamage, double suffocationMinCostFraction,
-                          double suffocationMaxCostFraction) { }
+                          double suffocationMaxCostFraction, int creeperSpawnConsumption) { }
     public record Slime(int undergroundEmission, int undergroundChanceDenominator,
                         int dissipationSpawnChanceDenominator, int dissipationSpawnAttempts,
                         double mediumDensityThreshold, double bigDensityThreshold, int preferredHeight) { }
