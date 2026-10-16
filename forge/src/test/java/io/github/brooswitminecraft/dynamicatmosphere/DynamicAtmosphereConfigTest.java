@@ -23,8 +23,13 @@ class DynamicAtmosphereConfigTest {
         assertEquals(0.75, first.runtime().simulationSkipChance());
         assertEquals(100, first.obsidianPowder().portalBlockEmission());
         assertEquals(256, first.vapor().rainCloudHeight());
-        assertEquals(0.75, first.verticalMovement().emptyTowardCloudlineChance());
-        assertEquals(0.25, first.verticalMovement().fullTowardCloudlineChance());
+        assertEquals(120, first.vapor().netherCloudlineHeight());
+        assertEquals(16, first.vapor().endCloudlineBlocksBelowTop());
+        assertEquals(2, first.verticalMovement().deadBand());
+        assertEquals(0.40, first.verticalMovement().w());
+        assertEquals(0.10, first.verticalMovement().driftFraction());
+        assertEquals(144, first.smoke().preferredHeight());
+        assertEquals(64, first.slime().preferredHeight());
         assertEquals(24, first.vapor().highTerrainBlocksAboveSeaLevel());
         assertEquals(200, first.runtime().simulationIntervalTicks());
         assertEquals(300, first.runtime().producerIntervalTicks());
@@ -40,33 +45,17 @@ class DynamicAtmosphereConfigTest {
     }
 
     @Test
-    void preferredHeightDefaultsMatchVaporsRainCloudHeightSoDayOneBehaviorIsUnchanged() {
-        // MINECRAFT-1: every material now has its own preferred resting height for fill-biased
-        // vertical movement. Each one must default to Vapor's existing rainCloudHeight so a world
-        // upgrading onto this change sees no behavior change until an operator tunes a key.
-        var snapshot = DynamicAtmosphereServerConfig.snapshot();
-        int rainCloudHeight = snapshot.vapor().rainCloudHeight();
-        assertEquals(rainCloudHeight, snapshot.smoke().preferredHeight());
-        assertEquals(rainCloudHeight, snapshot.dust().preferredHeight());
-        assertEquals(rainCloudHeight, snapshot.voidGas().preferredHeight());
-        assertEquals(rainCloudHeight, snapshot.exhaust().preferredHeight());
-        assertEquals(rainCloudHeight, snapshot.slime().preferredHeight());
-        assertEquals(rainCloudHeight, snapshot.obsidianPowder().preferredHeight());
-
-        assertEquals(rainCloudHeight, AtmosphereMaterial.DUST.preferredHeight());
-        assertEquals(rainCloudHeight, AtmosphereMaterial.OBSIDIAN_POWDER.preferredHeight());
-        assertEquals(rainCloudHeight, AtmosphereMaterial.VOID_GAS.preferredHeight());
-        assertEquals(rainCloudHeight, AtmosphereMaterial.EXHAUST.preferredHeight());
-        assertEquals(rainCloudHeight, AtmosphereMaterial.SLIME.preferredHeight());
-    }
-
-    @Test
-    void preferredHeightKeysExistPerMaterialWithTheirOwnDottedPath() {
+    void onlyAbsoluteHomedMaterialsHaveAPreferredHeightKey() {
+        // MINECRAFT-1 (B1): Dust, Void Gas, Exhaust and Obsidian Powder rest on the dimension's
+        // own bottom, which is structural, not a tunable number, so they get no preferredHeight
+        // key at all. Smoke and Slime rest at an absolute height and do get one.
         var names = flattenConfigKeys(DynamicAtmosphereServerConfig.SPEC.getValues(), "");
-        for (String expected : List.of("smoke.preferredheight", "dust.preferredheight",
-            "voidgas.preferredheight", "exhaust.preferredheight", "slime.preferredheight",
-            "obsidianpowder.preferredheight")) {
+        for (String expected : List.of("smoke.preferredheight", "slime.preferredheight")) {
             assertTrue(names.contains(expected), expected + " must be defined");
+        }
+        for (String absent : List.of("dust.preferredheight", "voidgas.preferredheight",
+            "exhaust.preferredheight", "obsidianpowder.preferredheight")) {
+            assertFalse(names.contains(absent), absent + " must not be defined");
         }
     }
 
