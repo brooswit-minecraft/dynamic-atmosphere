@@ -89,6 +89,15 @@ public final class DynamicAtmosphereServerConfig {
 
     private static final DoubleOption HEAVY_GAS_DISSIPATION_FACTOR;
 
+    private static final IntOption NETHER_GAS_NETHERRACK;
+    private static final DoubleOption NETHER_GAS_MILD_FULLNESS;
+    private static final DoubleOption NETHER_GAS_DANGEROUS_FULLNESS;
+
+    private static final BooleanOption THE_END_HONOR_PREFERRED_ALTITUDE;
+    private static final DoubleOption THE_END_GLOBAL_DISSIPATION_MULTIPLIER;
+
+    private static final IntOption PORTAL_TRANSFER_THROUGHPUT;
+
     private static final IntOption ENDER_MOB;
     private static final IntOption ENDER_PORTAL;
     private static final IntOption ENDER_PORTAL_BLOCK;
@@ -224,6 +233,33 @@ public final class DynamicAtmosphereServerConfig {
         HEAVY_GAS_DISSIPATION_FACTOR = decimal(builder, "dissipationFactor", 12.0, 0.001, 1_000.0);
         builder.pop();
 
+        builder.push("netherGas");
+        // Section 48: "Netherrack and/or other Nether blocks." Only Netherrack is sampled for now.
+        NETHER_GAS_NETHERRACK = integer(builder, "netherrackEmission", 16, 0, 1_000_000);
+        builder.comment("Local amount/capacity fullness at or above which a mild negative potion effect",
+            "(Nausea) is applied to living entities in the cell.");
+        NETHER_GAS_MILD_FULLNESS = decimal(builder, "mildFullness", 0.10, 0, 1);
+        builder.comment("Local amount/capacity fullness at or above which a dangerous potion effect",
+            "(Poison) is applied in addition to the mild effect.");
+        NETHER_GAS_DANGEROUS_FULLNESS = decimal(builder, "dangerousFullness", 0.50, 0, 1);
+        builder.pop();
+
+        builder.push("dimensions");
+        builder.push("theEnd");
+        // Phase 4 / section 35: the End ignores preferred altitude by default and is an
+        // "atmospheric annihilator" so an activated End portal is a useful pollution sink.
+        THE_END_HONOR_PREFERRED_ALTITUDE = bool(builder, "honorPreferredAltitude", false);
+        THE_END_GLOBAL_DISSIPATION_MULTIPLIER = decimal(builder, "globalDissipationMultiplier", 100.0, 0.001, 1_000_000.0);
+        builder.pop();
+        builder.pop();
+
+        builder.push("portalTransferSink");
+        // Section 32: a Transfer Sink consumes material locally but re-emits it at the
+        // linked destination, never destroying it. Bounded per portal block per producer
+        // pass, same shape as Obsidian Powder's portalBlockEmission.
+        PORTAL_TRANSFER_THROUGHPUT = integer(builder, "throughputPerPortalBlock", 64, 0, 1_000_000);
+        builder.pop();
+
         builder.push("obsidianPowder");
         // No worldRestart/gameRestart marker is applied in this section: NeoForge's default is RestartType.NONE.
         builder.comment("Emission from Endermen, endermites, dragons, witches, and shulkers.");
@@ -313,7 +349,11 @@ public final class DynamicAtmosphereServerConfig {
             new PlantGrowth(PLANT_CHANCE.get(), PLANT_COST.get()),
             new Integrations(CREATE_FAN_RPM_COEFFICIENT.get(), CREATE_FAN_INTERVAL.get(), CREATE_FAN_CHUNK_BUDGET.get()),
             new HeavyGas(HEAVY_GAS_DISSIPATION_FACTOR.get()),
-            new Magma(MAGMA_BREAK_LAVA_CHANCE.get())
+            new Magma(MAGMA_BREAK_LAVA_CHANCE.get()),
+            new NetherGas(NETHER_GAS_NETHERRACK.get(), NETHER_GAS_MILD_FULLNESS.get(), NETHER_GAS_DANGEROUS_FULLNESS.get()),
+            new Dimensions(new DimensionAtmosphereConfig(
+                THE_END_HONOR_PREFERRED_ALTITUDE.get(), THE_END_GLOBAL_DISSIPATION_MULTIPLIER.get())),
+            new PortalTransferSinkTuning(PORTAL_TRANSFER_THROUGHPUT.get())
         );
     }
 
@@ -325,6 +365,10 @@ public final class DynamicAtmosphereServerConfig {
         return value != null && Double.isFinite(value) && value >= min && value <= max ? value : fallback;
     }
 
+    private static BooleanOption bool(ModConfigSpec.Builder builder, String name, boolean fallback) {
+        return new BooleanOption(builder.define(name, fallback), fallback);
+    }
+
     private static IntOption integer(ModConfigSpec.Builder builder, String name, int fallback, int min, int max) {
         return new IntOption(builder.defineInRange(name, fallback, min, max), fallback, min, max);
     }
@@ -333,6 +377,17 @@ public final class DynamicAtmosphereServerConfig {
         ModConfigSpec.Builder builder, String name, double fallback, double min, double max
     ) {
         return new DoubleOption(builder.defineInRange(name, fallback, min, max), fallback, min, max);
+    }
+
+    private record BooleanOption(ModConfigSpec.BooleanValue value, boolean fallback) {
+        boolean get() {
+            try {
+                Boolean configured = value.get();
+                return configured == null ? fallback : configured;
+            } catch (IllegalStateException ignored) {
+                return fallback;
+            }
+        }
     }
 
     private record IntOption(ModConfigSpec.IntValue value, int fallback, int min, int max) {
@@ -357,7 +412,8 @@ public final class DynamicAtmosphereServerConfig {
 
     public record Snapshot(RuntimeTuning runtime, Vapor vapor, VerticalMovement verticalMovement, Smoke smoke, Dust dust, VoidGas voidGas,
                            Exhaust exhaust, Slime slime, ObsidianPowder obsidianPowder, PlantGrowth plantGrowth,
-                           Integrations integrations, HeavyGas heavyGas, Magma magma) { }
+                           Integrations integrations, HeavyGas heavyGas, Magma magma,
+                           NetherGas netherGas, Dimensions dimensions, PortalTransferSinkTuning portalTransferSink) { }
     public record RuntimeTuning(int syncIntervalTicks, int fullSnapshotIntervalTicks,
                                 int simulationIntervalTicks, int producerIntervalTicks,
                                 int maxChunkImportsPerTick, int maxProducerChunksPerTick,
@@ -404,9 +460,28 @@ public final class DynamicAtmosphereServerConfig {
     public record PlantGrowth(double chance, int cost) { }
     public record Integrations(double createFanTransportPerRpm, int createFanIntervalTicks,
                                int maxFanChunksPerTick) { }
-    /** Shared by Void Gas, Obsidian Powder and Slime: their dissipation chance is Smoke's own divided by this. */
+    /** Shared by Void Gas, Obsidian Powder, Slime and Nether Gas: their dissipation chance is Smoke's own divided by this. */
     public record HeavyGas(double dissipationFactor) { }
     public record Magma(double breakLavaChance) { }
+    public record NetherGas(int netherrackEmission, double mildFullness, double dangerousFullness) { }
+
+    /**
+     * Phase 4 (section 36): dimension configuration stays small. {@code honorPreferredAltitude}
+     * gates the shared fill-biased vertical movement (section 35's "ignore normal preferred-altitude
+     * behavior by default" for the End); {@code globalDissipationMultiplier} scales the generic
+     * material grid's own dissipation chance for that dimension.
+     */
+    public record DimensionAtmosphereConfig(boolean honorPreferredAltitude, double globalDissipationMultiplier) {
+        public static final DimensionAtmosphereConfig DEFAULT = new DimensionAtmosphereConfig(true, 1.0);
+
+        public DimensionAtmosphereConfig {
+            if (!Double.isFinite(globalDissipationMultiplier) || globalDissipationMultiplier <= 0) {
+                throw new IllegalArgumentException("globalDissipationMultiplier must be finite and positive");
+            }
+        }
+    }
+    public record Dimensions(DimensionAtmosphereConfig theEnd) { }
+    public record PortalTransferSinkTuning(int throughputPerPortalBlock) { }
 
     private DynamicAtmosphereServerConfig() { }
 }

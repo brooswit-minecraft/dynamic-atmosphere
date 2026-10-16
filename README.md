@@ -272,6 +272,14 @@ and migrated chunks are saved in the new format.
   dissipate (roughly 330:1 at the default factor) — this is intended: full
   cells billow upward and are a stable, load-bearing signal, not a runaway to
   be capped or damped.
+- **Nether Gas:** loaded Netherrack samples are its only source (default 16
+  units per sampled block), mirroring Void Gas's own netherrack-emission
+  mechanism but as an independent material. A processed cell at or above
+  `netherGas.mildFullness` (default 10%) applies Confusion (displayed in-game
+  as Nausea) to living entities exposed to it; at or above
+  `netherGas.dangerousFullness` (default 50%) it also applies Poison. Movement
+  and dissipation reuse the shared `heavyGas` rules above, alongside Void Gas,
+  Obsidian Powder and Slime.
 
 Producer hooks and effect scans are bounded and loaded-only; not every block or
 entity is sampled each tick. Effects requiring material cannot spend unavailable
@@ -507,7 +515,7 @@ via the existing lava-removal mixin hook; no mixin changes were needed.
 ## Fans and Configuration
 
 Fans affect cells up to 4x4x4, which now covers every material: Vapor, Smoke,
-Dust, Exhaust, Obsidian Powder, Void Gas, and Slime. Void Gas and Slime previously used
+Dust, Exhaust, Obsidian Powder, Void Gas, Slime, and Nether Gas. Void Gas and Slime previously used
 larger cells and were unaffected; they are fan-transportable as of `0.20.0-alpha.1`.
 
 When Create is installed, a rotating Encased Fan performs intake followed by output
@@ -536,7 +544,7 @@ general passive source; plain obsidian has its own `obsidianPowder.obsidianBlock
 (default 1), and crying obsidian has its own `obsidianPowder.cryingObsidianEmission`
 (default 1000).
 
-`runtime.simulationSkipChance` applies to all seven materials (default 0.75,
+`runtime.simulationSkipChance` applies to all eight materials (default 0.75,
 zero processes every due cell, one skips every due cell). It replaces the old
 Vapor-only `vapor.skipChance` setting; producer cadence is independent.
 
@@ -551,6 +559,49 @@ without restarting. The client `allocation.cellBudget` setting is the exception
 and requires a game restart. Structural cell sizes, storage formats, and network
 protocol are intentionally not configurable and change only with a matching mod
 update on both sides.
+
+## Portal Transfer Sinks and Dimension Configuration
+
+A Transfer Sink consumes atmospheric material locally but does not destroy
+it: it re-emits the same amount at a linked destination. This is the whole of
+cross-dimension atmosphere; there is no separate "portal pollution" feature,
+and no scenario-specific Java logic backs it.
+
+- **Nether portals:** a Nether Gas cell at a Nether portal block transfers up
+  to `portalTransferSink.throughputPerPortalBlock` units (default 64) per
+  producer pass to the linked position on the other side, using the vanilla
+  8:1 Nether/Overworld coordinate scale (Nether coordinates are Overworld
+  coordinates divided by 8). A poorly ventilated Nether portal room becoming
+  hazardous is emergent: it falls out of Nether Gas's own Netherrack source,
+  this transfer, and ordinary destination-side emission — nothing scenario-specific
+  was added for it.
+- **End portals:** every generic-grid material (Dust, Obsidian Powder, Void
+  Gas, Exhaust, Slime, Nether Gas) near an End portal block transfers into The
+  End at the same throughput, where the dimension configuration below makes
+  it dissipate almost immediately. This makes an activated End portal a
+  practical pollution-disposal mechanism, the same way routing factory smoke
+  into one is: an emergent use of normal atmospheric rules, not an industrial
+  feature in its own right.
+- **Never forces a load:** emitting into the destination only succeeds
+  against an already-loaded, already-tracked chunk. If the destination isn't
+  reachable this pass, the transfer is skipped entirely — the source material
+  is left in place (nothing is consumed until the matching emit succeeds) and
+  retried on a later pass. A portal links two independently simulated
+  regions; this sink intentionally never forces either one to stay active
+  just because the other is.
+- **Out of scope for this mechanism:** Smoke and Vapor use a separate legacy
+  grid without a public cross-grid consume API; transferring them through
+  portals is left to a follow-up.
+
+Dimension configuration stays deliberately small — material-specific
+behavior belongs in material definitions, not here. Today only The End has
+an override, under `dimensions.theEnd` in `dynamicatmosphere-server.toml`:
+`honorPreferredAltitude` (default `false`) skips the shared fill-biased
+vertical movement entirely in that dimension, and
+`globalDissipationMultiplier` (default `100`) scales up the generic
+material grid's own dissipation chance there. Together these turn The End
+into the "atmospheric annihilator" the design calls for, without the End
+needing an oxygen system or any dimension-specific gameplay code.
 
 ## Lava and Magma
 

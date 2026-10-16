@@ -9,7 +9,8 @@ public enum AtmosphereMaterial {
     OBSIDIAN_POWDER("obsidian_powder"),
     VOID_GAS("void_gas"),
     EXHAUST("exhaust"),
-    SLIME("slime");
+    SLIME("slime"),
+    NETHER_GAS("nether_gas");
 
     public static final StreamCodec<RegistryFriendlyByteBuf, AtmosphereMaterial> STREAM_CODEC =
         new StreamCodec<>() {
