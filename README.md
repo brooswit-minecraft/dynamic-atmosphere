@@ -100,9 +100,20 @@ direction toward the configured rain cloudline is
 The downward chance is its complement. Defaults are 75% toward the cloudline when
 empty and 25% when full, deliberately leaving horizontal spreading available while
 making sparse cells buoyant and dense cells sink. Both endpoints are configurable in
-the server `verticalMovement` section. At or above the cloudline, “toward the
-cloudline” is downward, so both outcomes collapse to downward. Existing downward
-barriers still apply.
+the server `verticalMovement` section and apply to every material alike. At or
+above the cloudline, “toward the cloudline” is downward, so both outcomes collapse
+to downward. Existing downward barriers still apply.
+
+Each material has its own **preferred resting height** — the Y value its
+cloudline check uses — rather than all sharing Vapor's `rainCloudHeight`. Vapor
+keeps using its own `rainCloudHeight` (unrenamed, so existing worlds are
+unaffected); Smoke and each of the five named material grids (Dust, Void Gas,
+Exhaust, Slime, Obsidian Powder) get their own `preferredHeight` key in their
+server config section. Every one of these new keys defaults to the same value
+as `vapor.rainCloudHeight` (256), so installing this version changes no
+existing world's behavior until an operator tunes a key — for example, lowering
+`voidGas.preferredHeight` so Void Gas, a floor hazard, settles near the ground
+instead of drifting toward the rain cloudline like Vapor does.
 This fix does not delete accumulated atmosphere or reset worlds; existing material
 and simulation backlog remain.
 

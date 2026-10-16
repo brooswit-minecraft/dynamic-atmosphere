@@ -45,6 +45,7 @@ public final class DynamicAtmosphereServerConfig {
     private static final IntOption VILLAGER_COST;
     private static final DoubleOption SMOKE_DISSIPATION_CHANCE;
     private static final IntOption SMOKE_DISSIPATION_AMOUNT;
+    private static final IntOption SMOKE_PREFERRED_HEIGHT;
 
     private static final IntOption DUST_WALK;
     private static final IntOption DUST_RUN;
@@ -61,12 +62,14 @@ public final class DynamicAtmosphereServerConfig {
     private static final DoubleOption GRAVEL_CHANCE;
     private static final DoubleOption DUST_DISSIPATION_CHANCE;
     private static final IntOption DUST_DISSIPATION_AMOUNT;
+    private static final IntOption DUST_PREFERRED_HEIGHT;
 
     private static final IntOption VOID_GAS_HOSTILE_DEATH;
     private static final IntOption VOID_GAS_NETHERRACK;
     private static final IntOption VOID_GAS_BOTTOM;
     private static final IntOption VOID_GAS_BOTTOM_DENOMINATOR;
     private static final IntOption VOID_GAS_BREAD;
+    private static final IntOption VOID_GAS_PREFERRED_HEIGHT;
 
     private static final IntOption EXHAUST_PASSIVE;
     private static final IntOption EXHAUST_LIVING_DENOMINATOR;
@@ -79,6 +82,7 @@ public final class DynamicAtmosphereServerConfig {
     private static final DoubleOption EXHAUST_MAX_DAMAGE;
     private static final DoubleOption EXHAUST_MIN_COST;
     private static final DoubleOption EXHAUST_MAX_COST;
+    private static final IntOption EXHAUST_PREFERRED_HEIGHT;
 
     private static final IntOption SLIME_UNDERGROUND;
     private static final IntOption SLIME_UNDERGROUND_DENOMINATOR;
@@ -86,6 +90,7 @@ public final class DynamicAtmosphereServerConfig {
     private static final IntOption SLIME_DISSIPATION_SPAWN_ATTEMPTS;
     private static final DoubleOption SLIME_MEDIUM_DENSITY_THRESHOLD;
     private static final DoubleOption SLIME_BIG_DENSITY_THRESHOLD;
+    private static final IntOption SLIME_PREFERRED_HEIGHT;
 
     private static final DoubleOption HEAVY_GAS_DISSIPATION_FACTOR;
 
@@ -99,6 +104,7 @@ public final class DynamicAtmosphereServerConfig {
     private static final IntOption ENDER_PEARL_IMPACT;
     private static final IntOption ENDER_MOB_INTERVAL;
     private static final IntOption ENDER_PORTAL_INTERVAL;
+    private static final IntOption OBSIDIAN_POWDER_PREFERRED_HEIGHT;
 
     private static final DoubleOption PLANT_CHANCE;
     private static final IntOption PLANT_COST;
@@ -130,6 +136,8 @@ public final class DynamicAtmosphereServerConfig {
 
         builder.push("vapor");
         VAPOR_PRODUCER_CHANCE = decimal(builder, "producerChance", 0.10, 0, 1);
+        // MINECRAFT-1: this is also Vapor's own preferred resting height for fill-biased vertical
+        // movement (the key is kept unrenamed so existing worlds are not reset).
         RAIN_CLOUD_HEIGHT = integer(builder, "rainCloudHeight", 256, -2048, 2048);
         HIGH_TERRAIN_ABOVE_SEA = integer(builder, "highTerrainBlocksAboveSeaLevel", 24, 0, 2048);
         HIGH_TERRAIN = integer(builder, "highTerrainEmission", 40, 0, 1_000_000);
@@ -157,6 +165,9 @@ public final class DynamicAtmosphereServerConfig {
         VILLAGER_COST = integer(builder, "villagerConversionCost", 40, 0, 1_000_000);
         SMOKE_DISSIPATION_CHANCE = decimal(builder, "dissipationChance", 10.0 / 64, 0, 1);
         SMOKE_DISSIPATION_AMOUNT = integer(builder, "dissipationAmount", 40, 0, 1_000_000);
+        builder.comment("MINECRAFT-1: Smoke's own preferred resting height for fill-biased vertical movement.",
+            "Defaults to the same height as Vapor's rainCloudHeight so day-one behavior is unchanged.");
+        SMOKE_PREFERRED_HEIGHT = integer(builder, "preferredHeight", 256, -2048, 2048);
         builder.pop();
 
         builder.push("dust");
@@ -175,6 +186,9 @@ public final class DynamicAtmosphereServerConfig {
         GRAVEL_CHANCE = decimal(builder, "gravelChance", 1.0 / 16, 0, 1);
         DUST_DISSIPATION_CHANCE = decimal(builder, "dissipationChance", 1.0 / 64, 0, 1);
         DUST_DISSIPATION_AMOUNT = integer(builder, "dissipationAmount", 40, 0, 1_000_000);
+        builder.comment("MINECRAFT-1: Dust's own preferred resting height for fill-biased vertical movement.",
+            "Defaults to the same height as Vapor's rainCloudHeight so day-one behavior is unchanged.");
+        DUST_PREFERRED_HEIGHT = integer(builder, "preferredHeight", 256, -2048, 2048);
         builder.pop();
 
         builder.push("voidGas");
@@ -183,6 +197,10 @@ public final class DynamicAtmosphereServerConfig {
         VOID_GAS_BOTTOM = integer(builder, "bottomEmission", 64, 0, 1_000_000);
         VOID_GAS_BOTTOM_DENOMINATOR = integer(builder, "bottomChanceDenominator", 1, 1, 1_000_000);
         VOID_GAS_BREAD = integer(builder, "breedingBread", 3, 0, 64);
+        builder.comment("MINECRAFT-1: Void Gas's own preferred resting height for fill-biased vertical",
+            "movement. Defaults to the same height as Vapor's rainCloudHeight so day-one behavior is",
+            "unchanged; operators will likely want this much lower given Void Gas is a floor hazard.");
+        VOID_GAS_PREFERRED_HEIGHT = integer(builder, "preferredHeight", 256, -2048, 2048);
         builder.pop();
 
         builder.push("exhaust");
@@ -197,6 +215,9 @@ public final class DynamicAtmosphereServerConfig {
         EXHAUST_MAX_DAMAGE = decimal(builder, "suffocationMaxDamage", 4, 0, 2048);
         EXHAUST_MIN_COST = decimal(builder, "suffocationMinCostFraction", 0.25, 0, 1);
         EXHAUST_MAX_COST = decimal(builder, "suffocationMaxCostFraction", 0.50, 0, 1);
+        builder.comment("MINECRAFT-1: Exhaust's own preferred resting height for fill-biased vertical movement.",
+            "Defaults to the same height as Vapor's rainCloudHeight so day-one behavior is unchanged.");
+        EXHAUST_PREFERRED_HEIGHT = integer(builder, "preferredHeight", 256, -2048, 2048);
         builder.pop();
 
         builder.push("slime");
@@ -215,6 +236,9 @@ public final class DynamicAtmosphereServerConfig {
             "spawned slime is big (size 4) instead of medium. Must be configured at or above",
             "mediumDensityThreshold to behave as intended; this is not cross-validated.");
         SLIME_BIG_DENSITY_THRESHOLD = decimal(builder, "bigDensityThreshold", 0.75, 0, 1);
+        builder.comment("MINECRAFT-1: Slime's own preferred resting height for fill-biased vertical movement.",
+            "Defaults to the same height as Vapor's rainCloudHeight so day-one behavior is unchanged.");
+        SLIME_PREFERRED_HEIGHT = integer(builder, "preferredHeight", 256, -2048, 2048);
         builder.pop();
 
         builder.push("heavyGas");
@@ -246,6 +270,10 @@ public final class DynamicAtmosphereServerConfig {
         ENDER_MOB_INTERVAL = integer(builder, "mobIntervalTicks", 40, 1, 72000);
         builder.comment("Ticks between portal occupancy emission checks.");
         ENDER_PORTAL_INTERVAL = integer(builder, "portalIntervalTicks", 20, 1, 72000);
+        builder.comment("MINECRAFT-1: Obsidian Powder's own preferred resting height for fill-biased",
+            "vertical movement. Defaults to the same height as Vapor's rainCloudHeight so day-one",
+            "behavior is unchanged.");
+        OBSIDIAN_POWDER_PREFERRED_HEIGHT = integer(builder, "preferredHeight", 256, -2048, 2048);
         builder.pop();
 
         builder.push("plantGrowth");
@@ -292,24 +320,27 @@ public final class DynamicAtmosphereServerConfig {
             new Smoke(FIRE.get(), LAVA.get(), FURNACE.get(),
                 TORCH.get(), CAMPFIRE.get(), EXPLOSION.get(), EXPLOSION_BLOCK.get(), LEAF_CHANCE.get(),
                 LEAF_COST.get(), FARMLAND_CHANCE.get(), FARMLAND_COST.get(), VILLAGER_CHANCE.get(),
-                VILLAGER_COST.get(), SMOKE_DISSIPATION_CHANCE.get(), SMOKE_DISSIPATION_AMOUNT.get()),
+                VILLAGER_COST.get(), SMOKE_DISSIPATION_CHANCE.get(), SMOKE_DISSIPATION_AMOUNT.get(),
+                SMOKE_PREFERRED_HEIGHT.get()),
             new Dust(DUST_WALK.get(), DUST_RUN.get(), DUST_JUMP.get(), DUST_LAND.get(), DUST_FALL_BASE.get(),
                 DUST_FALL_PER_POINT.get(), DUST_FALL_MAX.get(), DUST_BREAK.get(), DUST_PLACE.get(),
                 DUST_WALK_INTERVAL.get(), DUST_RUN_INTERVAL.get(), FALLING_BLOCK.get(), GRAVEL_CHANCE.get(),
-                DUST_DISSIPATION_CHANCE.get(), DUST_DISSIPATION_AMOUNT.get()),
+                DUST_DISSIPATION_CHANCE.get(), DUST_DISSIPATION_AMOUNT.get(), DUST_PREFERRED_HEIGHT.get()),
             new VoidGas(VOID_GAS_HOSTILE_DEATH.get(), VOID_GAS_NETHERRACK.get(), VOID_GAS_BOTTOM.get(),
-                VOID_GAS_BOTTOM_DENOMINATOR.get(), VOID_GAS_BREAD.get()),
+                VOID_GAS_BOTTOM_DENOMINATOR.get(), VOID_GAS_BREAD.get(), VOID_GAS_PREFERRED_HEIGHT.get()),
             new Exhaust(EXHAUST_PASSIVE.get(), EXHAUST_LIVING_DENOMINATOR.get(),
                 EXHAUST_CREEPER_DENOMINATOR.get(), EXHAUST_DAMAGE_PER_POINT.get(), EXHAUST_DAMAGE_MAX.get(),
                 EXHAUST_MIN_FULLNESS.get(), EXHAUST_MAX_FULLNESS.get(), EXHAUST_MIN_DAMAGE.get(),
-                EXHAUST_MAX_DAMAGE.get(), EXHAUST_MIN_COST.get(), EXHAUST_MAX_COST.get()),
+                EXHAUST_MAX_DAMAGE.get(), EXHAUST_MIN_COST.get(), EXHAUST_MAX_COST.get(),
+                EXHAUST_PREFERRED_HEIGHT.get()),
             new Slime(SLIME_UNDERGROUND.get(), SLIME_UNDERGROUND_DENOMINATOR.get(),
                 SLIME_DISSIPATION_SPAWN_DENOMINATOR.get(), SLIME_DISSIPATION_SPAWN_ATTEMPTS.get(),
-                SLIME_MEDIUM_DENSITY_THRESHOLD.get(), SLIME_BIG_DENSITY_THRESHOLD.get()),
+                SLIME_MEDIUM_DENSITY_THRESHOLD.get(), SLIME_BIG_DENSITY_THRESHOLD.get(),
+                SLIME_PREFERRED_HEIGHT.get()),
             new ObsidianPowder(ENDER_MOB.get(), ENDER_PORTAL.get(), OBSIDIAN_PASSIVE.get(), OBSIDIAN_BLOCK.get(),
                 CRYING_OBSIDIAN.get(), ENDER_PEARL_USE.get(),
                 ENDER_PEARL_IMPACT.get(), ENDER_MOB_INTERVAL.get(),
-                ENDER_PORTAL_INTERVAL.get(), ENDER_PORTAL_BLOCK.get()),
+                ENDER_PORTAL_INTERVAL.get(), ENDER_PORTAL_BLOCK.get(), OBSIDIAN_POWDER_PREFERRED_HEIGHT.get()),
             new PlantGrowth(PLANT_CHANCE.get(), PLANT_COST.get()),
             new Integrations(CREATE_FAN_RPM_COEFFICIENT.get(), CREATE_FAN_INTERVAL.get(), CREATE_FAN_CHUNK_BUDGET.get()),
             new HeavyGas(HEAVY_GAS_DISSIPATION_FACTOR.get()),
@@ -377,7 +408,7 @@ public final class DynamicAtmosphereServerConfig {
                         int explosionEmission, int explosionBlockEmission, double leafRemovalChance,
                         int leafRemovalCost, double farmlandConversionChance, int farmlandConversionCost,
                         double villagerConversionChance, int villagerConversionCost,
-                        double dissipationChance, int dissipationAmount) {
+                        double dissipationChance, int dissipationAmount, int preferredHeight) {
         public int simulationIntervalTicks() { return snapshot().runtime().simulationIntervalTicks(); }
         public int producerIntervalTicks() { return snapshot().runtime().producerIntervalTicks(); }
     }
@@ -385,22 +416,22 @@ public final class DynamicAtmosphereServerConfig {
                        int fallDamageBaseEmission, int fallDamageEmissionPerPoint, int maxFallDamageEmission,
                        int blockBreakEmission, int blockPlaceEmission, int walkIntervalTicks,
                        int runIntervalTicks, int fallingBlockEmission, double gravelChance,
-                       double dissipationChance, int dissipationAmount) { }
+                       double dissipationChance, int dissipationAmount, int preferredHeight) { }
     public record VoidGas(int hostileDeathEmission, int netherrackEmission, int bottomEmission,
-                          int bottomChanceDenominator, int breedingBread) { }
+                          int bottomChanceDenominator, int breedingBread, int preferredHeight) { }
     public record Exhaust(int passiveEmission, int livingChanceDenominator, int creeperChanceDenominator,
                           int damageEmissionPerPoint, int maxDamageEmission, double suffocationMinFullness,
                           double suffocationMaxFullness, double suffocationMinDamage,
                           double suffocationMaxDamage, double suffocationMinCostFraction,
-                          double suffocationMaxCostFraction) { }
+                          double suffocationMaxCostFraction, int preferredHeight) { }
     public record Slime(int undergroundEmission, int undergroundChanceDenominator,
                         int dissipationSpawnChanceDenominator, int dissipationSpawnAttempts,
-                        double mediumDensityThreshold, double bigDensityThreshold) { }
+                        double mediumDensityThreshold, double bigDensityThreshold, int preferredHeight) { }
     public record ObsidianPowder(int mobEmission, int portalOccupantEmission, int passiveBlockEmission,
                                  int obsidianBlockEmission, int cryingObsidianEmission,
                            int pearlUseEmission, int pearlImpactEmission,
                            int mobIntervalTicks, int portalIntervalTicks,
-                           int portalBlockEmission) { }
+                           int portalBlockEmission, int preferredHeight) { }
     public record PlantGrowth(double chance, int cost) { }
     public record Integrations(double createFanTransportPerRpm, int createFanIntervalTicks,
                                int maxFanChunksPerTick) { }

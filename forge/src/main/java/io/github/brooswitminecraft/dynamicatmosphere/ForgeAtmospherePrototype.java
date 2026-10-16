@@ -708,7 +708,8 @@ final class ForgeAtmospherePrototype {
                 (source, destination) -> canTransferDown(server, source, destination, false)
                     && allowsVerticalMovement(source, destination, verticalDirections);
         var spread = grid.spread(serverTicks, capacityAt, key -> {
-            rememberVerticalMovement(server, grid, key, AtmosphereGrid.CELL_SIZE, capacityAt, verticalDirections);
+            rememberVerticalMovement(server, grid, key, AtmosphereGrid.CELL_SIZE, tuning().vapor().rainCloudHeight(),
+                capacityAt, verticalDirections);
             growPlants(server.getLevel(key.dimension()), grid, key, AtmosphereGrid.CELL_SIZE, capacityAt);
             capacities.clear();
             if (condense(server.getLevel(key.dimension()), key, capacityAt.applyAsInt(key))) capacities.clear();
@@ -795,7 +796,8 @@ final class ForgeAtmospherePrototype {
                 (source, destination) -> canTransferDown(server, source, destination, true)
                     && allowsVerticalMovement(source, destination, verticalDirections);
         var spread = smokeGrid.spread(serverTicks, capacityAt, key -> {
-            rememberVerticalMovement(server, smokeGrid, key, SmokeGridLayout.CELL_SIZE, capacityAt, verticalDirections);
+            rememberVerticalMovement(server, smokeGrid, key, SmokeGridLayout.CELL_SIZE, tuning().smoke().preferredHeight(),
+                capacityAt, verticalDirections);
             ServerLevel level = server.getLevel(key.dimension());
             var cell = smokeGrid.get(key);
             if (level == null || cell == null) return;
@@ -829,7 +831,8 @@ final class ForgeAtmospherePrototype {
                     (source, destination) -> canMaterialTransferDown(server, material, source, destination)
                         && allowsVerticalMovement(source, destination, verticalDirections);
             var spread = materialGrid.spread(serverTicks, capacityAt, key -> {
-                rememberVerticalMovement(server, materialGrid, key, material.cellSize(), capacityAt, verticalDirections);
+                rememberVerticalMovement(server, materialGrid, key, material.cellSize(), material.preferredHeight(),
+                    capacityAt, verticalDirections);
                 ServerLevel cellLevel = server.getLevel(key.dimension());
                 if (cellLevel == null) return;
                 BlockPos origin = materialCellOrigin(material, key);
@@ -1595,6 +1598,7 @@ final class ForgeAtmospherePrototype {
         AtmosphereGrid<ResourceKey<Level>> target,
         AtmosphereGrid.CellKey<ResourceKey<Level>> key,
         int cellSize,
+        int preferredHeight,
         ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacityAt,
         Map<AtmosphereGrid.CellKey<ResourceKey<Level>>, FillBiasedVerticalMovement.Direction> directions
     ) {
@@ -1603,7 +1607,7 @@ final class ForgeAtmospherePrototype {
         int capacity = capacityAt.applyAsInt(key);
         if (level == null || cell == null || capacity <= 0) return;
         var movement = tuning().verticalMovement();
-        int cloudlineCell = Math.floorDiv(tuning().vapor().rainCloudHeight(), cellSize);
+        int cloudlineCell = Math.floorDiv(preferredHeight, cellSize);
         directions.put(key, FillBiasedVerticalMovement.choose(key.y(), cloudlineCell, cell.amount(), capacity,
             movement.emptyTowardCloudlineChance(), movement.fullTowardCloudlineChance(), level.random::nextDouble));
     }

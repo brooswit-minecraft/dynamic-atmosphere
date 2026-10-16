@@ -40,6 +40,37 @@ class DynamicAtmosphereConfigTest {
     }
 
     @Test
+    void preferredHeightDefaultsMatchVaporsRainCloudHeightSoDayOneBehaviorIsUnchanged() {
+        // MINECRAFT-1: every material now has its own preferred resting height for fill-biased
+        // vertical movement. Each one must default to Vapor's existing rainCloudHeight so a world
+        // upgrading onto this change sees no behavior change until an operator tunes a key.
+        var snapshot = DynamicAtmosphereServerConfig.snapshot();
+        int rainCloudHeight = snapshot.vapor().rainCloudHeight();
+        assertEquals(rainCloudHeight, snapshot.smoke().preferredHeight());
+        assertEquals(rainCloudHeight, snapshot.dust().preferredHeight());
+        assertEquals(rainCloudHeight, snapshot.voidGas().preferredHeight());
+        assertEquals(rainCloudHeight, snapshot.exhaust().preferredHeight());
+        assertEquals(rainCloudHeight, snapshot.slime().preferredHeight());
+        assertEquals(rainCloudHeight, snapshot.obsidianPowder().preferredHeight());
+
+        assertEquals(rainCloudHeight, AtmosphereMaterial.DUST.preferredHeight());
+        assertEquals(rainCloudHeight, AtmosphereMaterial.OBSIDIAN_POWDER.preferredHeight());
+        assertEquals(rainCloudHeight, AtmosphereMaterial.VOID_GAS.preferredHeight());
+        assertEquals(rainCloudHeight, AtmosphereMaterial.EXHAUST.preferredHeight());
+        assertEquals(rainCloudHeight, AtmosphereMaterial.SLIME.preferredHeight());
+    }
+
+    @Test
+    void preferredHeightKeysExistPerMaterialWithTheirOwnDottedPath() {
+        var names = flattenConfigKeys(DynamicAtmosphereServerConfig.SPEC.getValues(), "");
+        for (String expected : List.of("smoke.preferredheight", "dust.preferredheight",
+            "voidgas.preferredheight", "exhaust.preferredheight", "slime.preferredheight",
+            "obsidianpowder.preferredheight")) {
+            assertTrue(names.contains(expected), expected + " must be defined");
+        }
+    }
+
+    @Test
     void removedVoidGasSpawnKeysAreNoLongerDefined() {
         // MINECRAFT-17: the consumption-driven zombie spawn (and these two keys) are removed.
         // This flattens the spec into full dotted paths so the assertion is against the

@@ -64,4 +64,16 @@ public enum AtmosphereMaterial {
         int interval = DynamicAtmosphereServerConfig.snapshot().runtime().producerIntervalTicks();
         return Math.multiplyExact(Math.floorDiv(tick, interval) + 1, (long) interval);
     }
+
+    /** MINECRAFT-1: the Y this material's cells drift toward under fill-biased vertical movement. */
+    public int preferredHeight() {
+        var snapshot = DynamicAtmosphereServerConfig.snapshot();
+        return switch (this) {
+            case DUST -> snapshot.dust().preferredHeight();
+            case OBSIDIAN_POWDER -> snapshot.obsidianPowder().preferredHeight();
+            case VOID_GAS -> snapshot.voidGas().preferredHeight();
+            case EXHAUST -> snapshot.exhaust().preferredHeight();
+            case SLIME -> snapshot.slime().preferredHeight();
+        };
+    }
 }
