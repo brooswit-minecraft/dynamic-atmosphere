@@ -10,6 +10,8 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.block.state.BlockState;
 
+import java.util.function.BooleanSupplier;
+
 /**
  * MINECRAFT-1 (B4): rises 1 block every {@code endSand.riseIntervalTicks}. When blocked above it
  * simply stops rescheduling itself a tick and resumes once that tick finds the way clear again;
@@ -39,19 +41,55 @@ public final class EndSandBlock extends Block {
     @Override
     protected void tick(BlockState state, ServerLevel level, BlockPos pos, RandomSource random) {
         BlockPos above = pos.above();
-        if (above.getY() >= level.getMaxBuildHeight()) {
-            level.removeBlock(pos, false);
-            return;
-        }
         BlockState aboveState = level.getBlockState(above);
-        if (aboveState.isAir() || aboveState.canBeReplaced()) {
-            level.setBlock(above, state, 3);
-            level.setBlock(pos, Blocks.AIR.defaultBlockState(), 3);
-            level.scheduleTick(above, this, riseIntervalTicks());
-        } else {
-            // Blocked: stop here, but reschedule so this resumes as soon as it's freed.
-            level.scheduleTick(pos, this, riseIntervalTicks());
+        Outcome outcome = attemptRise(
+            above.getY() >= level.getMaxBuildHeight(),
+            () -> level.removeBlock(pos, false),
+            aboveState.isAir() || aboveState.canBeReplaced(),
+            () -> level.setBlock(above, state, 3),
+            () -> level.setBlock(pos, Blocks.AIR.defaultBlockState(), 3),
+            () -> level.removeBlock(above, false));
+        switch (outcome) {
+            case DELETED -> {}
+            case BLOCKED -> level.scheduleTick(pos, this, riseIntervalTicks());
+            case MOVED -> level.scheduleTick(above, this, riseIntervalTicks());
         }
+    }
+
+    enum Outcome { DELETED, BLOCKED, MOVED }
+
+    /**
+     * Regression for a review finding on MINECRAFT-1 (B4): the move used to ignore the result of
+     * both {@code setBlock} calls, so a failed destination write could delete the source with
+     * nothing produced, and a failed source clear after a successful destination write could
+     * duplicate the block. The move is now checked and conservative: a failed destination write
+     * leaves the source untouched (treated as blocked), and a failed source clear after a
+     * successful destination write is undone (the destination placement is rolled back) rather
+     * than left as a duplicate. Package-private and pure so review's "test the production path"
+     * requirement can be met with injected failures instead of a full ServerLevel bootstrap.
+     */
+    static Outcome attemptRise(
+            boolean atCeiling,
+            BooleanSupplier removeAtCeiling,
+            boolean destinationOpen,
+            BooleanSupplier placeAbove,
+            BooleanSupplier clearSource,
+            Runnable undoAbove) {
+        if (atCeiling) {
+            removeAtCeiling.getAsBoolean();
+            return Outcome.DELETED;
+        }
+        if (!destinationOpen) {
+            return Outcome.BLOCKED;
+        }
+        if (!placeAbove.getAsBoolean()) {
+            return Outcome.BLOCKED;
+        }
+        if (!clearSource.getAsBoolean()) {
+            undoAbove.run();
+            return Outcome.BLOCKED;
+        }
+        return Outcome.MOVED;
     }
 
     private static int riseIntervalTicks() {
