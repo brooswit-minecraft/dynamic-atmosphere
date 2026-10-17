@@ -12,7 +12,10 @@ import org.junit.jupiter.api.Test;
 class AtmosphericMaterialsTest {
     @Test
     void opticalDensityIsRenderingOnlyAndUnspecifiedSettingsDefaultToOne() {
-        assertEquals(List.of(1.0, 1.0, 2.0, 4.0, 1.0, 4.0, 40.0, 4.0, 2.0, 1.0),
+        // MINECRAFT-21: vapor 1 -> 1.2, smoke 2 -> 4, obsidianPowder 40 -> 0.3. zombie_fog
+        // (MINECRAFT-51) is 4.0, glow_gas (B2) is 2.0, nether_fog (B3) is 1.0 (all three
+        // unaffected by MINECRAFT-21).
+        assertEquals(List.of(1.2, 1.0, 4.0, 4.0, 1.0, 4.0, 0.3, 4.0, 2.0, 1.0),
             AtmosphericMaterials.ALL.stream().map(m -> m.settings().opticalDensityMultiplier()).toList());
         var vapor = AtmosphericMaterials.VAPOR.settings();
         assertEquals(1, new MaterialSettings(vapor.cellSize(), vapor.lod(), vapor.simulationSpeed(),

@@ -23,7 +23,9 @@ public record MaterialDefinition(
     }
 
     // Named colors preserve the specification without selecting unspecified RGB values.
-    public enum Color { CURRENT_FOG, BROWN, DARK_BROWN, BLACK, YELLOW, GREEN, PURPLE, GRAY, GOLD, DARK_RED }
+    // MINECRAFT-21: DARK_BROWN -> DARK_WARM_GREY (Smoke's exact RGB, now client config, is
+    // 0x0D0A08 — deliberately NOT pure black so Smoke stays distinct from Void Gas).
+    public enum Color { CURRENT_FOG, BROWN, DARK_WARM_GREY, BLACK, YELLOW, GREEN, PURPLE, GRAY, GOLD, DARK_RED }
 
     public enum Producer {
         EXISTING_VAPOR_RULES, SNOW_ICE_SURFACE,
