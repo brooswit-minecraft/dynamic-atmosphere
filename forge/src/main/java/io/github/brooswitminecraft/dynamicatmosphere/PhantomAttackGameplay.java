@@ -30,11 +30,35 @@ public final class PhantomAttackGameplay {
         return isPhantomType(attackerType) ? 0f : originalDamage;
     }
 
+    /** Seam over {@link LivingDamageEvent.Pre}'s own get/set pair, so production wiring can be
+     * exercised with a fake in tests without constructing a real event/{@code DamageContainer}. */
+    interface DamageAdjustment {
+        float getNewDamage();
+
+        void setNewDamage(float newDamage);
+    }
+
+    /** Production damage-adjustment wiring; a null {@code attackerType} (e.g. fall or fire
+     * damage, which carry no responsible entity) leaves the damage untouched. */
+    static void adjustDamage(EntityType<?> attackerType, DamageAdjustment adjustment) {
+        if (attackerType != null) {
+            adjustment.setNewDamage(zeroedDamage(attackerType, adjustment.getNewDamage()));
+        }
+    }
+
     public void onLivingDamagePre(LivingDamageEvent.Pre event) {
         Entity attacker = event.getSource().getEntity();
-        if (attacker != null) {
-            event.setNewDamage(zeroedDamage(attacker.getType(), event.getNewDamage()));
-        }
+        adjustDamage(attacker == null ? null : attacker.getType(), new DamageAdjustment() {
+            @Override
+            public float getNewDamage() {
+                return event.getNewDamage();
+            }
+
+            @Override
+            public void setNewDamage(float newDamage) {
+                event.setNewDamage(newDamage);
+            }
+        });
     }
 
     private PhantomAttackGameplay() { }

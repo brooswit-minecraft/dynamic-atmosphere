@@ -29,9 +29,12 @@ import net.neoforged.neoforge.event.tick.EntityTickEvent;
  * ticks, passive source sample 1, pearl use 24, pearl impact 48, and 100 per portal
  * block per scheduled producer pass. Random sky bursts are not produced.</p>
  *
- * <p>MINECRAFT-368 added the flying Phantom to the listed-mob set: it emits on the
- * exact same interval-ticks schedule, through the exact same OBSIDIAN_POWDER call
- * site, that Endermen already used. No new material or emission path.</p>
+ * <p>MINECRAFT-368: a Phantom emits on the exact same interval-ticks schedule, through
+ * the exact same OBSIDIAN_POWDER call site, that the other listed mobs already use --
+ * but only while actually airborne and moving. A Phantom that is grounded (rare, but not
+ * impossible: see {@code horizontalCollision} handling in its move control) or has zero
+ * velocity (e.g. frozen by a mod, or mid-despawn) does not emit, unlike the other listed
+ * mobs, which stay unconditional exactly as before.</p>
  */
 public final class ObsidianPowderGameplay {
     private static final Set<ResourceLocation> PASSIVE_SOURCE_IDS = Set.of(
@@ -54,13 +57,34 @@ public final class ObsidianPowderGameplay {
 
     private final Set<UUID> impactedPearls = new HashSet<>();
 
-    static boolean isEnderMob(Entity entity) {
-        return isEnderMob(entity.getType());
-    }
-
     static boolean isEnderMob(EntityType<?> type) {
         return type == EntityType.ENDERMAN || type == EntityType.ENDERMITE || type == EntityType.ENDER_DRAGON
-            || type == EntityType.WITCH || type == EntityType.SHULKER || type == EntityType.PHANTOM;
+            || type == EntityType.WITCH || type == EntityType.SHULKER;
+    }
+
+    /** The Phantom's own emission eligibility: unlike the unconditional {@link #isEnderMob}
+     * set, a Phantom must actually be airborne (not {@code onGround()}) and moving (nonzero
+     * velocity) -- "while flying", not merely "while it exists". */
+    static boolean isFlyingPhantom(EntityType<?> type, boolean airborne, boolean moving) {
+        return type == EntityType.PHANTOM && airborne && moving;
+    }
+
+    static boolean isListedMobTick(EntityType<?> type, boolean airborne, boolean moving) {
+        return isEnderMob(type) || isFlyingPhantom(type, airborne, moving);
+    }
+
+    /** Seam over the real {@link DynamicAtmosphereMod#emitMaterial} call, so
+     * {@link #emitForEntityTick(EmissionSink, EntityType, boolean, boolean, boolean, long, int, BlockPos, int, int, int, int)}
+     * can be exercised with a fake in tests. */
+    interface EmissionSink {
+        boolean emit(AtmosphereMaterial material, BlockPos pos, int amount);
+    }
+
+    private record ServerLevelEmissionSink(ServerLevel level) implements EmissionSink {
+        @Override
+        public boolean emit(AtmosphereMaterial material, BlockPos pos, int amount) {
+            return DynamicAtmosphereMod.emitMaterial(level, material, pos, amount);
+        }
     }
 
     static boolean isPassiveSource(BlockState state) {
@@ -71,13 +95,13 @@ public final class ObsidianPowderGameplay {
         return PASSIVE_SOURCE_IDS.contains(id);
     }
 
-    /** Pure tick-schedule logic shared by every listed mob, Phantom included; the single
-     * OBSIDIAN_POWDER emission call site lives only in {@link #onEntityTick}. */
-    static int entityTickEmission(EntityType<?> type, boolean insidePortalThisTick, long tick, int entityId,
-                                   int mobIntervalTicks, int mobEmission,
+    /** Pure tick-schedule logic shared by every listed mob; the single OBSIDIAN_POWDER
+     * emission call site lives only in {@link #emitForEntityTick}. */
+    static int entityTickEmission(EntityType<?> type, boolean airborne, boolean moving, boolean insidePortalThisTick,
+                                   long tick, int entityId, int mobIntervalTicks, int mobEmission,
                                    int portalIntervalTicks, int portalOccupantEmission) {
         int amount = 0;
-        if (isEnderMob(type) && Math.floorMod(tick + entityId, mobIntervalTicks) == 0) {
+        if (isListedMobTick(type, airborne, moving) && Math.floorMod(tick + entityId, mobIntervalTicks) == 0) {
             amount += mobEmission;
         }
         if (insidePortalThisTick && Math.floorMod(tick + entityId, portalIntervalTicks) == 0) {
@@ -86,16 +110,28 @@ public final class ObsidianPowderGameplay {
         return amount;
     }
 
+    /** Production entity-tick wiring, seamed over {@link EmissionSink} so tests can verify the
+     * exact material/position/amount reaching it without a real {@code ServerLevel}. */
+    static void emitForEntityTick(EmissionSink sink, EntityType<?> type, boolean airborne, boolean moving,
+                              boolean insidePortalThisTick, long tick, int entityId, BlockPos pos,
+                              int mobIntervalTicks, int mobEmission,
+                              int portalIntervalTicks, int portalOccupantEmission) {
+        int amount = entityTickEmission(type, airborne, moving, insidePortalThisTick, tick, entityId,
+            mobIntervalTicks, mobEmission, portalIntervalTicks, portalOccupantEmission);
+        if (amount > 0) {
+            sink.emit(AtmosphereMaterial.OBSIDIAN_POWDER, pos, amount);
+        }
+    }
+
     public void onEntityTick(EntityTickEvent.Post event) {
         Entity entity = event.getEntity();
         if (!(entity.level() instanceof ServerLevel level)) return;
         DynamicAtmosphereServerConfig.ObsidianPowder config = DynamicAtmosphereServerConfig.snapshot().obsidianPowder();
         boolean insidePortal = entity.portalProcess != null && entity.portalProcess.isInsidePortalThisTick();
-        int amount = entityTickEmission(entity.getType(), insidePortal, level.getGameTime(), entity.getId(),
-            config.mobIntervalTicks(), config.mobEmission(), config.portalIntervalTicks(), config.portalOccupantEmission());
-        if (amount > 0) {
-            DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.OBSIDIAN_POWDER, entity.blockPosition(), amount);
-        }
+        emitForEntityTick(new ServerLevelEmissionSink(level), entity.getType(), !entity.onGround(),
+            entity.getDeltaMovement().lengthSqr() > 0.0, insidePortal, level.getGameTime(), entity.getId(),
+            entity.blockPosition(), config.mobIntervalTicks(), config.mobEmission(),
+            config.portalIntervalTicks(), config.portalOccupantEmission());
     }
 
     /** Called by the bounded producer schedule for a position it already selected in a loaded chunk. */
