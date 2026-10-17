@@ -193,7 +193,7 @@ before upgrading.** It changes the world, not just the visual cache. Existing
 destructive-pressure warnings remain unchanged, and no data or world reset is
 required.
 
-## Nine Materials
+## Ten Materials
 
 `0.19.0-alpha.1` enabled all seven independent materials, each with chunk-persisted
 server amounts and separate client state. These are active MVP systems, not
@@ -213,6 +213,7 @@ emission sources, thresholds, and costs did not change.
 | Void Gas | 4 blocks | 200 ticks | Black (`voidGasColor`, default `0x000000`) | 4x |
 | Exhaust | 4 blocks | 200 ticks | Yellow (`exhaustColor`, default `0xFFFF00`) | 1x |
 | Slime | 4 blocks | 200 ticks | Green (`slimeColor`, default `0x00FF00`) | 4x |
+| Nether Gas | 4 blocks | 200 ticks | Sickly green (`netherGasColor`, default `0x6B8E23`) | 4x |
 | Glow Gas | 4 blocks | 200 ticks | Warm gold (`glowGasColor`, default `0xFFC83C`) | 2x |
 | Nether Fog | 4 blocks | 200 ticks | Very dark red (`netherFogColor`, default `0x400000`) | 1x |
 
@@ -232,7 +233,7 @@ density. Obsidian Powder's optical density moved from `40x` to `0.3x` and its
 colour from `0x800080` to a PROPOSED `0x1A1025`, pending in-game visual
 confirmation against Smoke and Void Gas at representative densities. Vapor's
 optical density moved from `1x` to `1.2x`; its colour is unchanged (and, per
-above, not actually read). Dust, Exhaust, Slime, Glow Gas, and Nether Fog are
+above, not actually read). Dust, Exhaust, Slime, Nether Gas, Glow Gas, and Nether Fog are
 unchanged in both colour and optical density.
 
 Nether Fog (MINECRAFT-1 B3) harvests and condenses lava, ultraWarm dimensions
@@ -350,6 +351,14 @@ and migrated chunks are saved in the new format.
   dissipate (roughly 330:1 at the default factor) — this is intended: full
   cells billow upward and are a stable, load-bearing signal, not a runaway to
   be capped or damped.
+- **Nether Gas:** loaded Netherrack samples are its only source (default 16
+  units per sampled block), mirroring Void Gas's own netherrack-emission
+  mechanism but as an independent material. A processed cell at or above
+  `netherGas.mildFullness` (default 10%) applies Confusion (displayed in-game
+  as Nausea) to living entities exposed to it; at or above
+  `netherGas.dangerousFullness` (default 50%) it also applies Poison. Movement
+  and dissipation reuse the shared `heavyGas` rules above, alongside Void Gas,
+  Obsidian Powder and Slime.
 - **Glow Gas (MINECRAFT-1 B2):** a bounded, palette-gated section scan of each
   loaded-chunk producer check emits 100 units per glowstone block found; only
   sections whose palette actually contains glowstone pay the scan. Visual
@@ -589,7 +598,7 @@ via the existing lava-removal mixin hook; no mixin changes were needed.
 ## Fans and Configuration
 
 Fans affect cells up to 4x4x4, which now covers every material: Vapor, Smoke,
-Dust, Exhaust, Obsidian Powder, Void Gas, and Slime. Void Gas and Slime previously used
+Dust, Exhaust, Obsidian Powder, Void Gas, Slime, Nether Gas, Glow Gas, and Nether Fog. Void Gas and Slime previously used
 larger cells and were unaffected; they are fan-transportable as of `0.20.0-alpha.1`.
 
 When Create is installed, a rotating Encased Fan performs intake followed by output
@@ -618,7 +627,7 @@ general passive source; plain obsidian has its own `obsidianPowder.obsidianBlock
 (default 1), and crying obsidian has its own `obsidianPowder.cryingObsidianEmission`
 (default 1000).
 
-`runtime.simulationSkipChance` applies to all seven materials (default 0.75,
+`runtime.simulationSkipChance` applies to all ten materials (default 0.75,
 zero processes every due cell, one skips every due cell). It replaces the old
 Vapor-only `vapor.skipChance` setting; producer cadence is independent.
 
@@ -633,6 +642,66 @@ without restarting. The client `allocation.cellBudget` setting is the exception
 and requires a game restart. Structural cell sizes, storage formats, and network
 protocol are intentionally not configurable and change only with a matching mod
 update on both sides.
+
+## Portal Transfer Sinks and Dimension Configuration
+
+A Transfer Sink consumes atmospheric material locally but does not destroy
+it: it re-emits the same amount at a linked destination. This is the whole of
+cross-dimension atmosphere; there is no separate "portal pollution" feature,
+and no scenario-specific Java logic backs it.
+
+- **Verified destinations only:** the sink remembers every portal block
+  position its own loaded-chunk scan has observed, per dimension, replacing
+  each chunk's remembered positions whenever that chunk is rescanned (so a
+  destroyed portal falls out of the cache next time its chunk is visited). A
+  transfer only ever proceeds against a position this cache already
+  contains — never a freshly computed or guessed one. The vanilla 8:1
+  Nether/Overworld coordinate scale is only a search anchor: vanilla's own
+  portal linking can place the real exit at a displaced X/Y/Z, so a Nether
+  transfer looks for the nearest already-observed portal within
+  `PortalTransferSink.NETHER_LINK_SEARCH_RADIUS` (128 blocks) of the scaled
+  anchor in the destination dimension, not the raw anchor itself. If nothing
+  verified is nearby, the transfer is declined for that pass rather than
+  emitting into unrelated terrain.
+- **Nether portals:** a Nether Gas cell at a Nether portal block transfers up
+  to `portalTransferSink.throughputPerPortalBlock` units (default 64) per
+  producer pass to the nearest verified portal position on the other side
+  (see above). A poorly ventilated Nether portal room becoming hazardous is
+  emergent: it falls out of Nether Gas's own Netherrack source, this
+  transfer, and ordinary destination-side emission — nothing scenario-specific
+  was added for it.
+- **End portals:** every generic-grid material (Dust, Obsidian Powder, Void
+  Gas, Exhaust, Slime, Nether Gas) near an End portal block transfers into The
+  End's own verified exit-portal position at the same throughput — The End's
+  portal is not coordinate-linked to the source at all, unlike the Nether, so
+  any already-observed End portal position is used — where the dimension
+  configuration below makes it dissipate almost immediately. This makes an
+  activated End portal a practical pollution-disposal mechanism, the same way
+  routing factory smoke into one is: an emergent use of normal atmospheric
+  rules, not an industrial feature in its own right.
+- **Never forces a load:** besides never resolving a destination it hasn't
+  already observed, emitting into that destination also only succeeds
+  against an already-loaded, already-tracked chunk. If either check fails
+  this pass, the transfer is skipped entirely — the source material is left
+  in place (nothing is consumed until the matching emit succeeds) and retried
+  on a later pass. A portal links two independently simulated regions; this
+  sink intentionally never forces either one to stay active just because the
+  other is.
+- **Out of scope for this mechanism:** Smoke and Vapor use a separate legacy
+  grid without a public cross-grid consume API; transferring them through
+  portals is left to a follow-up.
+
+Dimension configuration stays deliberately small — material-specific
+behavior belongs in material definitions, not here. Today only The End has
+an override, under `dimensions.theEnd` in `dynamicatmosphere-server.toml`:
+`honorPreferredAltitude` (default `false`) skips the shared fill-biased
+vertical movement entirely in that dimension, and
+`globalDissipationMultiplier` (default `100`) scales up the generic
+material grid's own dissipation chance there. Together these turn The End
+into the "atmospheric annihilator" the design calls for, without the End
+needing an oxygen system or any dimension-specific gameplay code.
+
+## Config Versioning
 
 Both config files carry an internal `configVersion` marker (MINECRAFT-21).
 Deliberately NOT a regular settable option — it's a raw top-level key the mod

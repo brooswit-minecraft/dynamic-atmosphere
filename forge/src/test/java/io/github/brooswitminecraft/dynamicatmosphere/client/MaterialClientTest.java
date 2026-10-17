@@ -63,6 +63,7 @@ class MaterialClientTest {
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.EXHAUST,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.SLIME,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.ZOMBIE_FOG,
+            io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.NETHER_GAS,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.GLOW_GAS,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.NETHER_FOG);
         var materials = AtmosphereRenderMaterial.values();
@@ -292,6 +293,9 @@ class MaterialClientTest {
         assertEquals(0, AtmosphereRenderMaterial.SLIME.channel(0, fog));
         assertEquals(1, AtmosphereRenderMaterial.SLIME.channel(1, fog));
         assertEquals(0, AtmosphereRenderMaterial.SLIME.channel(2, fog));
+        assertEquals(107 / 255f, AtmosphereRenderMaterial.NETHER_GAS.channel(0, fog));
+        assertEquals(142 / 255f, AtmosphereRenderMaterial.NETHER_GAS.channel(1, fog));
+        assertEquals(35 / 255f, AtmosphereRenderMaterial.NETHER_GAS.channel(2, fog));
         var order = new AtmosphereSliceOrder();
         var materials = AtmosphereRenderMaterial.values();
         for (int i = 0; i < materials.length; i++) {

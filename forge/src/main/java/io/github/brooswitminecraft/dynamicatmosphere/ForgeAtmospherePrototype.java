@@ -119,6 +119,8 @@ final class ForgeAtmospherePrototype {
     private final VoidGasGameplay voidGasGameplay = VoidGasGameplay.create();
     private final SlimeGameplay slimeGameplay = SlimeGameplay.create();
     private final ExhaustGameplay exhaustGameplay = ExhaustGameplay.create();
+    private final NetherGasGameplay netherGasGameplay = NetherGasGameplay.create();
+    private final PortalTransferSink portalTransferSink = PortalTransferSink.create();
     private final Map<AtmosphereMaterial, AtmosphereProducerSchedule<ChunkKey>> materialProducerSchedules =
         createMaterialProducerSchedules();
     private final Map<AtmosphereMaterial, List<AtmosphereMaterialProducer>> materialProducerHooks =
@@ -137,6 +139,10 @@ final class ForgeAtmospherePrototype {
             voidGasGameplay.onPassiveBlockSample(level, pos, chunk.getBlockState(pos));
         });
         registerMaterialProducer(AtmosphereMaterial.SLIME, slimeGameplay::onLoadedChunkProducerCheck);
+        registerMaterialProducer(AtmosphereMaterial.NETHER_GAS, (level, chunk) -> {
+            netherGasGameplay.onLoadedChunkProducerCheck(level, chunk);
+            portalTransferSink.onLoadedChunkProducerCheck(level, chunk);
+        });
         registerMaterialProducer(AtmosphereMaterial.GLOW_GAS, this::sampleGlowGasChunk);
         registerMaterialProducer(AtmosphereMaterial.NETHER_FOG, this::sampleNetherFogChunk);
     }
@@ -1065,6 +1071,13 @@ final class ForgeAtmospherePrototype {
                         capacities.clear();
                     }
                 }
+                if (material == AtmosphereMaterial.NETHER_GAS) {
+                    int size = material.cellSize();
+                    netherGasGameplay.processTurn(cellLevel, origin,
+                        cellLevel.getEntitiesOfClass(net.minecraft.world.entity.LivingEntity.class,
+                            new net.minecraft.world.phys.AABB(origin).expandTowards(size - 1, size - 1, size - 1)));
+                    dissipateHeavyGas(cellLevel, materialGrid, key, capacityAt);
+                }
                 if (material == AtmosphereMaterial.EXHAUST) {
                     int size = material.cellSize();
                     exhaustGameplay.processTurn(cellLevel, origin,
@@ -1105,7 +1118,10 @@ final class ForgeAtmospherePrototype {
         if (level == null) return;
         var cell = materialGrid.get(key);
         if (cell == null) return;
-        int loss = DustDissipation.amount(cell.amount(), level.random::nextDouble);
+        var dustConfig = tuning().dust();
+        double multiplier = DimensionAtmosphereConfigs.forDimension(key.dimension()).globalDissipationMultiplier();
+        double chance = Math.min(1.0, dustConfig.dissipationChance() * multiplier);
+        int loss = DustDissipation.amount(cell.amount(), level.random::nextDouble, chance, dustConfig.dissipationAmount());
         if (loss > 0) {
             materialGrid.set(key, cell.amount() - loss, serverTicks, capacityAt.applyAsInt(key));
         }
@@ -1125,7 +1141,9 @@ final class ForgeAtmospherePrototype {
         if (level == null) return 0;
         var cell = materialGrid.get(key);
         if (cell == null) return 0;
-        int loss = HeavyGasDissipation.amount(cell.amount(), tuning().heavyGas().dissipationFactor(), level.random::nextDouble);
+        double multiplier = DimensionAtmosphereConfigs.forDimension(key.dimension()).globalDissipationMultiplier();
+        double factor = tuning().heavyGas().dissipationFactor() / multiplier;
+        int loss = HeavyGasDissipation.amount(cell.amount(), factor, level.random::nextDouble);
         if (loss > 0) {
             materialGrid.set(key, cell.amount() - loss, serverTicks, capacityAt.applyAsInt(key));
         }
@@ -1986,6 +2004,7 @@ final class ForgeAtmospherePrototype {
         BiPredicate<AtmosphereGrid.CellKey<ResourceKey<Level>>,
             AtmosphereGrid.CellKey<ResourceKey<Level>>> canTransferDownBarrier
     ) {
+        if (!DimensionAtmosphereConfigs.forDimension(key.dimension()).honorPreferredAltitude()) return;
         ServerLevel level = server.getLevel(key.dimension());
         var cell = target.get(key);
         int capacity = capacityAt.applyAsInt(key);

@@ -1,13 +1,13 @@
 # Multiple Atmospheric Materials
 
 This document describes the combined `0.16.1-alpha.1` atmospheric-material
-runtime. All seven materials are active, independently stored, independently
+runtime. All nine materials are active, independently stored, independently
 rendered, sparse, chunk-persisted server systems. Numeric values are configurable
 defaults, not permanent balance guarantees.
 
 ## Shared Runtime
 
-All seven materials share a 200-tick simulation cadence and a 300-tick scheduled
+All nine materials share a 200-tick simulation cadence and a 300-tick scheduled
 producer cadence. Work queues remain bounded, so those values schedule work but
 do not guarantee wall-clock completion under backlog. Entity and block event
 producers remain event-driven. Producer and effect queries use loaded data only
@@ -22,14 +22,17 @@ and never force chunks to load.
 | Exhaust | Yellow | 4x4x4 | Base cells only | 1x |
 | Slime | Green | 4x4x4 | 1x to V, 2x to 2V | 4x |
 | Obsidian Powder | Dark purple cast, PROPOSED (0x1A1025) | 4x4x4 | Base cells only | 0.3x |
+| Nether Gas | Sickly green (0x6B8E23) | 4x4x4 | 1x to V, 2x to 2V | 4x |
+| Glow Gas | Gold (0xFFC83C) | 4x4x4 | Base cells only | 2x |
+| Nether Fog | Very dark red (0x400000) | 4x4x4 | 1x to V/2, 2x to V, 4x to 2V | 1x |
 
 MINECRAFT-21 (transferred from MINECRAFT-20) made every Color/Optical density
 value above a client config default (`client.materials.<material>Color` /
 `<material>OpticalDensity`) instead of a hard-coded enum literal; see
-README.md's "Seven Materials" section for the exact key names and the
+README.md's "Ten Materials" section for the exact key names and the
 Smoke/Obsidian Powder/Vapor value changes.
 
-All seven materials now share one render distance and one fade: full opacity
+All nine materials now share one render distance and one fade: full opacity
 out to `client.rendering.fadeStartFraction * maxDistance` (defaults 0.75 and
 `2 * V`), fading smoothly to fully transparent at `maxDistance`, nothing
 rendered beyond. There is no longer a per-material reach multiplier; the LOD
@@ -140,6 +143,47 @@ Ender pearl use/impact produce Obsidian Powder. Full-moon loaded-chunk checks re
 independent 1/256 chance of an 8,000-unit burst. Obsidian Powder never gates spawning;
 Endermen still emit it, but their spawns follow the same Vapor (fog) rule as
 every other Overworld monster — see the Vapor section above.
+
+### Nether Gas
+
+Loaded Netherrack samples produce Nether Gas. Processed cells at or above the
+configured mild-fullness fraction apply a Confusion (Nausea) effect to nearby
+living entities; cells at or above the configured dangerous-fullness fraction
+also apply Poison. Movement and dissipation reuse the same generic heavy-gas
+rules as Void Gas, Obsidian Powder and Slime.
+
+### Glow Gas (MINECRAFT-1 B2)
+
+A bounded, palette-gated section scan of each loaded-chunk producer check emits
+100 units per glowstone block found; only sections whose palette actually
+contains glowstone pay the scan. Visual only — no entity effects, no spawn
+gating, no real block light.
+
+## Dimension Configuration and Portal Transfer Sinks
+
+Phase 4 adds two small, generic mechanisms rather than per-scenario logic:
+
+- **Portal Transfer Sink**: a Nether portal block consumes Nether Gas from its
+  own cell and re-emits the same amount at a verified destination, resolved
+  from portal positions the sink has itself already observed while scanning
+  loaded chunks (the vanilla 8:1 Nether/Overworld coordinate scale is only a
+  search anchor for that lookup, within a 128-block radius, since vanilla's
+  own portal linking can place the real exit at a displaced X/Y/Z). An End
+  portal block drains every generic-grid material (Dust, Obsidian Powder,
+  Void Gas, Exhaust, Slime, Nether Gas) near it into The End's own verified
+  exit-portal position. If no verified destination is known, or its chunk is
+  not already loaded, the attempt is skipped and retried on a later producer
+  pass — nothing is ever emitted into unrelated terrain, and material is
+  never destroyed by a skipped transfer. Smoke and Vapor use a separate
+  legacy grid without a public cross-grid consume API and are out of scope
+  for this mechanism.
+- **Dimension configuration**: a small, dimension-keyed override, intentionally
+  not a general per-dimension registry. Today only The End is overridden:
+  `honorPreferredAltitude = false` (the shared fill-biased vertical movement
+  is skipped entirely in the End) and `globalDissipationMultiplier = 100`
+  (the generic material grid's own dissipation chance is scaled up for that
+  dimension), making an activated End portal a practical, emergent pollution
+  disposal mechanism rather than a special-cased feature.
 
 ## Configuration
 
