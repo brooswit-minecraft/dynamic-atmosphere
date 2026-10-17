@@ -46,6 +46,10 @@ public final class AtmosphericMaterials {
         Set.of(NETHER_PORTAL_BLOCKS_SLOWLY, ENDERMEN, ENDERMITES, ENDER_DRAGON,
             ENDER_PEARL_USE, STANDING_IN_NETHER_PORTAL, SOUL_TORCHES, SOUL_FIRES, SOUL_SAND,
             WITCH, SHULKER, ENDER_CHEST, CRYING_OBSIDIAN), Set.of());
+    /** Phase 4 (MINECRAFT-52): mild-to-dangerous potion-effect hazard, sourced from Netherrack. */
+    public static final MaterialDefinition NETHER_GAS = new MaterialDefinition("nether_gas", SICKLY_GREEN,
+        new MaterialSettings(CELL_SIZE, VOID_GAS_LOD, 1, OptionalDouble.of(1), 4),
+        Set.of(NETHERRACK), Set.of());
     /** MINECRAFT-1 (B2): visual only, 2x Vapor's optical density. */
     public static final MaterialDefinition GLOW_GAS = new MaterialDefinition("glow_gas", GOLD,
         new MaterialSettings(CELL_SIZE, DUST_LOD, 1, OptionalDouble.of(1), 2),
@@ -56,7 +60,7 @@ public final class AtmosphericMaterials {
         Set.of(LAVA_SOURCE_HARVEST), Set.of());
 
     public static final List<MaterialDefinition> ALL =
-        List.of(VAPOR, DUST, SMOKE, VOID_GAS, EXHAUST, SLIME, OBSIDIAN_POWDER, GLOW_GAS, NETHER_FOG);
+        List.of(VAPOR, DUST, SMOKE, VOID_GAS, EXHAUST, SLIME, OBSIDIAN_POWDER, NETHER_GAS, GLOW_GAS, NETHER_FOG);
 
     private AtmosphericMaterials() { }
 

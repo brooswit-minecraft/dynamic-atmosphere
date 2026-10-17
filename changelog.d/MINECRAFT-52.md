@@ -1,0 +1,9 @@
+bump: minor
+
+### Added
+- Nether Gas: an eighth atmospheric material, sourced from loaded Netherrack samples. Mild negative potion effects (Confusion/Nausea) apply at low concentration, with Poison added at high concentration; movement and dissipation reuse the existing generic heavy-gas rules shared with Void Gas, Obsidian Powder and Slime.
+- Portal Transfer Sinks: a Nether portal block consumes Nether Gas locally and re-emits the same amount at a verified destination resolved from portal positions the sink has itself already observed while scanning loaded chunks (the vanilla 8:1 Nether/Overworld coordinate scale is only a search anchor for that lookup, within a 128-block radius, since vanilla's own portal linking can place the real exit at a displaced X/Y/Z). An End portal block drains every generic-grid material near it into The End's own verified exit-portal position instead. A transfer never forces a chunk or dimension to load, and never guesses at an unverified destination — if nothing verified is available this pass, the attempt is skipped and retried later, and the source material is only debited after a successful emit, so it is never destroyed by a skipped transfer.
+- Dimension configuration: a small, dimension-keyed override (`dimensions.theEnd` in `dynamicatmosphere-server.toml`). The End now ignores the shared fill-biased vertical movement by default (`honorPreferredAltitude = false`) and multiplies its own generic-grid dissipation chance (`globalDissipationMultiplier`, default `100`), making an activated End portal a practical, emergent pollution-disposal mechanism rather than a special-cased feature.
+
+### Changed
+- Smoke, Vapor, and sources already active in the Nether (lava, fire, soul fire, Netherrack, Nether portal blocks, etc.) were already dimension-generic; this phase adds Nether Gas as the Nether's own named material rather than introducing new per-dimension simulation plumbing.
