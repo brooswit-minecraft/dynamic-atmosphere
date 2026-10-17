@@ -46,14 +46,16 @@ import java.util.function.Predicate;
  * <p><b>Verified destinations, never a forced load:</b> this class remembers every portal
  * block position its own loaded-chunk scan has observed, per dimension, replacing each chunk's
  * remembered positions whenever that chunk is rescanned (so a destroyed portal falls out of the
- * cache the next time its chunk is visited). That alone still leaves a window: a portal destroyed
- * in a still-loaded chunk stays cached until that chunk's own next scheduled scan. So before
- * selecting a candidate, any one of them whose chunk is CURRENTLY loaded is re-checked live
- * against the expected block right now ({@link #liveCandidates}) -- a candidate only survives
- * that check if it is still the expected portal block, or if its chunk isn't loaded at all (and
- * therefore can't be verified without forcing a load, so it is trusted from the cache instead).
- * A transfer only proceeds against a surviving position -- never a freshly computed/guessed one,
- * and never one that requires loading or generating anything.</p>
+ * cache the next time its chunk is visited). The historical cache can still hold a position whose
+ * chunk is not loaded right now, so eligibility for SELECTION this pass is stricter than mere
+ * cache membership: {@link #eligibleCandidates} keeps only positions whose chunk is currently
+ * loaded AND whose live block still matches the expected portal block right now. An unloaded
+ * candidate is neither trusted nor force-loaded to check -- it is simply not eligible this pass,
+ * so it can never be selected ahead of a farther but currently reachable, verified exit, and it
+ * can never cause a transfer to repeatedly pick a dead end it cannot complete. It stays in the
+ * historical cache in case its chunk loads again later. A transfer only proceeds against an
+ * eligible position -- never a freshly computed/guessed one, and never one that requires loading
+ * or generating anything.</p>
  *
  * <p><b>Conservation under a partial/clamped emit:</b> {@link DynamicAtmosphereMod#emitMaterial}
  * returns a boolean, but the underlying grid can clamp an emit short of what was requested while
@@ -163,27 +165,28 @@ public final class PortalTransferSink {
     }
 
     /**
-     * Pure, injectable filter dropping a candidate only when {@code isPlausible} says it can no
-     * longer be trusted (verified, via an already-loaded chunk, to no longer be the expected
-     * portal block). A candidate in a chunk that is not currently loaded cannot be verified
-     * without forcing a load, so it stays -- same "no-force-load" rule as everywhere else here.
+     * Pure, injectable filter keeping only candidates {@code isEligible} accepts. Used both for
+     * production selection (a live, no-force-load loaded-and-verified check) and for tests (a
+     * fake predicate standing in for that check without a real level or chunk).
      */
-    static Collection<BlockPos> filterStale(Collection<BlockPos> candidates, Predicate<BlockPos> isPlausible) {
-        return candidates.stream().filter(isPlausible).toList();
+    static Collection<BlockPos> filterStale(Collection<BlockPos> candidates, Predicate<BlockPos> isEligible) {
+        return candidates.stream().filter(isEligible).toList();
     }
 
     /**
-     * Drops a known position only when its chunk is CURRENTLY loaded and the live block there no
-     * longer matches {@code expected}. Never forces a load to check -- an unloaded candidate is
-     * kept (unverifiable, trusted from the cache) rather than forced to resolve.
+     * Keeps only positions whose chunk is CURRENTLY loaded and whose live block still matches
+     * {@code expected} right now. Never forces a load to check: an unloaded candidate is simply
+     * not eligible for selection this pass (not trusted, not guessed at) -- it stays in the
+     * historical cache ({@link #knownPositions}) for a later pass where its chunk might be
+     * loaded, but a farther, currently-reachable candidate is always preferred over it this pass.
      */
-    private Collection<BlockPos> liveCandidates(
+    private Collection<BlockPos> eligibleCandidates(
         ServerLevel destinationLevel, Collection<BlockPos> candidates, Predicate<BlockState> expected
     ) {
         return filterStale(candidates, pos -> {
             ChunkPos chunkPos = new ChunkPos(pos);
             LevelChunk chunk = destinationLevel.getChunkSource().getChunkNow(chunkPos.x, chunkPos.z);
-            return chunk == null || expected.test(chunk.getBlockState(pos));
+            return chunk != null && expected.test(chunk.getBlockState(pos));
         });
     }
 
@@ -227,7 +230,7 @@ public final class PortalTransferSink {
         }
         ServerLevel destinationLevel = server.getLevel(destinationDimension);
         if (destinationLevel == null) return;
-        var candidates = liveCandidates(destinationLevel,
+        var candidates = eligibleCandidates(destinationLevel,
             knownPositions(knownNetherPortals, destinationDimension), state -> state.is(Blocks.NETHER_PORTAL));
         Optional<BlockPos> destination = nearestWithinRadius(anchor, candidates, NETHER_LINK_SEARCH_RADIUS);
         if (destination.isEmpty()) return;
@@ -238,7 +241,7 @@ public final class PortalTransferSink {
         if (level.dimension().equals(Level.END)) return;
         ServerLevel endLevel = server.getLevel(Level.END);
         if (endLevel == null) return;
-        var candidates = liveCandidates(endLevel, knownPositions(knownEndPortals, Level.END), state -> state.is(Blocks.END_PORTAL));
+        var candidates = eligibleCandidates(endLevel, knownPositions(knownEndPortals, Level.END), state -> state.is(Blocks.END_PORTAL));
         Optional<BlockPos> destination = any(candidates);
         if (destination.isEmpty()) return;
         for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
@@ -246,30 +249,77 @@ public final class PortalTransferSink {
         }
     }
 
-    private void transfer(
+    /**
+     * The three grid operations {@link #transfer} needs, behind an interface so the whole
+     * transaction -- partial/clamped acceptance, a failed source debit and its rollback, and an
+     * unavailable destination -- is unit-testable with an in-memory fake, not just its pure
+     * arithmetic helpers in isolation.
+     */
+    interface MaterialPorts {
+        Optional<AtmosphereMaterialState> state(ServerLevel level, AtmosphereMaterial material, BlockPos pos);
+
+        boolean emit(ServerLevel level, AtmosphereMaterial material, BlockPos pos, int amount);
+
+        boolean consume(ServerLevel level, AtmosphereMaterial material, BlockPos pos, int amount);
+    }
+
+    private static final MaterialPorts LIVE_PORTS = new MaterialPorts() {
+        @Override
+        public Optional<AtmosphereMaterialState> state(ServerLevel level, AtmosphereMaterial material, BlockPos pos) {
+            return DynamicAtmosphereMod.materialState(level, material, pos);
+        }
+
+        @Override
+        public boolean emit(ServerLevel level, AtmosphereMaterial material, BlockPos pos, int amount) {
+            return DynamicAtmosphereMod.emitMaterial(level, material, pos, amount);
+        }
+
+        @Override
+        public boolean consume(ServerLevel level, AtmosphereMaterial material, BlockPos pos, int amount) {
+            return DynamicAtmosphereMod.consumeMaterial(level, material, pos, amount);
+        }
+    };
+
+    private final MaterialPorts ports;
+
+    /**
+     * Package-private so an in-memory fake {@link MaterialPorts} can exercise {@link #transfer}
+     * end to end -- partial destination acceptance, a failed source debit with verified rollback,
+     * and an unavailable destination preserving both totals -- without a live level.
+     */
+    void transfer(
         ServerLevel sourceLevel, BlockPos sourcePos,
         ServerLevel destinationLevel, BlockPos destinationPos,
         AtmosphereMaterial material, int throughput
     ) {
-        var sourceState = DynamicAtmosphereMod.materialState(sourceLevel, material, sourcePos);
+        var sourceState = ports.state(sourceLevel, material, sourcePos);
         var transferPlan = plan(sourceState.map(AtmosphereMaterialState::amount).orElse(0), throughput, true);
         if (!transferPlan.active()) return;
-        var destinationBefore = DynamicAtmosphereMod.materialState(destinationLevel, material, destinationPos);
+        var destinationBefore = ports.state(destinationLevel, material, destinationPos);
         if (destinationBefore.isEmpty()) return;
-        if (!DynamicAtmosphereMod.emitMaterial(destinationLevel, material, destinationPos, transferPlan.amount())) return;
-        var destinationAfter = DynamicAtmosphereMod.materialState(destinationLevel, material, destinationPos);
+        if (!ports.emit(destinationLevel, material, destinationPos, transferPlan.amount())) return;
+        var destinationAfter = ports.state(destinationLevel, material, destinationPos);
         int accepted = acceptedAmount(destinationBefore.get().amount(),
             destinationAfter.map(AtmosphereMaterialState::amount).orElse(destinationBefore.get().amount()));
         int debit = Math.min(transferPlan.amount(), accepted);
         if (debit <= 0) return;
-        if (!DynamicAtmosphereMod.consumeMaterial(sourceLevel, material, sourcePos, debit) && accepted > 0) {
+        if (!ports.consume(sourceLevel, material, sourcePos, debit) && accepted > 0) {
             // The destination already accepted material but the source couldn't be debited:
             // roll back the exact accepted amount so nothing is ever duplicated.
-            DynamicAtmosphereMod.consumeMaterial(destinationLevel, material, destinationPos, accepted);
+            ports.consume(destinationLevel, material, destinationPos, accepted);
         }
     }
 
-    private PortalTransferSink() { }
+    private PortalTransferSink(MaterialPorts ports) {
+        this.ports = ports;
+    }
 
-    public static PortalTransferSink create() { return new PortalTransferSink(); }
+    public static PortalTransferSink create() {
+        return new PortalTransferSink(LIVE_PORTS);
+    }
+
+    /** Test-only: injects a fake {@link MaterialPorts} so {@link #transfer} is unit-testable. */
+    static PortalTransferSink createForTest(MaterialPorts ports) {
+        return new PortalTransferSink(ports);
+    }
 }
