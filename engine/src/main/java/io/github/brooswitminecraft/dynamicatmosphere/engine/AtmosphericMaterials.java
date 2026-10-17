@@ -20,14 +20,16 @@ public final class AtmosphericMaterials {
         new MaterialSettings.LodBand(1, 1), new MaterialSettings.LodBand(2, 2));
 
     public static final MaterialDefinition VAPOR = new MaterialDefinition("vapor", CURRENT_FOG,
-        settings(CELL_SIZE, VAPOR_LOD, 1, OptionalDouble.of(1)), Set.of(EXISTING_VAPOR_RULES, SNOW_ICE_SURFACE),
+        // MINECRAFT-21: vaporOpticalDensity 1 -> 1.2.
+        new MaterialSettings(CELL_SIZE, VAPOR_LOD, 1, OptionalDouble.of(1), 1.2), Set.of(EXISTING_VAPOR_RULES, SNOW_ICE_SURFACE),
         Set.of(MaterialDefinition.Transformation.WATER));
     public static final MaterialDefinition DUST = new MaterialDefinition("dust", BROWN,
         settings(CELL_SIZE, DUST_LOD, 1, OptionalDouble.of(1)),
         Set.of(PLAYER_WALKING, MOB_WALKING, BLOCK_BREAKING, BLOCK_PLACEMENT,
             PLAYER_FALL_DAMAGE, MOB_FALL_DAMAGE), Set.of(MaterialDefinition.Transformation.GRAVEL));
-    public static final MaterialDefinition SMOKE = new MaterialDefinition("smoke", DARK_BROWN,
-        new MaterialSettings(CELL_SIZE, VAPOR_LOD, 1, OptionalDouble.of(1), 2),
+    public static final MaterialDefinition SMOKE = new MaterialDefinition("smoke", DARK_WARM_GREY,
+        // MINECRAFT-21: smokeOpticalDensity 2 -> 4.
+        new MaterialSettings(CELL_SIZE, VAPOR_LOD, 1, OptionalDouble.of(1), 4),
         Set.of(LAVA, FIRE, EXPLOSIONS, EXPLOSION_DESTROYED_BLOCKS, FURNACES, TORCHES, CAMPFIRES), Set.of());
     public static final MaterialDefinition VOID_GAS = new MaterialDefinition("void_gas", BLACK,
         new MaterialSettings(CELL_SIZE, VOID_GAS_LOD, 1, OptionalDouble.of(1), 4),
@@ -39,7 +41,8 @@ public final class AtmosphericMaterials {
         new MaterialSettings(CELL_SIZE, VOID_GAS_LOD, 1, OptionalDouble.of(1), 4),
         Set.of(UNDERGROUND_SLIME_CHUNKS_RANDOMLY), Set.of(MaterialDefinition.Transformation.SLIME));
     public static final MaterialDefinition OBSIDIAN_POWDER = new MaterialDefinition("obsidian_powder", PURPLE,
-        new MaterialSettings(CELL_SIZE, DUST_LOD, 1, OptionalDouble.of(1), 40),
+        // MINECRAFT-21: obsidianPowderOpticalDensity 40 -> 0.3.
+        new MaterialSettings(CELL_SIZE, DUST_LOD, 1, OptionalDouble.of(1), 0.3),
         Set.of(NETHER_PORTAL_BLOCKS_SLOWLY, ENDERMEN, ENDERMITES, ENDER_DRAGON,
             ENDER_PEARL_USE, STANDING_IN_NETHER_PORTAL, SOUL_TORCHES, SOUL_FIRES, SOUL_SAND,
             WITCH, SHULKER, ENDER_CHEST, CRYING_OBSIDIAN), Set.of());
@@ -51,9 +54,13 @@ public final class AtmosphericMaterials {
     public static final MaterialDefinition GLOW_GAS = new MaterialDefinition("glow_gas", GOLD,
         new MaterialSettings(CELL_SIZE, DUST_LOD, 1, OptionalDouble.of(1), 2),
         Set.of(GLOWSTONE), Set.of());
+    /** MINECRAFT-1 (B3): very dark red, vapor-like LOD; home is the dimension's own bottom. */
+    public static final MaterialDefinition NETHER_FOG = new MaterialDefinition("nether_fog", DARK_RED,
+        settings(CELL_SIZE, VAPOR_LOD, 1, OptionalDouble.of(1)),
+        Set.of(LAVA_SOURCE_HARVEST), Set.of());
 
     public static final List<MaterialDefinition> ALL =
-        List.of(VAPOR, DUST, SMOKE, VOID_GAS, EXHAUST, SLIME, OBSIDIAN_POWDER, NETHER_GAS, GLOW_GAS);
+        List.of(VAPOR, DUST, SMOKE, VOID_GAS, EXHAUST, SLIME, OBSIDIAN_POWDER, NETHER_GAS, GLOW_GAS, NETHER_FOG);
 
     private AtmosphericMaterials() { }
 

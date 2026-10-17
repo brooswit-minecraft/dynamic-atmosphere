@@ -154,7 +154,7 @@ units; capacity remains 0..1000.
 
 Install this version on **both server and client**, or in a single-player NeoForge
 instance. Earlier particle-only releases did not require a client installation;
-the new grid renderer and sync protocol do. **Protocol 11 requires updating both
+the new grid renderer and sync protocol do. **Protocol 12 requires updating both
 sides together; earlier-protocol clients cannot connect.** Large snapshots use
 512-cell packets and a completion marker. Snapshot scope and chunk freshness
 distinguish current observations from retained visual history. There is no
@@ -193,7 +193,7 @@ before upgrading.** It changes the world, not just the visual cache. Existing
 destructive-pressure warnings remain unchanged, and no data or world reset is
 required.
 
-## Eight Materials
+## Ten Materials
 
 `0.19.0-alpha.1` enabled all seven independent materials, each with chunk-persisted
 server amounts and separate client state. These are active MVP systems, not
@@ -206,17 +206,63 @@ emission sources, thresholds, and costs did not change.
 
 | Material | Base cell edge | Scheduled simulation interval | Color | Optical density |
 | --- | --- | --- | --- | --- |
-| Vapor | 4 blocks | 200 ticks | Minecraft fog/horizon | 1x |
-| Smoke | 4 blocks | 200 ticks | Very dark brown (0x1F160F) | 2x |
-| Dust | 4 blocks | 200 ticks | Brown | 1x |
-| Obsidian Powder | 4 blocks | 200 ticks | Purple | 40x |
-| Void Gas | 4 blocks | 200 ticks | Black | 4x |
-| Exhaust | 4 blocks | 200 ticks | Yellow | 1x |
-| Slime | 4 blocks | 200 ticks | Green | 4x |
-| Glow Gas | 4 blocks | 200 ticks | Warm gold (0xFFC83C) | 2x |
+| Vapor | 4 blocks | 200 ticks | Minecraft fog/horizon (`vaporColor` defined for config parity, unused by the renderer) | 1.2x |
+| Smoke | 4 blocks | 200 ticks | Very dark warm grey, deliberately not pure black (`smokeColor`, default `0x0D0A08`) | 4x |
+| Dust | 4 blocks | 200 ticks | Brown (`dustColor`, default `0x8B4513`) | 1x |
+| Obsidian Powder | 4 blocks | 200 ticks | Dark purple cast, PROPOSED pending in-game visual acceptance (`obsidianPowderColor`, default `0x1A1025`) | 0.3x |
+| Void Gas | 4 blocks | 200 ticks | Black (`voidGasColor`, default `0x000000`) | 4x |
+| Exhaust | 4 blocks | 200 ticks | Yellow (`exhaustColor`, default `0xFFFF00`) | 1x |
+| Slime | 4 blocks | 200 ticks | Green (`slimeColor`, default `0x00FF00`) | 4x |
+| Nether Gas | 4 blocks | 200 ticks | Sickly green (`netherGasColor`, default `0x6B8E23`) | 4x |
+| Glow Gas | 4 blocks | 200 ticks | Warm gold (`glowGasColor`, default `0xFFC83C`) | 2x |
+| Nether Fog | 4 blocks | 200 ticks | Very dark red (`netherFogColor`, default `0x400000`) | 1x |
 
 Glow Gas (MINECRAFT-1 B2) is visual only: it carries no real block light and is
 rendered unlit, purely atmospheric haze colored to suggest glowstone's glow.
+
+`0.22.0-alpha.1` (MINECRAFT-21, transferred from MINECRAFT-20) made every
+material's colour above a client config value (`client.materials.<material>Color`,
+packed `0xRRGGBB`), where a hard-coded `AtmosphereRenderMaterial` enum literal
+used to be the only way to change one — retuning a colour previously required
+a full mod release. The renderer reads the live client config value, never the
+enum literal, for every material except Vapor, which always uses the current
+fog colour regardless of `vaporColor`. Smoke's optical density moved from `2x`
+to `4x` and its colour from `0x1F160F` to `0x0D0A08` — deliberately NOT pure
+black, so it stays visually distinct from Void Gas, the other material at `4x`
+density. Obsidian Powder's optical density moved from `40x` to `0.3x` and its
+colour from `0x800080` to a PROPOSED `0x1A1025`, pending in-game visual
+confirmation against Smoke and Void Gas at representative densities. Vapor's
+optical density moved from `1x` to `1.2x`; its colour is unchanged (and, per
+above, not actually read). Dust, Exhaust, Slime, Nether Gas, Glow Gas, and Nether Fog are
+unchanged in both colour and optical density.
+
+Nether Fog (MINECRAFT-1 B3) harvests and condenses lava, ultraWarm dimensions
+only: a bounded, palette-gated random check consumes one lava source block per
+pass into fog equal to one full block's capacity share, and at high fullness a
+cell places one lava source back into a random air block in itself, at exactly
+the same cost. Both directions share one constant, so the cycle neither drains
+nor floods lava over any number of round trips. No explosions either way: both
+are direct block-state writes, the same technique the existing magma-regrowth
+feature uses. The existing Smoke "lava disappeared" emission is deliberately
+not fired for a Nether Fog harvest. Known physics: gas cannot move down out of
+a cell containing fluid, so Nether Fog pools on the surface of a Nether lava
+sea rather than reaching the bedrock beneath it -- accepted, not a bug.
+
+Ender Gas (Obsidian Powder) gains a third, End-only production path
+(MINECRAFT-1 B4): near the dimension's build-height ceiling, a 10%-by-default
+chunk gate (`obsidianPowder.endGateChance`) mirrors Vapor's own producer
+pattern before emitting `obsidianPowder.endEmission` (default 200) per loaded
+End chunk per pass. At high fullness, a dense Ender Gas cell in the End
+occasionally condenses into **End Sand** -- the mod's first registered block
+and item (`dynamicatmosphere:end_sand`, ID frozen: renaming it later is
+breaking for sickos). End Sand rises one block every
+`endSand.riseIntervalTicks` (default 20) ticks; when something blocks the
+block above, it simply stops rising and resumes the moment that's no longer
+true, and is deleted outright rather than placed if a rise would cross the
+dimension's build-height ceiling. It's mineable and drops itself. Player-placed
+End Sand rises exactly the same way as condensed End Sand -- both go through
+the same placement hook. The block's current texture is a flat placeholder
+purple; real block art is a follow-up.
 
 Intervals are scheduled game ticks, subject to bounded work queues, not guaranteed
 wall-clock completion. Scheduled producer passes share a 300-tick cadence. All
@@ -231,7 +277,7 @@ Genuinely invalid or corrupt data — a missing `cells` array, a malformed tag,
 a decode failure — is handled differently: the original tag is retained and
 that chunk is skipped rather than silently truncated.
 Only Vapor uses the persistent
-client visual disk cache; the other seven keep independent session-only visual caches.
+client visual disk cache; the other eight keep independent session-only visual caches.
 Legacy 8-block Smoke cells are split into aligned 4-block children on load. Integer
 remainders are distributed among children so total stored Smoke mass is preserved,
 and migrated chunks are saved in the new format.
@@ -552,7 +598,7 @@ via the existing lava-removal mixin hook; no mixin changes were needed.
 ## Fans and Configuration
 
 Fans affect cells up to 4x4x4, which now covers every material: Vapor, Smoke,
-Dust, Exhaust, Obsidian Powder, Void Gas, Slime, Nether Gas, and Glow Gas. Void Gas and Slime previously used
+Dust, Exhaust, Obsidian Powder, Void Gas, Slime, Nether Gas, Glow Gas, and Nether Fog. Void Gas and Slime previously used
 larger cells and were unaffected; they are fan-transportable as of `0.20.0-alpha.1`.
 
 When Create is installed, a rotating Encased Fan performs intake followed by output
@@ -581,7 +627,7 @@ general passive source; plain obsidian has its own `obsidianPowder.obsidianBlock
 (default 1), and crying obsidian has its own `obsidianPowder.cryingObsidianEmission`
 (default 1000).
 
-`runtime.simulationSkipChance` applies to all nine materials (default 0.75,
+`runtime.simulationSkipChance` applies to all ten materials (default 0.75,
 zero processes every due cell, one skips every due cell). It replaces the old
 Vapor-only `vapor.skipChance` setting; producer cadence is independent.
 
@@ -654,6 +700,29 @@ vertical movement entirely in that dimension, and
 material grid's own dissipation chance there. Together these turn The End
 into the "atmospheric annihilator" the design calls for, without the End
 needing an oxygen system or any dimension-specific gameplay code.
+
+## Config Versioning
+
+Both config files carry an internal `configVersion` marker (MINECRAFT-21).
+Deliberately NOT a regular settable option — it's a raw top-level key the mod
+manages itself, outside NeoForge's normal config spec, so NeoForge's own
+"fill in missing defaults" correction pass can never invent or overwrite it
+before the mod gets a chance to compare it (see `ConfigVersionGuard`'s class
+documentation in the source for why that distinction matters). Before a file
+is read, the mod compares its stored `configVersion` against its own current
+revision for that file (independently versioned per file). A pre-MINECRAFT-21
+file with no `configVersion` key at all is treated as version `0`. On any
+mismatch, the old file is renamed to `<name>.toml.bak-<oldVersion>` (e.g.
+`dynamicatmosphere-server.toml.bak-0`, never overwriting an existing backup —
+colliding names fall back to `-2`, `-3`, ...) and a warning is logged naming
+the renamed path; a fresh file carrying just the current `configVersion` is
+written in its place, so the config loader then regenerates every other key
+from current defaults around that marker. **This resets that file's
+configuration — it does not merge old custom settings into the new
+defaults.** Re-apply any customization by hand from the backup file. This
+runs both against the global `config/` directory at mod-construction time,
+and — for the server file specifically — against a dedicated server's actual
+per-world `<world>/serverconfig/` override, checked on every server start.
 
 ## Lava and Magma
 

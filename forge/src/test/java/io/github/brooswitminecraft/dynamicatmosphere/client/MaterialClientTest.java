@@ -43,13 +43,14 @@ class MaterialClientTest {
     }
 
     @Test
-    void obsidianPowderIsTenTimesItsPreviousOpticalDensity() {
-        assertEquals(40, AtmosphereRenderMaterial.OBSIDIAN_POWDER.opticalDensityMultiplier);
+    void obsidianPowderIsPointZeroThreeTimesOpticalDensity() {
+        // MINECRAFT-21: obsidianPowderOpticalDensity 40 -> 0.3.
+        assertEquals(0.3, AtmosphereRenderMaterial.OBSIDIAN_POWDER.opticalDensityMultiplier);
         assertEquals(4, AtmosphereRenderMaterial.OBSIDIAN_POWDER.cellSize);
         assertEquals(4, AtmosphereRenderMaterial.SMOKE.cellSize);
         double oldDepth = -Math.log1p(-AtmosphereVolumeGeometry.sliceAlpha(100, 1, 1, 4));
-        double newDepth = -Math.log1p(-AtmosphereVolumeGeometry.sliceAlpha(100, 1, 1, 40));
-        assertEquals(oldDepth * 10, newDepth, 1e-5);
+        double newDepth = -Math.log1p(-AtmosphereVolumeGeometry.sliceAlpha(100, 1, 1, 0.3));
+        assertEquals(oldDepth * 0.075, newDepth, 1e-5);
     }
     @Test
     void activeOpticalDensityMultipliersMatchDefinitionsWithoutScalingMaterial() {
@@ -62,7 +63,8 @@ class MaterialClientTest {
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.EXHAUST,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.SLIME,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.NETHER_GAS,
-            io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.GLOW_GAS);
+            io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.GLOW_GAS,
+            io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.NETHER_FOG);
         var materials = AtmosphereRenderMaterial.values();
         for (int i = 0; i < materials.length; i++) {
             assertEquals(definitions.get(i).settings().opticalDensityMultiplier(), materials[i].opticalDensityMultiplier);
@@ -81,12 +83,14 @@ class MaterialClientTest {
     }
 
     @Test
-    void smokeIsTwoTimesAndVoidGasStaysFourTimesWithSlimeEnderVaporDustExhaustUnchanged() {
-        assertEquals(2, AtmosphereRenderMaterial.SMOKE.opticalDensityMultiplier);
-        assertEquals(2, AtmosphereRenderMaterial.SMOKE.tuning().opticalDensity());
-        assertEquals(31 / 255f, AtmosphereRenderMaterial.SMOKE.channel(0, new float[3]));
-        assertEquals(22 / 255f, AtmosphereRenderMaterial.SMOKE.channel(1, new float[3]));
-        assertEquals(15 / 255f, AtmosphereRenderMaterial.SMOKE.channel(2, new float[3]));
+    void smokeIsFourTimesAndVoidGasStaysFourTimesWithSlimeExhaustUnchanged() {
+        // MINECRAFT-21: smokeOpticalDensity 2 -> 4; colour 0x1F160F -> 0x0D0A08 (deliberately
+        // NOT pure black, so Smoke stays distinct from Void Gas at matching optical density).
+        assertEquals(4, AtmosphereRenderMaterial.SMOKE.opticalDensityMultiplier);
+        assertEquals(4, AtmosphereRenderMaterial.SMOKE.tuning().opticalDensity());
+        assertEquals(13 / 255f, AtmosphereRenderMaterial.SMOKE.channel(0, new float[3]));
+        assertEquals(10 / 255f, AtmosphereRenderMaterial.SMOKE.channel(1, new float[3]));
+        assertEquals(8 / 255f, AtmosphereRenderMaterial.SMOKE.channel(2, new float[3]));
 
         assertEquals(4, AtmosphereRenderMaterial.VOID_GAS.opticalDensityMultiplier);
         assertEquals(4, AtmosphereRenderMaterial.VOID_GAS.tuning().opticalDensity());
@@ -94,24 +98,27 @@ class MaterialClientTest {
         assertEquals(0, AtmosphereRenderMaterial.VOID_GAS.channel(1, new float[3]));
         assertEquals(0, AtmosphereRenderMaterial.VOID_GAS.channel(2, new float[3]));
 
-        assertEquals(1, AtmosphereRenderMaterial.VAPOR.opticalDensityMultiplier);
-        assertEquals(1, AtmosphereRenderMaterial.VAPOR.tuning().opticalDensity());
+        // MINECRAFT-21: vaporOpticalDensity 1 -> 1.2.
+        assertEquals(1.2, AtmosphereRenderMaterial.VAPOR.opticalDensityMultiplier);
+        assertEquals(1.2, AtmosphereRenderMaterial.VAPOR.tuning().opticalDensity());
         assertEquals(1, AtmosphereRenderMaterial.DUST.opticalDensityMultiplier);
         assertEquals(1, AtmosphereRenderMaterial.DUST.tuning().opticalDensity());
         assertEquals(1, AtmosphereRenderMaterial.EXHAUST.opticalDensityMultiplier);
         assertEquals(1, AtmosphereRenderMaterial.EXHAUST.tuning().opticalDensity());
         assertEquals(4, AtmosphereRenderMaterial.SLIME.opticalDensityMultiplier);
         assertEquals(4, AtmosphereRenderMaterial.SLIME.tuning().opticalDensity());
-        assertEquals(40, AtmosphereRenderMaterial.OBSIDIAN_POWDER.opticalDensityMultiplier);
-        assertEquals(40, AtmosphereRenderMaterial.OBSIDIAN_POWDER.tuning().opticalDensity());
+        // MINECRAFT-21: obsidianPowderOpticalDensity 40 -> 0.3; colour 0x800080 -> 0x1A1025
+        // (proposed, pending in-game visual confirmation).
+        assertEquals(0.3, AtmosphereRenderMaterial.OBSIDIAN_POWDER.opticalDensityMultiplier);
+        assertEquals(0.3, AtmosphereRenderMaterial.OBSIDIAN_POWDER.tuning().opticalDensity());
     }
 
     @Test
-    void smokeIsHalfItsPreviousOpticalDensity() {
-        assertEquals(2, AtmosphereRenderMaterial.SMOKE.opticalDensityMultiplier);
-        double oldDepth = -Math.log1p(-AtmosphereVolumeGeometry.sliceAlpha(100, 1, 1, 4));
-        double newDepth = -Math.log1p(-AtmosphereVolumeGeometry.sliceAlpha(100, 1, 1, 2));
-        assertEquals(oldDepth / 2, newDepth, 1e-5);
+    void smokeIsTwiceItsPreviousOpticalDensity() {
+        assertEquals(4, AtmosphereRenderMaterial.SMOKE.opticalDensityMultiplier);
+        double oldDepth = -Math.log1p(-AtmosphereVolumeGeometry.sliceAlpha(100, 1, 1, 2));
+        double newDepth = -Math.log1p(-AtmosphereVolumeGeometry.sliceAlpha(100, 1, 1, 4));
+        assertEquals(oldDepth * 2, newDepth, 1e-5);
     }
 
     @Test
@@ -265,15 +272,17 @@ class MaterialClientTest {
     void paletteAndSevenMaterialSliceOrderingAreIndependent() {
         float[] fog = {0.2f, 0.5f, 0.8f};
         assertEquals(fog[1], AtmosphereRenderMaterial.VAPOR.channel(1, fog));
-        assertEquals(31 / 255f, AtmosphereRenderMaterial.SMOKE.channel(0, fog));
-        assertEquals(22 / 255f, AtmosphereRenderMaterial.SMOKE.channel(1, fog));
-        assertEquals(15 / 255f, AtmosphereRenderMaterial.SMOKE.channel(2, fog));
+        // MINECRAFT-21: Smoke colour 0x1F160F -> 0x0D0A08.
+        assertEquals(13 / 255f, AtmosphereRenderMaterial.SMOKE.channel(0, fog));
+        assertEquals(10 / 255f, AtmosphereRenderMaterial.SMOKE.channel(1, fog));
+        assertEquals(8 / 255f, AtmosphereRenderMaterial.SMOKE.channel(2, fog));
         assertEquals(139 / 255f, AtmosphereRenderMaterial.DUST.channel(0, fog));
         assertEquals(69 / 255f, AtmosphereRenderMaterial.DUST.channel(1, fog));
         assertEquals(19 / 255f, AtmosphereRenderMaterial.DUST.channel(2, fog));
-        assertEquals(128 / 255f, AtmosphereRenderMaterial.OBSIDIAN_POWDER.channel(0, fog));
-        assertEquals(0, AtmosphereRenderMaterial.OBSIDIAN_POWDER.channel(1, fog));
-        assertEquals(128 / 255f, AtmosphereRenderMaterial.OBSIDIAN_POWDER.channel(2, fog));
+        // MINECRAFT-21: Obsidian Powder colour 0x800080 -> 0x1A1025 (proposed).
+        assertEquals(26 / 255f, AtmosphereRenderMaterial.OBSIDIAN_POWDER.channel(0, fog));
+        assertEquals(16 / 255f, AtmosphereRenderMaterial.OBSIDIAN_POWDER.channel(1, fog));
+        assertEquals(37 / 255f, AtmosphereRenderMaterial.OBSIDIAN_POWDER.channel(2, fog));
         assertEquals(0, AtmosphereRenderMaterial.VOID_GAS.channel(0, fog));
         assertEquals(0, AtmosphereRenderMaterial.VOID_GAS.channel(1, fog));
         assertEquals(0, AtmosphereRenderMaterial.VOID_GAS.channel(2, fog));
@@ -300,7 +309,7 @@ class MaterialClientTest {
     }
 
     @Test
-    void allEightSessionIdsKeepCoincidentCellsIndependent() {
+    void allNineSessionIdsKeepCoincidentCellsIndependent() {
         var sessions = new java.util.EnumMap<AtmosphereRenderMaterial, MaterialClientSession>(AtmosphereRenderMaterial.class);
         for (var material : AtmosphereRenderMaterial.values()) {
             var session = new MaterialClientSession(material);
@@ -309,7 +318,7 @@ class MaterialClientTest {
                 List.of(new AtmosphereClientCache.Chunk(0, 0)), List.of(update(0, 100 + material.ordinal())));
             sessions.put(material, session);
         }
-        assertEquals(9, sessions.size());
+        assertEquals(10, sessions.size());
         for (var material : AtmosphereRenderMaterial.values()) {
             sessions.get(material).receive(WORLD, DIMENSION, false, false, List.of(), List.of(update(0, 0)));
             for (var other : AtmosphereRenderMaterial.values()) {

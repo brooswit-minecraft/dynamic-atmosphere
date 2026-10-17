@@ -12,7 +12,9 @@ import org.junit.jupiter.api.Test;
 class AtmosphericMaterialsTest {
     @Test
     void opticalDensityIsRenderingOnlyAndUnspecifiedSettingsDefaultToOne() {
-        assertEquals(List.of(1.0, 1.0, 2.0, 4.0, 1.0, 4.0, 40.0, 4.0, 2.0),
+        // MINECRAFT-21: vapor 1 -> 1.2, smoke 2 -> 4, obsidianPowder 40 -> 0.3. nether_gas (this
+        // ticket) is 4.0, glow_gas (B2) is 2.0, nether_fog (B3) is 1.0 (all unaffected by MINECRAFT-21).
+        assertEquals(List.of(1.2, 1.0, 4.0, 4.0, 1.0, 4.0, 0.3, 4.0, 2.0, 1.0),
             AtmosphericMaterials.ALL.stream().map(m -> m.settings().opticalDensityMultiplier()).toList());
         var vapor = AtmosphericMaterials.VAPOR.settings();
         assertEquals(1, new MaterialSettings(vapor.cellSize(), vapor.lod(), vapor.simulationSpeed(),
@@ -26,11 +28,11 @@ class AtmosphericMaterialsTest {
     @Test
     void catalogMatchesTheUniformCellSizeAndIndependentColorsAndSimulationSpeeds() {
         assertEquals(List.of("vapor", "dust", "smoke", "void_gas", "exhaust", "slime", "obsidian_powder",
-                "nether_gas", "glow_gas"),
+                "nether_gas", "glow_gas", "nether_fog"),
             AtmosphericMaterials.ALL.stream().map(MaterialDefinition::id).toList());
-        assertEquals(java.util.Collections.nCopies(9, 4),
+        assertEquals(java.util.Collections.nCopies(10, 4),
             AtmosphericMaterials.ALL.stream().map(m -> m.settings().cellSize()).toList());
-        assertEquals(java.util.Collections.nCopies(9, 1.0),
+        assertEquals(java.util.Collections.nCopies(10, 1.0),
             AtmosphericMaterials.ALL.stream().map(m -> m.settings().simulationSpeed()).toList());
         assertEquals(List.of(MaterialDefinition.Color.values()),
             AtmosphericMaterials.ALL.stream().map(MaterialDefinition::color).toList());
@@ -38,7 +40,7 @@ class AtmosphericMaterialsTest {
 
     @Test
     void allProducerSpeedsUseTheSameBaseline() {
-        assertEquals(java.util.Collections.nCopies(9, OptionalDouble.of(1)),
+        assertEquals(java.util.Collections.nCopies(10, OptionalDouble.of(1)),
             AtmosphericMaterials.ALL.stream().map(m -> m.settings().producerSpeed()).toList());
     }
 
@@ -48,7 +50,7 @@ class AtmosphericMaterialsTest {
             new MaterialSettings.LodBand(4, 2));
         var dust = List.of(new MaterialSettings.LodBand(1, 0.25));
         var voidGas = List.of(new MaterialSettings.LodBand(1, 1), new MaterialSettings.LodBand(2, 2));
-        assertEquals(List.of(vapor, dust, vapor, voidGas, dust, voidGas, dust, voidGas, dust),
+        assertEquals(List.of(vapor, dust, vapor, voidGas, dust, voidGas, dust, voidGas, dust, vapor),
             AtmosphericMaterials.ALL.stream().map(m -> m.settings().lod()).toList());
     }
 
@@ -56,7 +58,7 @@ class AtmosphericMaterialsTest {
     void producerIdentitiesRemainDistinctWithoutRatesOrActivation() {
         assertEquals(Set.of(MaterialDefinition.Producer.EXISTING_VAPOR_RULES,
             MaterialDefinition.Producer.SNOW_ICE_SURFACE), AtmosphericMaterials.VAPOR.producers());
-        assertEquals(List.of(2, 6, 7, 2, 4, 1, 13, 1, 1),
+        assertEquals(List.of(2, 6, 7, 2, 4, 1, 13, 1, 1, 1),
             AtmosphericMaterials.ALL.stream().map(m -> m.producers().size()).toList());
         var identities = new HashSet<MaterialDefinition.Producer>();
         AtmosphericMaterials.ALL.forEach(m -> identities.addAll(m.producers()));
