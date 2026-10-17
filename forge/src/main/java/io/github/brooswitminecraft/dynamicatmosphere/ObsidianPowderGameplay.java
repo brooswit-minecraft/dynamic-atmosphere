@@ -10,11 +10,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
-import net.minecraft.world.entity.monster.EnderMan;
-import net.minecraft.world.entity.monster.Endermite;
-import net.minecraft.world.entity.monster.Shulker;
-import net.minecraft.world.entity.monster.Witch;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.projectile.ThrownEnderpearl;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.Blocks;
@@ -32,6 +28,10 @@ import net.neoforged.neoforge.event.tick.EntityTickEvent;
  * <p>Conservative MVP amounts: listed mobs 1/40 ticks, portal occupancy 2/20
  * ticks, passive source sample 1, pearl use 24, pearl impact 48, and 100 per portal
  * block per scheduled producer pass. Random sky bursts are not produced.</p>
+ *
+ * <p>MINECRAFT-368 added the flying Phantom to the listed-mob set: it emits on the
+ * exact same interval-ticks schedule, through the exact same OBSIDIAN_POWDER call
+ * site, that Endermen already used. No new material or emission path.</p>
  */
 public final class ObsidianPowderGameplay {
     private static final Set<ResourceLocation> PASSIVE_SOURCE_IDS = Set.of(
@@ -55,8 +55,12 @@ public final class ObsidianPowderGameplay {
     private final Set<UUID> impactedPearls = new HashSet<>();
 
     static boolean isEnderMob(Entity entity) {
-        return entity instanceof EnderMan || entity instanceof Endermite || entity instanceof EnderDragon
-            || entity instanceof Witch || entity instanceof Shulker;
+        return isEnderMob(entity.getType());
+    }
+
+    static boolean isEnderMob(EntityType<?> type) {
+        return type == EntityType.ENDERMAN || type == EntityType.ENDERMITE || type == EntityType.ENDER_DRAGON
+            || type == EntityType.WITCH || type == EntityType.SHULKER || type == EntityType.PHANTOM;
     }
 
     static boolean isPassiveSource(BlockState state) {
@@ -67,19 +71,28 @@ public final class ObsidianPowderGameplay {
         return PASSIVE_SOURCE_IDS.contains(id);
     }
 
+    /** Pure tick-schedule logic shared by every listed mob, Phantom included; the single
+     * OBSIDIAN_POWDER emission call site lives only in {@link #onEntityTick}. */
+    static int entityTickEmission(EntityType<?> type, boolean insidePortalThisTick, long tick, int entityId,
+                                   int mobIntervalTicks, int mobEmission,
+                                   int portalIntervalTicks, int portalOccupantEmission) {
+        int amount = 0;
+        if (isEnderMob(type) && Math.floorMod(tick + entityId, mobIntervalTicks) == 0) {
+            amount += mobEmission;
+        }
+        if (insidePortalThisTick && Math.floorMod(tick + entityId, portalIntervalTicks) == 0) {
+            amount += portalOccupantEmission;
+        }
+        return amount;
+    }
+
     public void onEntityTick(EntityTickEvent.Post event) {
         Entity entity = event.getEntity();
         if (!(entity.level() instanceof ServerLevel level)) return;
         DynamicAtmosphereServerConfig.ObsidianPowder config = DynamicAtmosphereServerConfig.snapshot().obsidianPowder();
-        long tick = level.getGameTime();
-        int amount = 0;
-        if (isEnderMob(entity) && Math.floorMod(tick + entity.getId(), config.mobIntervalTicks()) == 0) {
-            amount += config.mobEmission();
-        }
-        if (entity.portalProcess != null && entity.portalProcess.isInsidePortalThisTick()
-            && Math.floorMod(tick + entity.getId(), config.portalIntervalTicks()) == 0) {
-            amount += config.portalOccupantEmission();
-        }
+        boolean insidePortal = entity.portalProcess != null && entity.portalProcess.isInsidePortalThisTick();
+        int amount = entityTickEmission(entity.getType(), insidePortal, level.getGameTime(), entity.getId(),
+            config.mobIntervalTicks(), config.mobEmission(), config.portalIntervalTicks(), config.portalOccupantEmission());
         if (amount > 0) {
             DynamicAtmosphereMod.emitMaterial(level, AtmosphereMaterial.OBSIDIAN_POWDER, entity.blockPosition(), amount);
         }

@@ -97,6 +97,7 @@ public class DynamicAtmosphereMod {
         NeoForge.EVENT_BUS.addListener(magmaLava::onChunkUnload);
         NeoForge.EVENT_BUS.addListener(magmaLava::onNeighborNotify);
         NeoForge.EVENT_BUS.addListener(magmaLava::onServerTick);
+        NeoForge.EVENT_BUS.addListener(PhantomAttackGameplay.create()::onLivingDamagePre);
         // MINECRAFT-21: the mod-construction-time ConfigVersionGuard calls above only ever see
         // the global config/ directory. DynamicAtmosphereServerConfig is ModConfig.Type.SERVER,
         // which NeoForge re-reads per-world from <world>/serverconfig/ once that directory holds
