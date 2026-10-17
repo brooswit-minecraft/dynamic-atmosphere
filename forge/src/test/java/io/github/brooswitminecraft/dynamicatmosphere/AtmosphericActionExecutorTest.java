@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 import static io.github.brooswitminecraft.dynamicatmosphere.AtmosphericActionExecutor.execute;
+import static io.github.brooswitminecraft.dynamicatmosphere.AtmosphericActionExecutor.executeAtMostOneAction;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -144,6 +145,52 @@ class AtmosphericActionExecutorTest {
         assertTrue(sink.placeBlockCalls.isEmpty());
         assertTrue(sink.applyEffectCalls.isEmpty());
         assertTrue(sink.spawnItemCalls.isEmpty());
+    }
+
+    @Test
+    void zeroActionsSucceedsWithoutCallingTheSink() {
+        // Spec section 26's actionless heat sink: nothing can fail, so the cost stays
+        // eligible to be committed.
+        var sink = new FakeSink();
+        assertTrue(executeAtMostOneAction(sink, ORIGIN, List.of(), "heat_sink"));
+        assertTrue(sink.spawnEntityCalls.isEmpty());
+    }
+
+    @Test
+    void oneActionExecutesExactlyOnceAndPropagatesSuccess() {
+        var sink = new FakeSink();
+        sink.knownEntities.add("minecraft:ghast");
+        sink.spawnEntityResult = true;
+        var action = new AtmosphericAction(AtmosphericAction.Type.SPAWN_ENTITY, Map.of("entity", "minecraft:ghast"));
+
+        assertTrue(executeAtMostOneAction(sink, ORIGIN, List.of(action), "ghast_spawn"));
+        assertEquals(1, sink.spawnEntityCalls.size());
+    }
+
+    @Test
+    void oneActionExecutesExactlyOnceAndPropagatesFailure() {
+        var sink = new FakeSink();
+        sink.knownEntities.add("minecraft:ghast");
+        sink.spawnEntityResult = false;
+        var action = new AtmosphericAction(AtmosphericAction.Type.SPAWN_ENTITY, Map.of("entity", "minecraft:ghast"));
+
+        assertFalse(executeAtMostOneAction(sink, ORIGIN, List.of(action), "ghast_spawn"));
+        assertEquals(1, sink.spawnEntityCalls.size(), "a failed action must still be attempted exactly once");
+    }
+
+    @Test
+    void twoOrMoreActionsFailWithZeroExecutorCallsAndNoPartialOutput() {
+        // The exact conservation defect comment 47631 asks this to prove: the size check
+        // must run BEFORE any side effect, not after the first one, or a 2-action event
+        // could leave the first action's real output in place while refusing the second.
+        var sink = new FakeSink();
+        sink.knownEntities.add("minecraft:ghast");
+        sink.spawnEntityResult = true;
+        var first = new AtmosphericAction(AtmosphericAction.Type.SPAWN_ENTITY, Map.of("entity", "minecraft:ghast"));
+        var second = new AtmosphericAction(AtmosphericAction.Type.SPAWN_ENTITY, Map.of("entity", "minecraft:ghast"));
+
+        assertFalse(executeAtMostOneAction(sink, ORIGIN, List.of(first, second), "two_actions"));
+        assertTrue(sink.spawnEntityCalls.isEmpty(), "neither action may reach the sink once there are 2+");
     }
 
     /** Records every call it receives so tests can assert what production actually did. */

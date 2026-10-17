@@ -19,6 +19,8 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.phys.AABB;
 import org.slf4j.Logger;
 
+import java.util.List;
+
 /**
  * The Forge half of the generic event/action system (spec section 23): interprets a
  * data-defined {@link AtmosphericAction} against an actual {@code ServerLevel}.
@@ -65,6 +67,31 @@ final class AtmosphericActionExecutor {
             case APPLY_EFFECT -> applyEffect(sink, target, action);
             case EMIT_MATERIAL, TRANSFER_MATERIAL -> emitMaterial(sink, target, action);
         };
+    }
+
+    /**
+     * Executes an event's action list, enforcing that at most one may fire -- callers
+     * must only debit the event's material cost on {@code true}. Executing a second
+     * action after a first one already succeeded, only to have the second fail, would
+     * leave the first action's real-world output in place while the cost is withheld: a
+     * free output nothing in this mod can roll back (no way to un-spawn an entity or
+     * un-place a block). Every built-in event ships with 0 or 1 actions; this is the
+     * policy, not a missing feature, for anything that doesn't -- the size check runs
+     * BEFORE any action executes, so a 2+ action event causes zero calls into the sink.
+     */
+    static boolean executeAtMostOneAction(ServerLevel level, BlockPos target, List<AtmosphericAction> actions, String eventId) {
+        return executeAtMostOneAction(new ServerLevelActionSink(level), target, actions, eventId);
+    }
+
+    /** Same policy as {@link #executeAtMostOneAction(ServerLevel, BlockPos, List, String)}, seamed for tests. */
+    static boolean executeAtMostOneAction(ActionSink sink, BlockPos target, List<AtmosphericAction> actions, String eventId) {
+        if (actions.isEmpty()) return true;
+        if (actions.size() > 1) {
+            LOGGER.error("[dynamicatmosphere] event {} declares {} actions; only 0 or 1 is supported, "
+                + "refusing rather than risk a partial free output", eventId, actions.size());
+            return false;
+        }
+        return execute(sink, target, actions.get(0));
     }
 
     private static boolean spawnEntity(ActionSink sink, BlockPos target, AtmosphericAction action) {
