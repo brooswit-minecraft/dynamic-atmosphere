@@ -1155,13 +1155,32 @@ final class ForgeAtmospherePrototype {
         if (fired.isEmpty()) return false;
         int cost = Math.max(1, (int) Math.round(fired.get().materialCost() * capacity));
         if (cell.amount() < cost) return false;
-        var outcomes = new java.util.ArrayList<Boolean>();
-        for (var action : fired.get().actions()) {
-            outcomes.add(AtmosphericActionExecutor.execute(level, origin, action));
-        }
-        if (!AtmosphericActionExecutor.allActionsSucceeded(outcomes)) return false;
+        if (!executeAtMostOneAction(level, origin, fired.get())) return false;
         smokeGrid.set(key, cell.amount() - cost, serverTicks, capacity);
         return true;
+    }
+
+    /**
+     * Executes an event's action(s), refusing (no cost debited, nothing executed) unless
+     * there are 0 or 1 of them. Executing a second action after a first one already
+     * succeeded, only to have the second fail, would leave the first action's real-world
+     * output in place while the caller withholds the cost -- a free output with nothing in
+     * this mod able to roll back an already-spawned entity or placed block. Every built-in
+     * event ships with 0 or 1 actions; this is the policy, not a missing feature, for
+     * anything that doesn't.
+     */
+    private boolean executeAtMostOneAction(
+        ServerLevel level, BlockPos target,
+        io.github.brooswitminecraft.dynamicatmosphere.engine.event.AtmosphericEvent event
+    ) {
+        var actions = event.actions();
+        if (actions.isEmpty()) return true;
+        if (actions.size() > 1) {
+            LOGGER.error("[dynamicatmosphere] event {} declares {} actions; only 0 or 1 is supported, "
+                + "refusing rather than risk a partial free output", event.id(), actions.size());
+            return false;
+        }
+        return AtmosphericActionExecutor.execute(level, target, actions.get(0));
     }
 
     /**
@@ -1232,15 +1251,9 @@ final class ForgeAtmospherePrototype {
         if (fired.isEmpty()) return false;
         int cost = Math.max(1, (int) Math.round(fired.get().materialCost() * capacity));
         if (cell.amount() < cost) return false;
-        // Actionless by design (spec section 26): this loop runs zero times, so
-        // allActionsSucceeded is vacuously true and the sink always debits its cost -- the
-        // same success-gating pattern other events use, applied here for consistency,
-        // degenerates to a no-op.
-        var outcomes = new java.util.ArrayList<Boolean>();
-        for (var action : fired.get().actions()) {
-            outcomes.add(AtmosphericActionExecutor.execute(level, origin, action));
-        }
-        if (!AtmosphericActionExecutor.allActionsSucceeded(outcomes)) return false;
+        // Actionless by design (spec section 26): executeAtMostOneAction sees zero actions
+        // and trivially returns true, so the sink always debits its cost.
+        if (!executeAtMostOneAction(level, origin, fired.get())) return false;
         materialGrid.set(key, cell.amount() - cost, serverTicks, capacity);
         return true;
     }
@@ -1515,11 +1528,7 @@ final class ForgeAtmospherePrototype {
             io.github.brooswitminecraft.dynamicatmosphere.engine.event.PrecipitationDirection.DOWN,
             tuning().lightning().surfaceSearchAttempts());
         if (target == null) return false;
-        var outcomes = new java.util.ArrayList<Boolean>();
-        for (var action : fired.get().actions()) {
-            outcomes.add(AtmosphericActionExecutor.execute(level, target, action));
-        }
-        if (!AtmosphericActionExecutor.allActionsSucceeded(outcomes)) return false;
+        if (!executeAtMostOneAction(level, target, fired.get())) return false;
         grid.set(key, cell.amount() - cost, serverTicks, capacity);
         return true;
     }
