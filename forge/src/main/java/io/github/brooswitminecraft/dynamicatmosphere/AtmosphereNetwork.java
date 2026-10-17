@@ -19,9 +19,15 @@ public final class AtmosphereNetwork {
     }
 
     static void register(RegisterPayloadHandlersEvent event) {
-        // MINECRAFT-1 (B3): bumped 11 -> 12 for the new Nether Fog material (AtmosphereMaterial
-        // adds an ordinal; a client/server running different protocol versions must not connect).
-        var registrar = event.registrar("12");
+        // MINECRAFT-1 (B2) bumped 10 -> 11 for Glow Gas; MINECRAFT-51 (Zombie Fog) and
+        // MINECRAFT-1 (B3, Nether Fog) each independently bumped 11 -> 12 on their own branch,
+        // for two DIFFERENT 9-material layouts, so this was bumped straight to 13 to combine
+        // them. MINECRAFT-52 (Nether Gas, merged separately) added an 11th material ordinal
+        // WITHOUT its own bump -- main's own protocol stayed at 12 even after Nether Gas
+        // landed, so a naive merge would have silently under-counted this ordinal too. Bumped
+        // to 14 for the combined 11-material layout (AtmosphereMaterial adds an ordinal; a
+        // client/server running different protocol versions must not connect).
+        var registrar = event.registrar("14");
         registrar.playToClient(AtmosphereGridPayload.TYPE, AtmosphereGridPayload.STREAM_CODEC,
             (payload, context) -> clientReceiver.accept(payload, context.connection()));
         registrar.playToClient(SmokeGridPayload.TYPE, SmokeGridPayload.STREAM_CODEC,

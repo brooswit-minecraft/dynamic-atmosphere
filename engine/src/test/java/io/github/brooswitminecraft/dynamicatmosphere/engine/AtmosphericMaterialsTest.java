@@ -12,9 +12,10 @@ import org.junit.jupiter.api.Test;
 class AtmosphericMaterialsTest {
     @Test
     void opticalDensityIsRenderingOnlyAndUnspecifiedSettingsDefaultToOne() {
-        // MINECRAFT-21: vapor 1 -> 1.2, smoke 2 -> 4, obsidianPowder 40 -> 0.3. nether_gas (this
-        // ticket) is 4.0, glow_gas (B2) is 2.0, nether_fog (B3) is 1.0 (all unaffected by MINECRAFT-21).
-        assertEquals(List.of(1.2, 1.0, 4.0, 4.0, 1.0, 4.0, 0.3, 4.0, 2.0, 1.0),
+        // MINECRAFT-21: vapor 1 -> 1.2, smoke 2 -> 4, obsidianPowder 40 -> 0.3. zombie_fog
+        // (MINECRAFT-51) is 4.0, nether_gas (MINECRAFT-52) is 4.0, glow_gas (B2) is 2.0,
+        // nether_fog (B3) is 1.0 (all four unaffected by MINECRAFT-21).
+        assertEquals(List.of(1.2, 1.0, 4.0, 4.0, 1.0, 4.0, 0.3, 4.0, 4.0, 2.0, 1.0),
             AtmosphericMaterials.ALL.stream().map(m -> m.settings().opticalDensityMultiplier()).toList());
         var vapor = AtmosphericMaterials.VAPOR.settings();
         assertEquals(1, new MaterialSettings(vapor.cellSize(), vapor.lod(), vapor.simulationSpeed(),
@@ -28,11 +29,11 @@ class AtmosphericMaterialsTest {
     @Test
     void catalogMatchesTheUniformCellSizeAndIndependentColorsAndSimulationSpeeds() {
         assertEquals(List.of("vapor", "dust", "smoke", "void_gas", "exhaust", "slime", "obsidian_powder",
-                "nether_gas", "glow_gas", "nether_fog"),
+                "zombie_fog", "nether_gas", "glow_gas", "nether_fog"),
             AtmosphericMaterials.ALL.stream().map(MaterialDefinition::id).toList());
-        assertEquals(java.util.Collections.nCopies(10, 4),
+        assertEquals(java.util.Collections.nCopies(11, 4),
             AtmosphericMaterials.ALL.stream().map(m -> m.settings().cellSize()).toList());
-        assertEquals(java.util.Collections.nCopies(10, 1.0),
+        assertEquals(java.util.Collections.nCopies(11, 1.0),
             AtmosphericMaterials.ALL.stream().map(m -> m.settings().simulationSpeed()).toList());
         assertEquals(List.of(MaterialDefinition.Color.values()),
             AtmosphericMaterials.ALL.stream().map(MaterialDefinition::color).toList());
@@ -40,7 +41,7 @@ class AtmosphericMaterialsTest {
 
     @Test
     void allProducerSpeedsUseTheSameBaseline() {
-        assertEquals(java.util.Collections.nCopies(10, OptionalDouble.of(1)),
+        assertEquals(java.util.Collections.nCopies(11, OptionalDouble.of(1)),
             AtmosphericMaterials.ALL.stream().map(m -> m.settings().producerSpeed()).toList());
     }
 
@@ -50,7 +51,7 @@ class AtmosphericMaterialsTest {
             new MaterialSettings.LodBand(4, 2));
         var dust = List.of(new MaterialSettings.LodBand(1, 0.25));
         var voidGas = List.of(new MaterialSettings.LodBand(1, 1), new MaterialSettings.LodBand(2, 2));
-        assertEquals(List.of(vapor, dust, vapor, voidGas, dust, voidGas, dust, voidGas, dust, vapor),
+        assertEquals(List.of(vapor, dust, vapor, voidGas, dust, voidGas, dust, voidGas, voidGas, dust, vapor),
             AtmosphericMaterials.ALL.stream().map(m -> m.settings().lod()).toList());
     }
 
@@ -58,7 +59,7 @@ class AtmosphericMaterialsTest {
     void producerIdentitiesRemainDistinctWithoutRatesOrActivation() {
         assertEquals(Set.of(MaterialDefinition.Producer.EXISTING_VAPOR_RULES,
             MaterialDefinition.Producer.SNOW_ICE_SURFACE), AtmosphericMaterials.VAPOR.producers());
-        assertEquals(List.of(2, 6, 7, 2, 4, 1, 13, 1, 1, 1),
+        assertEquals(List.of(2, 6, 7, 2, 4, 1, 13, 1, 1, 1, 1),
             AtmosphericMaterials.ALL.stream().map(m -> m.producers().size()).toList());
         var identities = new HashSet<MaterialDefinition.Producer>();
         AtmosphericMaterials.ALL.forEach(m -> identities.addAll(m.producers()));
@@ -70,10 +71,14 @@ class AtmosphericMaterialsTest {
         assertTrue(AtmosphericMaterials.SMOKE.transformations().isEmpty());
         assertTrue(AtmosphericMaterials.EXHAUST.transformations().isEmpty());
         assertTrue(AtmosphericMaterials.OBSIDIAN_POWDER.transformations().isEmpty());
-        assertEquals(Set.of(MaterialDefinition.Producer.NETHERRACK), AtmosphericMaterials.NETHER_GAS.producers());
+        assertTrue(AtmosphericMaterials.ZOMBIE_FOG.transformations().isEmpty());
         assertTrue(AtmosphericMaterials.NETHER_GAS.transformations().isEmpty());
-        assertEquals(Set.of(MaterialDefinition.Producer.GLOWSTONE), AtmosphericMaterials.GLOW_GAS.producers());
         assertTrue(AtmosphericMaterials.GLOW_GAS.transformations().isEmpty());
+        assertTrue(AtmosphericMaterials.NETHER_FOG.transformations().isEmpty());
+        assertEquals(Set.of(MaterialDefinition.Producer.ZOMBIE_DEATHS), AtmosphericMaterials.ZOMBIE_FOG.producers());
+        assertEquals(Set.of(MaterialDefinition.Producer.NETHERRACK), AtmosphericMaterials.NETHER_GAS.producers());
+        assertEquals(Set.of(MaterialDefinition.Producer.GLOWSTONE), AtmosphericMaterials.GLOW_GAS.producers());
+        assertEquals(Set.of(MaterialDefinition.Producer.LAVA_SOURCE_HARVEST), AtmosphericMaterials.NETHER_FOG.producers());
     }
 
     @Test

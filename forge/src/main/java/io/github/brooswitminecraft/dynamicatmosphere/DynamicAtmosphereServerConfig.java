@@ -143,6 +143,33 @@ public final class DynamicAtmosphereServerConfig {
     private static final IntOption CREATE_FAN_CHUNK_BUDGET;
 
     private static final DoubleOption MAGMA_BREAK_LAVA_CHANCE;
+
+    private static final DoubleOption LIGHTNING_MIN_CONCENTRATION;
+    private static final DoubleOption LIGHTNING_CHANCE;
+    private static final DoubleOption LIGHTNING_MATERIAL_COST;
+    private static final IntOption LIGHTNING_SURFACE_ATTEMPTS;
+
+    private static final DoubleOption GHAST_MIN_CONCENTRATION;
+    private static final DoubleOption GHAST_CHANCE;
+    private static final DoubleOption GHAST_MATERIAL_COST;
+
+    private static final IntOption ZOMBIE_FOG_DEATH_EMISSION;
+    private static final DoubleOption ZOMBIE_FOG_SPAWN_CONCENTRATION;
+    private static final DoubleOption ZOMBIE_FOG_SPAWN_MULTIPLIER;
+    private static final DoubleOption ZOMBIE_FOG_HEAT_MIN_TEMPERATURE;
+    private static final DoubleOption ZOMBIE_FOG_HEAT_CHANCE;
+    private static final DoubleOption ZOMBIE_FOG_HEAT_MATERIAL_COST;
+
+    private static final DoubleOption SLIME_RAIN_MIN_CONCENTRATION;
+    private static final DoubleOption SLIME_RAIN_MIN_TEMPERATURE;
+    private static final DoubleOption SLIME_RAIN_CHANCE;
+    private static final DoubleOption SLIME_RAIN_MATERIAL_COST;
+    private static final DoubleOption SLIME_SNOW_MIN_CONCENTRATION;
+    private static final DoubleOption SLIME_SNOW_MAX_TEMPERATURE;
+    private static final DoubleOption SLIME_SNOW_CHANCE;
+    private static final DoubleOption SLIME_SNOW_MATERIAL_COST;
+    private static final IntOption SLIME_PRECIPITATION_SURFACE_ATTEMPTS;
+
     private static volatile Snapshot cached;
 
     static {
@@ -389,6 +416,79 @@ public final class DynamicAtmosphereServerConfig {
         // Chance a removed magma block leaves a lava source; read fresh each roll, no restart needed.
         MAGMA_BREAK_LAVA_CHANCE = decimal(builder, "breakLavaChance", 0.1, 0, 1);
         builder.pop();
+
+        builder.push("lightning");
+        // Phase 3 (MINECRAFT-51): lightning is an ordinary generic atmospheric event on the
+        // Vapor/Cloud grid -- a dense, precipitating cell occasionally spawns a lightning
+        // bolt and consumes material, the same event/action machinery as any other event.
+        // No electrical charge simulation and no thunderstorm material/subsystem exist (spec
+        // section 25): a thunderstorm IS simply a sufficiently dense Cloud that is both
+        // precipitating and occasionally spawning lightning.
+        builder.comment("Vapor concentration (amount/capacity) a cell must reach before lightning is possible.");
+        LIGHTNING_MIN_CONCENTRATION = decimal(builder, "minConcentration", 0.85, 0, 1);
+        builder.comment("Chance, per processed cell per tick, once minConcentration and precipitating both hold.");
+        LIGHTNING_CHANCE = decimal(builder, "chance", 0.002, 0, 1);
+        builder.comment("Fraction of the cell's capacity consumed when lightning fires -- this, repeated, is",
+            "what makes a severe storm dissipate itself.");
+        LIGHTNING_MATERIAL_COST = decimal(builder, "materialCost", 0.03, 0, 1);
+        builder.comment("Bounded loaded-column search attempts for the precipitation_surface target.");
+        LIGHTNING_SURFACE_ATTEMPTS = integer(builder, "surfaceSearchAttempts", 8, 1, 64);
+        builder.pop();
+
+        builder.push("ghastSpawn");
+        // Spec sections 30/46: "Ghast spawning and lightning use the same event/action
+        // machinery. That is intentional." A second, independent material (Smoke) proving
+        // the same generic engine, not a second subsystem.
+        builder.comment("Smoke concentration (amount/capacity) a cell must reach before a Ghast can appear.");
+        GHAST_MIN_CONCENTRATION = decimal(builder, "minConcentration", 0.90, 0, 1);
+        builder.comment("Chance, per processed cell per tick, once minConcentration holds.");
+        GHAST_CHANCE = decimal(builder, "chance", 0.0001, 0, 1);
+        builder.comment("Fraction of the cell's capacity consumed when a Ghast appears.");
+        GHAST_MATERIAL_COST = decimal(builder, "materialCost", 0.20, 0, 1);
+        builder.pop();
+
+        builder.push("zombieFog");
+        // Spec section 17/47: zombie deaths are Zombie Fog's entity source; a single death
+        // produces almost nothing, a mass battle produces a real atmospheric event. Section
+        // 29/45: Zombie Fog's own worked spawn-modifier example is "zombie spawn multiplier
+        // = 2.0" once concentration >= 0.30. Section 47: heat removes it relatively quickly.
+        builder.comment("Zombie Fog emitted at a zombie's death position.");
+        ZOMBIE_FOG_DEATH_EMISSION = integer(builder, "deathEmission", 24, 0, 1_000_000);
+        builder.comment("Zombie Fog concentration at or above which the zombie spawn modifier applies.");
+        ZOMBIE_FOG_SPAWN_CONCENTRATION = decimal(builder, "spawnConcentrationThreshold", 0.30, 0, 1);
+        builder.comment("Zombie spawn-attempt multiplier once the concentration threshold is met.");
+        ZOMBIE_FOG_SPAWN_MULTIPLIER = decimal(builder, "spawnMultiplier", 2.0, 0, 100);
+        builder.comment("Biome base temperature at or above which the heat sink can fire.");
+        ZOMBIE_FOG_HEAT_MIN_TEMPERATURE = decimal(builder, "heatMinBiomeTemperature", 0.5, -10, 10);
+        builder.comment("Chance, per processed cell per tick, once heatMinBiomeTemperature holds.");
+        ZOMBIE_FOG_HEAT_CHANCE = decimal(builder, "heatChance", 0.05, 0, 1);
+        builder.comment("Fraction of the cell's capacity removed each time the heat sink fires.");
+        ZOMBIE_FOG_HEAT_MATERIAL_COST = decimal(builder, "heatMaterialCost", 0.08, 0, 1);
+        builder.pop();
+
+        builder.push("slimePrecipitation");
+        // Spec section 44, Slime Fog's precipitation example: rain mode occasionally drops
+        // slimeballs, snow mode occasionally places slime blocks, selected by biome
+        // temperature exactly like vanilla rain/snow. This is independent of, and does not
+        // replace, Slime's existing MINECRAFT-18 dissipation-triggered spawn.
+        builder.comment("Slime concentration (amount/capacity) required for either precipitation mode.");
+        SLIME_RAIN_MIN_CONCENTRATION = decimal(builder, "rainMinConcentration", 0.65, 0, 1);
+        builder.comment("Biome base temperature at or above which rain mode (not snow mode) applies.");
+        SLIME_RAIN_MIN_TEMPERATURE = decimal(builder, "rainMinBiomeTemperature", 0.15, -10, 10);
+        builder.comment("Chance, per processed cell per tick, that rain mode drops a slimeball.");
+        SLIME_RAIN_CHANCE = decimal(builder, "rainChance", 0.02, 0, 1);
+        builder.comment("Fraction of the cell's capacity consumed when rain mode fires.");
+        SLIME_RAIN_MATERIAL_COST = decimal(builder, "rainMaterialCost", 0.01, 0, 1);
+        SLIME_SNOW_MIN_CONCENTRATION = decimal(builder, "snowMinConcentration", 0.65, 0, 1);
+        builder.comment("Biome base temperature at or below which snow mode (not rain mode) applies.");
+        SLIME_SNOW_MAX_TEMPERATURE = decimal(builder, "snowMaxBiomeTemperature", 0.15, -10, 10);
+        builder.comment("Chance, per processed cell per tick, that snow mode places a slime block.");
+        SLIME_SNOW_CHANCE = decimal(builder, "snowChance", 0.002, 0, 1);
+        builder.comment("Fraction of the cell's capacity consumed when snow mode fires.");
+        SLIME_SNOW_MATERIAL_COST = decimal(builder, "snowMaterialCost", 0.04, 0, 1);
+        builder.comment("Bounded loaded-column search attempts for the precipitation_surface target.");
+        SLIME_PRECIPITATION_SURFACE_ATTEMPTS = integer(builder, "surfaceSearchAttempts", 8, 1, 64);
+        builder.pop();
         SPEC = builder.build();
         cached = readSnapshot();
     }
@@ -448,6 +548,16 @@ public final class DynamicAtmosphereServerConfig {
             new Integrations(CREATE_FAN_RPM_COEFFICIENT.get(), CREATE_FAN_INTERVAL.get(), CREATE_FAN_CHUNK_BUDGET.get()),
             new HeavyGas(HEAVY_GAS_DISSIPATION_FACTOR.get()),
             new Magma(MAGMA_BREAK_LAVA_CHANCE.get()),
+            new Lightning(LIGHTNING_MIN_CONCENTRATION.get(), LIGHTNING_CHANCE.get(), LIGHTNING_MATERIAL_COST.get(),
+                LIGHTNING_SURFACE_ATTEMPTS.get()),
+            new GhastSpawn(GHAST_MIN_CONCENTRATION.get(), GHAST_CHANCE.get(), GHAST_MATERIAL_COST.get()),
+            new ZombieFog(ZOMBIE_FOG_DEATH_EMISSION.get(), ZOMBIE_FOG_SPAWN_CONCENTRATION.get(),
+                ZOMBIE_FOG_SPAWN_MULTIPLIER.get(), ZOMBIE_FOG_HEAT_MIN_TEMPERATURE.get(),
+                ZOMBIE_FOG_HEAT_CHANCE.get(), ZOMBIE_FOG_HEAT_MATERIAL_COST.get()),
+            new SlimePrecipitation(SLIME_RAIN_MIN_CONCENTRATION.get(), SLIME_RAIN_MIN_TEMPERATURE.get(),
+                SLIME_RAIN_CHANCE.get(), SLIME_RAIN_MATERIAL_COST.get(), SLIME_SNOW_MIN_CONCENTRATION.get(),
+                SLIME_SNOW_MAX_TEMPERATURE.get(), SLIME_SNOW_CHANCE.get(), SLIME_SNOW_MATERIAL_COST.get(),
+                SLIME_PRECIPITATION_SURFACE_ATTEMPTS.get()),
             new NetherGas(NETHER_GAS_NETHERRACK.get(), NETHER_GAS_MILD_FULLNESS.get(), NETHER_GAS_DANGEROUS_FULLNESS.get()),
             new Dimensions(new DimensionAtmosphereConfig(
                 THE_END_HONOR_PREFERRED_ALTITUDE.get(), THE_END_GLOBAL_DISSIPATION_MULTIPLIER.get())),
@@ -512,6 +622,8 @@ public final class DynamicAtmosphereServerConfig {
                            Exhaust exhaust, Slime slime, ObsidianPowder obsidianPowder, GlowGas glowGas,
                            NetherFog netherFog, EndSand endSand, PlantGrowth plantGrowth,
                            Integrations integrations, HeavyGas heavyGas, Magma magma,
+                           Lightning lightning, GhastSpawn ghastSpawn, ZombieFog zombieFog,
+                           SlimePrecipitation slimePrecipitation,
                            NetherGas netherGas, Dimensions dimensions, PortalTransferSinkTuning portalTransferSink) { }
     public record RuntimeTuning(int syncIntervalTicks, int fullSnapshotIntervalTicks,
                                 int simulationIntervalTicks, int producerIntervalTicks,
@@ -570,6 +682,14 @@ public final class DynamicAtmosphereServerConfig {
     /** Shared by Void Gas, Obsidian Powder, Slime and Nether Gas: their dissipation chance is Smoke's own divided by this. */
     public record HeavyGas(double dissipationFactor) { }
     public record Magma(double breakLavaChance) { }
+    public record Lightning(double minConcentration, double chance, double materialCost, int surfaceSearchAttempts) { }
+    public record GhastSpawn(double minConcentration, double chance, double materialCost) { }
+    public record ZombieFog(int deathEmission, double spawnConcentrationThreshold, double spawnMultiplier,
+                            double heatMinBiomeTemperature, double heatChance, double heatMaterialCost) { }
+    public record SlimePrecipitation(double rainMinConcentration, double rainMinBiomeTemperature,
+                                     double rainChance, double rainMaterialCost, double snowMinConcentration,
+                                     double snowMaxBiomeTemperature, double snowChance, double snowMaterialCost,
+                                     int surfaceSearchAttempts) { }
     public record NetherGas(int netherrackEmission, double mildFullness, double dangerousFullness) { }
 
     /**

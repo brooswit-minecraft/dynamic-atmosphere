@@ -62,6 +62,7 @@ class MaterialClientTest {
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.VOID_GAS,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.EXHAUST,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.SLIME,
+            io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.ZOMBIE_FOG,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.NETHER_GAS,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.GLOW_GAS,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.NETHER_FOG);
@@ -309,7 +310,7 @@ class MaterialClientTest {
     }
 
     @Test
-    void allNineSessionIdsKeepCoincidentCellsIndependent() {
+    void allSessionIdsKeepCoincidentCellsIndependent() {
         var sessions = new java.util.EnumMap<AtmosphereRenderMaterial, MaterialClientSession>(AtmosphereRenderMaterial.class);
         for (var material : AtmosphereRenderMaterial.values()) {
             var session = new MaterialClientSession(material);
@@ -318,7 +319,7 @@ class MaterialClientTest {
                 List.of(new AtmosphereClientCache.Chunk(0, 0)), List.of(update(0, 100 + material.ordinal())));
             sessions.put(material, session);
         }
-        assertEquals(10, sessions.size());
+        assertEquals(AtmosphereRenderMaterial.values().length, sessions.size());
         for (var material : AtmosphereRenderMaterial.values()) {
             sessions.get(material).receive(WORLD, DIMENSION, false, false, List.of(), List.of(update(0, 0)));
             for (var other : AtmosphereRenderMaterial.values()) {

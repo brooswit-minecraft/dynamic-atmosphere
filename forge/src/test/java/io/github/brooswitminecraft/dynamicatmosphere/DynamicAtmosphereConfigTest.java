@@ -42,6 +42,28 @@ class DynamicAtmosphereConfigTest {
         assertEquals(8, first.slime().dissipationSpawnAttempts());
         assertEquals(0.25, first.slime().mediumDensityThreshold());
         assertEquals(0.75, first.slime().bigDensityThreshold());
+        assertEquals(0.85, first.lightning().minConcentration());
+        assertEquals(0.002, first.lightning().chance());
+        assertEquals(0.03, first.lightning().materialCost());
+        assertEquals(8, first.lightning().surfaceSearchAttempts());
+        assertEquals(0.90, first.ghastSpawn().minConcentration());
+        assertEquals(0.0001, first.ghastSpawn().chance());
+        assertEquals(0.20, first.ghastSpawn().materialCost());
+        assertEquals(24, first.zombieFog().deathEmission());
+        assertEquals(0.30, first.zombieFog().spawnConcentrationThreshold());
+        assertEquals(2.0, first.zombieFog().spawnMultiplier());
+        assertEquals(0.5, first.zombieFog().heatMinBiomeTemperature());
+        assertEquals(0.05, first.zombieFog().heatChance());
+        assertEquals(0.08, first.zombieFog().heatMaterialCost());
+        assertEquals(0.65, first.slimePrecipitation().rainMinConcentration());
+        assertEquals(0.15, first.slimePrecipitation().rainMinBiomeTemperature());
+        assertEquals(0.02, first.slimePrecipitation().rainChance());
+        assertEquals(0.01, first.slimePrecipitation().rainMaterialCost());
+        assertEquals(0.65, first.slimePrecipitation().snowMinConcentration());
+        assertEquals(0.15, first.slimePrecipitation().snowMaxBiomeTemperature());
+        assertEquals(0.002, first.slimePrecipitation().snowChance());
+        assertEquals(0.04, first.slimePrecipitation().snowMaterialCost());
+        assertEquals(8, first.slimePrecipitation().surfaceSearchAttempts());
     }
 
     @Test
@@ -132,12 +154,13 @@ class DynamicAtmosphereConfigTest {
         assertEquals(0x000000, first.voidGas().color());
         assertEquals(0xFFFF00, first.exhaust().color());
         assertEquals(0x00FF00, first.slime().color());
+        assertEquals(0x808080, first.zombieFog().color());
         assertEquals(0xFFC83C, first.glowGas().color());
 
         var names = flattenConfigKeys(DynamicAtmosphereClientConfig.SPEC.getValues(), "");
         for (String colorKey : List.of("materials.vaporcolor", "materials.smokecolor", "materials.dustcolor",
             "materials.voidgascolor", "materials.exhaustcolor", "materials.slimecolor",
-            "materials.obsidianpowdercolor", "materials.glowgascolor")) {
+            "materials.obsidianpowdercolor", "materials.zombiefogcolor", "materials.glowgascolor")) {
             assertTrue(names.contains(colorKey), colorKey + " must be defined");
         }
     }

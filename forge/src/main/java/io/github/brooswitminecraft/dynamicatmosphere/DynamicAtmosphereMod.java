@@ -71,6 +71,8 @@ public class DynamicAtmosphereMod {
         NeoForge.EVENT_BUS.addListener(prototype::onPlayerRespawn);
         NeoForge.EVENT_BUS.addListener(prototype::onServerStopped);
         NeoForge.EVENT_BUS.addListener(VaporHostileSpawnGate::onSpawnPlacementCheck);
+        NeoForge.EVENT_BUS.addListener(AtmosphericSpawnModifierGate::onSpawnPlacementCheck);
+        NeoForge.EVENT_BUS.addListener(EntityDeathMaterialSource::onLivingDeath);
         NeoForge.EVENT_BUS.addListener(CreeperExhaustSpawnGate::onSpawnPlacementCheck);
         NeoForge.EVENT_BUS.addListener(CreeperExhaustSpawnGate::onPositionCheck);
         NeoForge.EVENT_BUS.addListener(EventPriority.LOWEST, CreeperExhaustSpawnGate::onEntityJoin);

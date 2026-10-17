@@ -925,6 +925,7 @@ final class ForgeAtmospherePrototype {
             growPlants(server.getLevel(key.dimension()), grid, key, AtmosphereGrid.CELL_SIZE, capacityAt);
             capacities.clear();
             if (condense(server.getLevel(key.dimension()), key, capacityAt.applyAsInt(key))) capacities.clear();
+            if (evaluateVaporEvents(server.getLevel(key.dimension()), key, capacityAt.applyAsInt(key))) capacities.clear();
         }, key -> shouldSimulate(server, key), canTransfer);
         materialMoved += spread.moved();
         blockedOverflow += spread.blockedOverflow();
@@ -1019,6 +1020,7 @@ final class ForgeAtmospherePrototype {
             var current = smokeGrid.get(key);
             if (used > 0 && current != null) smokeGrid.set(key,
                 Math.max(0, current.amount() - used), serverTicks, capacityAt.applyAsInt(key));
+            evaluateSmokeEvents(level, key, capacityAt.applyAsInt(key));
         }, key -> shouldSimulate(server, key), canTransfer);
         materialMoved += spread.moved();
         blockedOverflow += spread.blockedOverflow();
@@ -1050,11 +1052,18 @@ final class ForgeAtmospherePrototype {
                     dissipateHeavyGas(cellLevel, materialGrid, key, capacityAt);
                 }
                 if (material == AtmosphereMaterial.SLIME) {
+                    if (evaluateSlimePrecipitation(cellLevel, materialGrid, key, origin, capacityAt,
+                        materialGrid.get(key))) {
+                        capacities.clear();
+                    }
                     var preDissipationCell = materialGrid.get(key);
                     if (dissipateHeavyGas(cellLevel, materialGrid, key, capacityAt) > 0 && preDissipationCell != null) {
                         slimeGameplay.onDissipation(cellLevel, origin,
                             preDissipationCell.amount(), preDissipationCell.capacity());
                     }
+                }
+                if (material == AtmosphereMaterial.ZOMBIE_FOG) {
+                    evaluateZombieFogHeatSink(cellLevel, materialGrid, key, origin, capacityAt);
                 }
                 if (material == AtmosphereMaterial.OBSIDIAN_POWDER) {
                     dissipateHeavyGas(cellLevel, materialGrid, key, capacityAt);
@@ -1139,6 +1148,113 @@ final class ForgeAtmospherePrototype {
             materialGrid.set(key, cell.amount() - loss, serverTicks, capacityAt.applyAsInt(key));
         }
         return loss;
+    }
+
+    /**
+     * Dense Smoke occasionally spawns a Ghast (spec sections 30/46): the second,
+     * independent proof that Lightning's event/action machinery is genuinely generic,
+     * not a Vapor special case. Smoke never precipitates, so the context's
+     * {@code precipitating} flag is always false here; the Ghast event simply never
+     * conditions on it.
+     */
+    private boolean evaluateSmokeEvents(
+        ServerLevel level, AtmosphereGrid.CellKey<ResourceKey<Level>> key, int capacity
+    ) {
+        var cell = smokeGrid.get(key);
+        if (level == null || cell == null || capacity <= 0) return false;
+        int size = SmokeGridLayout.CELL_SIZE;
+        BlockPos origin = new BlockPos(key.x() * size, key.y() * size, key.z() * size);
+        if (!level.hasChunkAt(origin)) return false;
+        var context = io.github.brooswitminecraft.dynamicatmosphere.engine.event.EventContext.of(
+            cell.amount(), capacity, false, 0);
+        var events = AtmosphericEvents.smokeEvents(tuning());
+        var fired = io.github.brooswitminecraft.dynamicatmosphere.engine.event.AtmosphericEventEngine.evaluate(
+            events, context, level.random.nextDouble());
+        if (fired.isEmpty()) return false;
+        int cost = Math.max(1, (int) Math.round(fired.get().materialCost() * capacity));
+        if (cell.amount() < cost) return false;
+        if (!AtmosphericActionExecutor.executeAtMostOneAction(level, origin, fired.get().actions(), fired.get().id())) {
+            return false;
+        }
+        smokeGrid.set(key, cell.amount() - cost, serverTicks, capacity);
+        return true;
+    }
+
+    /**
+     * Slime Fog's precipitation (spec section 44): rain mode occasionally drops a
+     * slimeball, snow mode occasionally places a slime block, selected by biome
+     * temperature exactly like vanilla rain/snow. Independent of (and does not touch)
+     * {@link SlimeGameplay#onDissipation}, which is MINECRAFT-18's dissipation-triggered
+     * additive spawn and stays exactly as it is.
+     */
+    private boolean evaluateSlimePrecipitation(
+        ServerLevel level,
+        AtmosphereGrid<ResourceKey<Level>> materialGrid,
+        AtmosphereGrid.CellKey<ResourceKey<Level>> key,
+        BlockPos origin,
+        ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacityAt,
+        AtmosphereGrid.Cell<ResourceKey<Level>> cell
+    ) {
+        if (level == null || cell == null || !level.hasChunkAt(origin)) return false;
+        int capacity = capacityAt.applyAsInt(key);
+        if (capacity <= 0) return false;
+        boolean precipitating = !level.dimensionType().ultraWarm() && level.isRainingAt(origin);
+        if (!precipitating) return false;
+        double biomeTemperature = level.getBiome(origin).value().getModifiedClimateSettings().temperature();
+        var context = io.github.brooswitminecraft.dynamicatmosphere.engine.event.EventContext.of(
+            cell.amount(), capacity, true, biomeTemperature);
+        var config = tuning().slimePrecipitation();
+        double roll = level.random.nextDouble();
+        for (var rule : AtmosphericEvents.slimePrecipitation(tuning())) {
+            var fired = io.github.brooswitminecraft.dynamicatmosphere.engine.event.AtmosphericEventEngine
+                .evaluatePrecipitation(rule, context, roll);
+            if (fired.isEmpty()) continue;
+            int cost = Math.max(1, (int) Math.round(rule.materialCost() * capacity));
+            var current = materialGrid.get(key);
+            if (current == null || current.amount() < cost) return false;
+            BlockPos target = PrecipitationTargeting.findSurface(level, origin, AtmosphereMaterial.SLIME.cellSize(),
+                rule.direction(), config.surfaceSearchAttempts());
+            if (target == null) return false;
+            if (!AtmosphericActionExecutor.execute(level, target, fired.get().action())) return false;
+            materialGrid.set(key, current.amount() - cost, serverTicks, capacity);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Zombie Fog's heat sink (spec section 47: "heat should remove it relatively
+     * quickly"). A threshold-based event (section 26) whose actions list is empty: it
+     * only consumes material, which is a generic sink expressed with no new engine
+     * code at all.
+     */
+    private boolean evaluateZombieFogHeatSink(
+        ServerLevel level,
+        AtmosphereGrid<ResourceKey<Level>> materialGrid,
+        AtmosphereGrid.CellKey<ResourceKey<Level>> key,
+        BlockPos origin,
+        ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacityAt
+    ) {
+        if (level == null) return false;
+        var cell = materialGrid.get(key);
+        int capacity = capacityAt.applyAsInt(key);
+        if (cell == null || capacity <= 0) return false;
+        double biomeTemperature = level.getBiome(origin).value().getModifiedClimateSettings().temperature();
+        var context = io.github.brooswitminecraft.dynamicatmosphere.engine.event.EventContext.of(
+            cell.amount(), capacity, false, biomeTemperature);
+        var events = AtmosphericEvents.zombieFogEvents(tuning());
+        var fired = io.github.brooswitminecraft.dynamicatmosphere.engine.event.AtmosphericEventEngine.evaluate(
+            events, context, level.random.nextDouble());
+        if (fired.isEmpty()) return false;
+        int cost = Math.max(1, (int) Math.round(fired.get().materialCost() * capacity));
+        if (cell.amount() < cost) return false;
+        // Actionless by design (spec section 26): executeAtMostOneAction sees zero actions
+        // and trivially returns true, so the sink always debits its cost.
+        if (!AtmosphericActionExecutor.executeAtMostOneAction(level, origin, fired.get().actions(), fired.get().id())) {
+            return false;
+        }
+        materialGrid.set(key, cell.amount() - cost, serverTicks, capacity);
+        return true;
     }
 
     DustGameplay dustGameplay() { return dustGameplay; }
@@ -1376,6 +1492,45 @@ final class ForgeAtmospherePrototype {
         grid.set(key, cell.amount() - consumed, serverTicks, capacityAt(level, key));
         waterBlocksCreated++;
         materialCondensed += consumed;
+        return true;
+    }
+
+    /**
+     * Lightning (spec sections 25/40/41/46): the generic event/action system's proof
+     * case. A dense, precipitating Vapor/Cloud cell occasionally spawns a lightning
+     * bolt at a precipitation_surface target and consumes material -- repeated
+     * lightning is what makes a severe storm dissipate itself. No electrical charge
+     * simulation and no thunderstorm material/subsystem exist; this is exactly one
+     * entry in a generic {@code List<AtmosphericEvent>}, evaluated by the same
+     * {@link io.github.brooswitminecraft.dynamicatmosphere.engine.event.AtmosphericEventEngine}
+     * used for the Ghast-from-Smoke event below and the Zombie Fog heat sink.
+     */
+    private boolean evaluateVaporEvents(
+        ServerLevel level, AtmosphereGrid.CellKey<ResourceKey<Level>> key, int capacity
+    ) {
+        var cell = grid.get(key);
+        if (level == null || cell == null || capacity <= 0) return false;
+        int size = AtmosphereGridLayout.CELL_SIZE;
+        BlockPos origin = new BlockPos(key.x() * size, key.y() * size, key.z() * size);
+        if (!level.hasChunkAt(origin)) return false;
+        boolean precipitating = !level.dimensionType().ultraWarm() && level.isRainingAt(origin);
+        double biomeTemperature = level.getBiome(origin).value().getModifiedClimateSettings().temperature();
+        var context = io.github.brooswitminecraft.dynamicatmosphere.engine.event.EventContext.of(
+            cell.amount(), capacity, precipitating, biomeTemperature);
+        var events = AtmosphericEvents.vaporEvents(tuning());
+        var fired = io.github.brooswitminecraft.dynamicatmosphere.engine.event.AtmosphericEventEngine.evaluate(
+            events, context, level.random.nextDouble());
+        if (fired.isEmpty()) return false;
+        int cost = Math.max(1, (int) Math.round(fired.get().materialCost() * capacity));
+        if (cell.amount() < cost) return false;
+        BlockPos target = PrecipitationTargeting.findSurface(level, origin, size,
+            io.github.brooswitminecraft.dynamicatmosphere.engine.event.PrecipitationDirection.DOWN,
+            tuning().lightning().surfaceSearchAttempts());
+        if (target == null) return false;
+        if (!AtmosphericActionExecutor.executeAtMostOneAction(level, target, fired.get().actions(), fired.get().id())) {
+            return false;
+        }
+        grid.set(key, cell.amount() - cost, serverTicks, capacity);
         return true;
     }
 
