@@ -195,6 +195,16 @@ final class ForgeAtmospherePrototype {
     }
 
     /**
+     * MINECRAFT-384: narrow, package-visible, test-only accessor for the freeze-gate regression
+     * tests -- there is no other way to observe that {@link #tick} advances {@code serverTicks}
+     * by exactly one per accepted call and by zero per frozen call, since {@code serverTicks} is
+     * otherwise only read internally. Production code never calls this.
+     */
+    long serverTicksForTesting() {
+        return serverTicks;
+    }
+
+    /**
      * MINECRAFT-384: the production dispatch body, split out from {@link #onServerTick} so a
      * test can drive it directly with an explicit {@code runsNormally} flag instead of needing a
      * live {@link ServerTickEvent.Post}. {@code ServerTickEvent.Post} fires unconditionally from

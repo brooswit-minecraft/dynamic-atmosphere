@@ -200,6 +200,51 @@ class AtmosphereGridTickDeterminismTest {
                 + "across equal pass counts, through the real production cadence function");
     }
 
+    /**
+     * MINECRAFT-384 re-review: the test above only ever compares two calls to the SAME
+     * configured value against each other, so it would still pass even if the
+     * {@code simulationIntervalTicks} override were silently ignored by production code (both
+     * sides would then just be exercising the untouched default of 200). This test instead
+     * asserts the actual, computed expected next-due tick for each of two distinct configured
+     * values -- proving the override really reaches {@link AtmosphereGridLayout#nextSimulationTick},
+     * {@link SmokeGridLayout#nextSimulationTick}, and every {@link AtmosphereMaterial#nextSimulationTick},
+     * which all read {@code runtime().simulationIntervalTicks()} (see the class doc on
+     * {@link #withSimulationInterval}: they are not independently configurable per grid, they
+     * share this one runtime option).
+     */
+    @Test
+    void realConfiguredIntervalsProduceTheirOwnExactExpectedNextDueTickAcrossAllSharedBindings() {
+        assertNextDueTickMatchesConfiguredInterval(20);
+        assertNextDueTickMatchesConfiguredInterval(90);
+    }
+
+    private static void assertNextDueTickMatchesConfiguredInterval(int intervalTicks) {
+        DynamicAtmosphereServerConfig.runWithSnapshot(withSimulationInterval(intervalTicks), () -> {
+            long tick = 1;
+            long expected = intervalTicks; // first multiple of intervalTicks strictly after tick 1
+
+            assertEquals(expected, AtmosphereGridLayout.nextSimulationTick(tick),
+                "vapor's nextSimulationTick must equal the exact configured interval (" + intervalTicks
+                    + "), not merely some value self-consistent with a prior call");
+            assertEquals(expected, SmokeGridLayout.nextSimulationTick(tick),
+                "smoke's nextSimulationTick must equal the exact configured interval (" + intervalTicks + ")");
+            for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
+                assertEquals(expected, material.nextSimulationTick(tick),
+                    "material " + material + "'s nextSimulationTick must equal the exact configured interval ("
+                        + intervalTicks + "), proving the shared runtime option actually reached it");
+            }
+
+            // A second, later tick confirms the computed value tracks the interval itself, not a
+            // coincidental match at tick 1: the next multiple of intervalTicks strictly after
+            // tick (intervalTicks + 5) is 2 * intervalTicks.
+            long laterTick = intervalTicks + 5L;
+            long expectedLater = 2L * intervalTicks;
+            assertEquals(expectedLater, AtmosphereGridLayout.nextSimulationTick(laterTick),
+                "vapor's nextSimulationTick at a later tick must still equal exactly 2x the configured interval ("
+                    + intervalTicks + ")");
+        });
+    }
+
     private static List<AtmosphereGrid.Cell<String>> runUnderConfiguredInterval(int intervalTicks, long sleepMillisPerStep)
         throws InterruptedException {
         var holder = new Object() {
