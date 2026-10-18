@@ -210,6 +210,22 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
         }
     }
 
+    /** Soft horizon band half-width, in direction-Y units (see {@link CelestialTint#horizonWeight}). */
+    private static final double HORIZON_SOFTEN = 0.06;
+    /** Per-body occlusion ray step, in blocks. */
+    private static final double OCCLUSION_RAY_STEP = 2.0;
+    /** Per-body occlusion ray bound, in blocks: a terrain/building test needs to reach past
+     *  ordinary structures, not the full render distance -- bounding it keeps the per-frame cost
+     *  fixed regardless of view distance, which the {@code canSeeSky} column check this replaces
+     *  did not need to worry about (a single height-map lookup is O(1) either way). */
+    private static final double OCCLUSION_RAY_MAX_DISTANCE = 96.0;
+    /** Jittered-ring radius/count for soft occlusion edges (see {@link CelestialTint#jitterRing}):
+     *  5 total samples per body per frame, small enough that the tint changing under a roof edge
+     *  or around a wall corner reads as a gradient over roughly a block of camera movement rather
+     *  than an instant pop, without materially increasing the per-frame ray budget. */
+    private static final double OCCLUSION_JITTER_RADIUS = 0.08;
+    private static final int OCCLUSION_JITTER_COUNT = 4;
+
     /**
      * Visibility is gated on three independent things, each folding to 0 (no tint, not a guess)
      * rather than assuming time-of-day alone means a body is visible -- see the ticket's
@@ -220,20 +236,28 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
      * that branch); the End's own sky type draws no sun/moon, and the Nether has no sky to render
      * in the first place.</li>
      * <li>Horizon: a body below the local horizon (negative world Y component of its direction)
-     * cannot be contributing real light from that direction.</li>
+     * cannot be contributing real light from that direction; smoothed by
+     * {@link CelestialTint#horizonWeight} over {@link #HORIZON_SOFTEN} rather than a bare
+     * {@code > 0} step, so crossing the horizon fades rather than pops.</li>
      * <li>Weather: vanilla's own sky renderer fades the sun/moon quads to fully transparent as
      * rain level approaches 1 ({@code 1 - getRainLevel}); mirrored here exactly so this tint
      * disappears in step with the vanilla sun/moon disappearing into cloud, with no separate
      * thunder/clear-sky case to invent.</li>
      * </ul>
-     * Terrain/building occlusion is approximated with {@code Level#canSeeSky} at the camera's own
-     * block position: a coarse "is the camera under any roof at all" column check, already used
-     * by vanilla for rain/thunder visibility, not a true ray-trace toward the body's actual
-     * angle. This is intentionally conservative in the camera's favour near sunrise/sunset
-     * grazing angles (a body peeking through a sideways gap in nearby terrain while the camera's
-     * own column is covered will not tint, and a body behind a wall usually has the camera's own
-     * column covered too, hiding it), and does not detect indoor skylights whose column differs
-     * from the camera's exact column; see the ticket comment for this known approximation.
+     * Terrain/building occlusion is evaluated PER BODY, toward that body's own direction from the
+     * camera -- not a single shared "can the camera see the sky overhead" column check, which
+     * conflates the two: a wall or hill directly between the camera and a low sun hides it even
+     * with open sky overhead, and a gap in an overhang can reveal a body the camera's own column
+     * does not have clear sky above. {@link #bodyOcclusionVisibility} casts a small jittered
+     * bundle of rays toward the body (see {@link CelestialTint#jitterRing}) and returns the
+     * fraction that reach {@link #OCCLUSION_RAY_MAX_DISTANCE} unblocked, so occlusion is a smooth
+     * fraction in {@code [0, 1]}, not a single binary hit/miss -- the camera crossing a cover edge
+     * moves the bundle's rays across that edge one at a time rather than all at once. Each ray
+     * walks outward from the camera in fixed steps and stops, treating the remainder of that ray
+     * as unblocked (the safe default, not a claim of visibility it cannot verify), the moment it
+     * either leaves the loaded world ({@code Level#isLoaded}, never forcing a chunk to load) or
+     * exits the world's build height -- a real body is effectively at infinity, so nothing beyond
+     * the bounded probe distance can be checked either way.
      */
     private static CelestialFrame celestialFrame(RenderLevelStageEvent event, ClientLevel level,
                                                   AtmosphereVolumeGeometry.Point forward) {
@@ -243,23 +267,45 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
             ? new CelestialTint.Vector(forward.x() / len, forward.y() / len, forward.z() / len)
             : new CelestialTint.Vector(0, 0, 0);
         boolean rendersSunMoon = level.effects().skyType() == DimensionSpecialEffects.SkyType.NORMAL;
-        double visibility = 0;
         CelestialTint.Vector sunDir = new CelestialTint.Vector(0, 0, 0);
         CelestialTint.Vector moonDir = new CelestialTint.Vector(0, 0, 0);
+        double sunVisibility = 0;
+        double moonVisibility = 0;
         if (rendersSunMoon) {
             float partialTick = event.getPartialTick().getGameTimeDeltaPartialTick(true);
             double sunAngle = level.getSunAngle(partialTick);
             sunDir = CelestialTint.sunDirection(sunAngle);
             moonDir = CelestialTint.moonDirection(sunAngle);
             double rainFade = 1 - Math.clamp((double) level.getRainLevel(partialTick), 0, 1);
-            BlockPos cameraBlock = BlockPos.containing(event.getCamera().getPosition());
-            boolean openSky = level.canSeeSky(cameraBlock);
-            visibility = openSky ? rainFade : 0;
+            var eye = event.getCamera().getPosition();
+            double sunHorizon = CelestialTint.horizonWeight(sunDir.y(), HORIZON_SOFTEN);
+            double moonHorizon = CelestialTint.horizonWeight(moonDir.y(), HORIZON_SOFTEN);
+            sunVisibility = sunHorizon > 0 ? sunHorizon * rainFade * bodyOcclusionVisibility(level, eye, sunDir) : 0;
+            moonVisibility = moonHorizon > 0 ? moonHorizon * rainFade * bodyOcclusionVisibility(level, eye, moonDir) : 0;
         }
-        double sunVisibility = rendersSunMoon && sunDir.y() > 0 ? visibility : 0;
-        double moonVisibility = rendersSunMoon && moonDir.y() > 0 ? visibility : 0;
         return new CelestialFrame(look, sunDir, moonDir, sunVisibility, moonVisibility,
             config.celestialTintMaxStrength(), unpack(config.sunTintColor()), unpack(config.moonTintColor()));
+    }
+
+    /** See {@link #celestialFrame}'s javadoc for the occlusion model this implements. */
+    private static double bodyOcclusionVisibility(ClientLevel level, net.minecraft.world.phys.Vec3 eye,
+                                                   CelestialTint.Vector direction) {
+        var rays = CelestialTint.jitterRing(direction, OCCLUSION_JITTER_RADIUS, OCCLUSION_JITTER_COUNT);
+        int clear = 0;
+        for (var ray : rays) {
+            if (!rayObstructed(level, eye, ray)) clear++;
+        }
+        return (double) clear / rays.length;
+    }
+
+    private static boolean rayObstructed(ClientLevel level, net.minecraft.world.phys.Vec3 eye, CelestialTint.Vector ray) {
+        for (double distance = OCCLUSION_RAY_STEP; distance <= OCCLUSION_RAY_MAX_DISTANCE; distance += OCCLUSION_RAY_STEP) {
+            BlockPos pos = BlockPos.containing(
+                eye.x + ray.x() * distance, eye.y + ray.y() * distance, eye.z + ray.z() * distance);
+            if (level.isOutsideBuildHeight(pos) || !level.isLoaded(pos)) return false;
+            if (level.getBlockState(pos).getLightBlock(level, pos) >= 15) return true;
+        }
+        return false;
     }
 
     private static float[] unpack(int rgb) {

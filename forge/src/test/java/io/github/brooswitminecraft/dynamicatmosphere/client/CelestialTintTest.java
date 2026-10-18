@@ -122,4 +122,52 @@ class CelestialTintTest {
             }
         }
     }
+
+    @Test
+    void horizonWeightIsZeroBelowAndOneAboveTheSoftenedBand() {
+        assertEquals(0, CelestialTint.horizonWeight(-1, 0.06));
+        assertEquals(0, CelestialTint.horizonWeight(-0.06, 0.06), 1e-9);
+        assertEquals(1, CelestialTint.horizonWeight(0.06, 0.06), 1e-9);
+        assertEquals(1, CelestialTint.horizonWeight(1, 0.06));
+    }
+
+    @Test
+    void horizonWeightIsStrictlyBetweenZeroAndOneInsideTheBand() {
+        double w = CelestialTint.horizonWeight(0, 0.06);
+        assertTrue(w > 0 && w < 1, "expected a strictly intermediate horizon weight, got " + w);
+    }
+
+    @Test
+    void horizonWeightFallsBackToABareStepOnInvalidHalfWidth() {
+        assertEquals(1, CelestialTint.horizonWeight(0.5, 0));
+        assertEquals(0, CelestialTint.horizonWeight(-0.5, -1));
+    }
+
+    @Test
+    void jitterRingCentreRayIsExactlyTheRequestedDirection() {
+        var rays = CelestialTint.jitterRing(UP, 0.08, 4);
+        assertEquals(UP, rays[0]);
+    }
+
+    @Test
+    void jitterRingProducesUnitVectorsCloseToTheCentreDirection() {
+        var direction = new CelestialTint.Vector(0, Math.sqrt(0.5), Math.sqrt(0.5));
+        var rays = CelestialTint.jitterRing(direction, 0.08, 4);
+        for (var ray : rays) {
+            double length = Math.sqrt(ray.dot(ray));
+            assertEquals(1, length, 1e-9, "every ray must be a unit vector");
+            assertTrue(ray.dot(direction) > 0.99, "jittered ray strayed too far from the centre direction");
+        }
+    }
+
+    @Test
+    void jitterRingWorksForAStraightOverheadDirection() {
+        // The basis construction must fall back to a different reference axis when direction is
+        // itself nearly parallel to the default +Y reference, or the cross product degenerates.
+        var rays = CelestialTint.jitterRing(UP, 0.08, 4);
+        for (var ray : rays) {
+            assertTrue(Double.isFinite(ray.x()) && Double.isFinite(ray.y()) && Double.isFinite(ray.z()),
+                "degenerate basis produced a non-finite ray: " + ray);
+        }
+    }
 }

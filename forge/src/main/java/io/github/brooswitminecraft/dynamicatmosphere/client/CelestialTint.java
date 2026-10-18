@@ -26,8 +26,12 @@ package io.github.brooswitminecraft.dynamicatmosphere.client;
  * comment for the chosen default and why it is capped well under 1.
  *
  * <p><b>Visibility gating is the caller's job</b> (see {@code AtmosphereVolumeRenderer}): a body
- * below the horizon, in a dimension with no sky bodies, or with the camera column covered
- * contributes a visibility fraction of 0, collapsing {@link #weight} to 0 regardless of angle.
+ * below the horizon, in a dimension with no sky bodies, or obstructed by terrain/weather along
+ * the actual direction to that body contributes a visibility fraction of 0, collapsing
+ * {@link #weight} to 0 regardless of angle. Both the horizon and the obstruction check are
+ * themselves smoothed ({@link #horizonWeight} and a jittered ray bundle built from
+ * {@link #jitterRing}) rather than binary, so a body crossing the horizon or sliding behind
+ * cover never pops the tint instantly -- see those methods' own javadoc.
  */
 final class CelestialTint {
     private CelestialTint() { }
@@ -35,6 +39,15 @@ final class CelestialTint {
     record Vector(double x, double y, double z) {
         double dot(Vector other) { return x * other.x + y * other.y + z * other.z; }
         Vector negate() { return new Vector(-x, -y, -z); }
+        Vector add(Vector other) { return new Vector(x + other.x, y + other.y, z + other.z); }
+        Vector scale(double factor) { return new Vector(x * factor, y * factor, z * factor); }
+        Vector cross(Vector other) {
+            return new Vector(y * other.z - z * other.y, z * other.x - x * other.z, x * other.y - y * other.x);
+        }
+        Vector normalized() {
+            double length = Math.sqrt(dot(this));
+            return length > 0 && Double.isFinite(length) ? scale(1 / length) : new Vector(0, 0, 0);
+        }
     }
 
     /** Vanilla sun direction for a given {@code Level#getSunAngle} radians value; see class javadoc. */
@@ -45,6 +58,52 @@ final class CelestialTint {
     /** The moon sits diametrically opposite the sun in vanilla's sky dome; see class javadoc. */
     static Vector moonDirection(double sunAngleRadians) {
         return sunDirection(sunAngleRadians).negate();
+    }
+
+    /**
+     * Smoothstep fade for a body crossing the horizon, in {@code [0, 1]}: 0 at or below
+     * {@code -halfWidth}, 1 at or above {@code +halfWidth}, smooth in between. Replaces a bare
+     * {@code directionY > 0} check (which pops the entire tint instantly as the body crosses
+     * Y=0) with a continuous band a few degrees wide either side of the horizon, matching how
+     * the angular {@link #weight} curve is already smooth and avoiding a visible seam the ticket's
+     * "no abrupt transitions" requirement calls out. Non-finite input, or a non-positive
+     * {@code halfWidth}, falls back to the bare step (0 or 1) rather than guessing a band width.
+     */
+    static double horizonWeight(double directionY, double halfWidth) {
+        if (!Double.isFinite(directionY) || !Double.isFinite(halfWidth) || halfWidth <= 0) {
+            return directionY > 0 ? 1 : 0;
+        }
+        double t = Math.clamp((directionY + halfWidth) / (2 * halfWidth), 0, 1);
+        return t * t * (3 - 2 * t);
+    }
+
+    /**
+     * A centre ray plus {@code count} rays arranged in a ring around {@code direction}, each
+     * displaced by approximately {@code jitterRadius} (small-angle approximation: the exact
+     * angular radius is {@code atan(jitterRadius)}, not {@code jitterRadius} itself, which is
+     * immaterial at the small radii this is used for) before renormalizing. Used to turn a
+     * single binary ray-occlusion test into a smooth {@code clearRays / totalRays} visibility
+     * fraction: as the camera moves and the bundle's rays cross a cover edge one at a time
+     * rather than all at once, the fraction -- and therefore the tint -- changes gradually
+     * instead of popping. The basis is built from an arbitrary stable reference axis ({@code
+     * +Y}, or {@code +X} when {@code direction} is nearly parallel to {@code +Y}) so the ring
+     * is well-defined for every {@code direction} the sun/moon can take, including straight
+     * overhead. A non-unit {@code direction} (including the zero vector) yields a ring of zero
+     * vectors -- the caller's occlusion test must treat that as "nothing to sample" rather than
+     * a real direction, exactly like {@link #weight}'s own non-finite handling.
+     */
+    static Vector[] jitterRing(Vector direction, double jitterRadius, int count) {
+        Vector reference = Math.abs(direction.y()) < 0.99 ? new Vector(0, 1, 0) : new Vector(1, 0, 0);
+        Vector right = reference.cross(direction).normalized();
+        Vector up = direction.cross(right).normalized();
+        Vector[] rays = new Vector[count + 1];
+        rays[0] = direction;
+        for (int i = 0; i < count; i++) {
+            double theta = 2 * Math.PI * i / count;
+            rays[i + 1] = direction.add(right.scale(jitterRadius * Math.cos(theta)))
+                .add(up.scale(jitterRadius * Math.sin(theta))).normalized();
+        }
+        return rays;
     }
 
     /**

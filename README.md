@@ -509,24 +509,39 @@ visible:
 
 - The current dimension's `DimensionSpecialEffects.SkyType` is not `NORMAL`
   (the Nether and the End render no sun/moon quads at all).
-- The body's direction is below the local horizon (negative world Y).
+- The body's direction is below the local horizon (negative world Y), smoothed
+  by a small band either side of the horizon (`horizonWeight`, ~3.4 degrees)
+  rather than a bare sign check, so crossing the horizon fades the tint out
+  instead of popping it off instantly.
 - Rain is falling: scaled by `1 - getRainLevel`, the same fade vanilla applies to
   the sun/moon quads themselves, so the tint fades out in step with the sun/moon
   fading into cloud, with no separate thunder/clear-sky case.
-- The camera's own block column cannot see open sky (`Level#canSeeSky`), an
-  approximation for terrain/building occlusion: a coarse "is the camera under
-  any roof" check (the same one vanilla uses for rain/thunder visibility), not a
-  true ray-trace toward the body's actual angle. This is a known, documented
-  limitation — it will not detect a body peeking through a sideways gap while
-  the camera's own column is covered, and does not account for a skylight whose
-  column differs from the camera's exact column.
+- Terrain/building occlusion is checked PER BODY, toward that body's own
+  direction from the camera — not a single shared "can the camera see the sky
+  overhead" check, which conflates the two: a wall or hill between the camera
+  and a low sun hides it even with open sky directly overhead, and a gap in an
+  overhang can reveal a body the camera's own overhead column does not have
+  clear sky above. A small jittered bundle of 5 rays (1 centre + 4 ring, ~4.6
+  degree radius) is cast toward the body, each walking outward in 2-block steps
+  up to a 96-block bound; the fraction of rays that reach that bound without
+  hitting a fully light-opaque block (`BlockState#getLightBlock >= 15`) is the
+  occlusion visibility, so the tint fades smoothly as the camera's position
+  moves the ray bundle across a cover edge rather than popping all at once. A
+  ray that leaves the loaded world (`Level#isLoaded`, never forcing a chunk to
+  load) or exits the world's build height before hitting anything is treated as
+  unblocked for the rest of its length — a real body is effectively at
+  infinity, so nothing past the bounded probe distance can be checked either
+  way. The 96-block bound and 2-block step are a performance/precision
+  trade-off for an everyday build's walls and roofs, not a guarantee against
+  arbitrarily large structures or sub-2-block gaps.
 
 No in-game visual confirmation was performed for this feature (no live client in
-this environment); the angular weighting and color-blend math are covered by
-unit tests (`CelestialTintTest`) exercising toward/oblique/away angles,
-independent sun/moon weighting, visibility-zero collapse, and the bounded-output
+this environment); the angular weighting, horizon smoothing, jittered-ray-bundle
+construction, and color-blend math are covered by unit tests (`CelestialTintTest`)
+exercising toward/oblique/away angles, independent sun/moon weighting,
+visibility-zero collapse, horizon-band smoothness, and the bounded-output
 guarantee, but the actual Minecraft-side wiring (sun angle, sky type, rain,
-sky-column occlusion) has not been visually verified in a running client.
+block occlusion queries) has not been visually verified in a running client.
 
 With the default four slices per base cell, 4-block Vapor and Smoke cells use
 1-block slice spacing at every LOD. Alpha remains integrated over each slice's
