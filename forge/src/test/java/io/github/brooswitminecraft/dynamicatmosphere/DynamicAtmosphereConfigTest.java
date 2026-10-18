@@ -133,6 +133,9 @@ class DynamicAtmosphereConfigTest {
         assertEquals(4096, first.selectionWorkPerTick());
         assertEquals(2, first.maxDistanceMultiplier());
         assertEquals(0.75, first.fadeStartFraction());
+        assertEquals(0.35, first.celestialTintMaxStrength());
+        assertEquals(0xFFCB82, first.sunTintColor());
+        assertEquals(0xA9C4E8, first.moonTintColor());
         assertEquals(4, first.smoke().opticalDensity());
         assertEquals(0.3, first.obsidianPowder().opticalDensity());
         assertEquals(1.2, first.vapor().opticalDensity());

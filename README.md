@@ -487,6 +487,47 @@ Void Gas and Slime multiply optical density by four and Smoke by two before
 thickness-integrated alpha; Obsidian Powder uses 40x. This changes rendering only, not
 material amounts, capacity, or simulation fullness.
 
+### Sun/Moon Viewing-Angle Tint (MINECRAFT-399)
+
+Every material's rendered color (including Vapor's fog-derived color) blends
+toward the live sun color (`client.rendering.sunTintColor`, default `0xFFCB82`) the more
+directly the camera looks at a visible sun, and toward the live moon color
+(`client.rendering.moonTintColor`, default `0xA9C4E8`) the more directly it looks at a
+visible moon — a smoothstep of the angle between the camera's look direction and
+the body's direction, zero past 90 degrees off and rising to a configurable cap
+(`client.rendering.celestialTintMaxStrength`, default `0.35`, range `0`-`1`) looking
+straight at it. The result is a bounded convex combination of the material's own
+color and the sun/moon color, never an override, so a material cannot lose its
+identity at any angle; `celestialTintMaxStrength = 0` disables the effect outright.
+
+Sun and moon directions are derived from `Level#getSunAngle` using the same
+rotation vanilla's own `LevelRenderer#renderSky` applies to the sun/moon quads
+(moon is diametrically opposite the sun, as vanilla draws it). A body contributes
+nothing — not merely a dim tint — when any of the following hold, matching
+vanilla's own sun/moon visibility rather than assuming time of day alone means
+visible:
+
+- The current dimension's `DimensionSpecialEffects.SkyType` is not `NORMAL`
+  (the Nether and the End render no sun/moon quads at all).
+- The body's direction is below the local horizon (negative world Y).
+- Rain is falling: scaled by `1 - getRainLevel`, the same fade vanilla applies to
+  the sun/moon quads themselves, so the tint fades out in step with the sun/moon
+  fading into cloud, with no separate thunder/clear-sky case.
+- The camera's own block column cannot see open sky (`Level#canSeeSky`), an
+  approximation for terrain/building occlusion: a coarse "is the camera under
+  any roof" check (the same one vanilla uses for rain/thunder visibility), not a
+  true ray-trace toward the body's actual angle. This is a known, documented
+  limitation — it will not detect a body peeking through a sideways gap while
+  the camera's own column is covered, and does not account for a skylight whose
+  column differs from the camera's exact column.
+
+No in-game visual confirmation was performed for this feature (no live client in
+this environment); the angular weighting and color-blend math are covered by
+unit tests (`CelestialTintTest`) exercising toward/oblique/away angles,
+independent sun/moon weighting, visibility-zero collapse, and the bounded-output
+guarantee, but the actual Minecraft-side wiring (sun angle, sky type, rain,
+sky-column occlusion) has not been visually verified in a running client.
+
 With the default four slices per base cell, 4-block Vapor and Smoke cells use
 1-block slice spacing at every LOD. Alpha remains integrated over each slice's
 thickness, preserving total optical density. Zero-density volumes exit before

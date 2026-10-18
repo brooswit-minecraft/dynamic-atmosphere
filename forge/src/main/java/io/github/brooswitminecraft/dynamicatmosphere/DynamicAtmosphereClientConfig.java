@@ -27,6 +27,10 @@ public final class DynamicAtmosphereClientConfig {
     private static final DoubleOption MAX_DISTANCE_MULTIPLIER;
     private static final DoubleOption FADE_START_FRACTION;
 
+    private static final DoubleOption CELESTIAL_TINT_MAX_STRENGTH;
+    private static final IntOption SUN_TINT_COLOR;
+    private static final IntOption MOON_TINT_COLOR;
+
     private static final DoubleOption VAPOR_DARKNESS_OPACITY_BOOST;
     private static final DoubleOption VAPOR_DENSITY;
     private static final DoubleOption SMOKE_DENSITY;
@@ -71,6 +75,19 @@ public final class DynamicAtmosphereClientConfig {
         // Fraction of maxDistanceMultiplier's distance at which the horizontal fade
         // begins; opacity is full below this fraction, falls to zero at max distance.
         FADE_START_FRACTION = decimal(builder, "fadeStartFraction", 0.75, 0, 1);
+        // MINECRAFT-399: caps how far any material's colour can blend toward the sun/moon tint
+        // even looking straight at the body -- a convex-combination weight (see CelestialTint),
+        // never an outright colour override, so Dust/Smoke/etc. always keep a visible fraction
+        // of their own identity. 0.35 is a deliberately conservative default: noticeable warm/cool
+        // shift when staring at the sun/moon, but every material stays clearly itself at every
+        // angle. 0 disables the effect outright (base colour unchanged at every angle); 1 would
+        // let a material's colour go fully to the sun/moon colour looking straight at it.
+        CELESTIAL_TINT_MAX_STRENGTH = decimal(builder, "celestialTintMaxStrength", 0.35, 0, 1);
+        builder.comment("Packed 0xRRGGBB. Warm low-sun colour, not the pale-yellow disc texture colour --",
+            "chosen to read as directional lighting, not a second sun render.");
+        SUN_TINT_COLOR = integer(builder, "sunTintColor", 0xFFCB82, 0x000000, 0xFFFFFF);
+        builder.comment("Packed 0xRRGGBB. Cool pale-blue moonlight colour.");
+        MOON_TINT_COLOR = integer(builder, "moonTintColor", 0xA9C4E8, 0x000000, 0xFFFFFF);
         builder.pop();
 
         builder.push("materials");
@@ -167,6 +184,7 @@ public final class DynamicAtmosphereClientConfig {
         return new Snapshot(
             ENABLED.get(), SLICES_PER_BASE_CELL.get(), TRANSITION_TICKS.get(), SELECTION_WORK.get(),
             SLICES_PER_BATCH.get(), MAX_DISTANCE_MULTIPLIER.get(), FADE_START_FRACTION.get(),
+            CELESTIAL_TINT_MAX_STRENGTH.get(), SUN_TINT_COLOR.get(), MOON_TINT_COLOR.get(),
             VAPOR_DARKNESS_OPACITY_BOOST.get(),
             new Material(VAPOR_DENSITY.get(), VAPOR_COLOR.get()),
             new Material(SMOKE_DENSITY.get(), SMOKE_COLOR.get()),
@@ -246,6 +264,7 @@ public final class DynamicAtmosphereClientConfig {
     public record Snapshot(boolean enabled, int slicesPerBaseCell, int transitionTicks,
                            int selectionWorkPerTick, int slicesPerBatch,
                            double maxDistanceMultiplier, double fadeStartFraction,
+                           double celestialTintMaxStrength, int sunTintColor, int moonTintColor,
                            double vaporDarknessOpacityBoost,
                            Material vapor, Material smoke,
                            Material dust, Material voidGas, Material exhaust, Material slime,
