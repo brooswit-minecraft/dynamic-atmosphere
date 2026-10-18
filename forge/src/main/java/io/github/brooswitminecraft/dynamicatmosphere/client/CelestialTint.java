@@ -107,6 +107,28 @@ final class CelestialTint {
     }
 
     /**
+     * Moves {@code current} toward {@code target} by at most {@code maxStep}, landing exactly on
+     * {@code target} once within range rather than overshooting. Used to turn the per-frame
+     * occlusion sample -- itself only as fine-grained as the ray bundle's ray count, so it can
+     * only take a handful of discrete values -- into an actually continuous visibility signal
+     * over time: a body crossing a cover edge changes its RAW sampled visibility abruptly from
+     * one frame to the next, but the caller feeds that raw value in as {@code target} every
+     * frame and keeps {@code current} as persistent state, so the tint interpolates smoothly
+     * across several frames instead of jumping straight to the new sample. Non-finite
+     * {@code current}/{@code target} fold to {@code target}'s clamped value directly (or 0 if
+     * that is also non-finite) -- the safe landing value, never a NaN propagating forward through
+     * every later frame's state. A non-positive {@code maxStep} disables smoothing (jumps straight
+     * to target), consistent with {@link #horizonWeight}'s own invalid-parameter fallback.
+     */
+    static double smoothTowards(double current, double target, double maxStep) {
+        double safeTarget = Double.isFinite(target) ? Math.clamp(target, 0, 1) : 0;
+        if (!Double.isFinite(current) || !Double.isFinite(maxStep) || maxStep <= 0) return safeTarget;
+        double diff = safeTarget - current;
+        if (Math.abs(diff) <= maxStep) return safeTarget;
+        return current + Math.signum(diff) * maxStep;
+    }
+
+    /**
      * Smoothstep blend weight in {@code [0, maxStrength]} for a body at {@code bodyDirection}
      * (unit vector, camera to body), the camera's normalized look direction, and a
      * {@code visibility} fraction in {@code [0, 1]} (0 = fully hidden/absent; see class javadoc).

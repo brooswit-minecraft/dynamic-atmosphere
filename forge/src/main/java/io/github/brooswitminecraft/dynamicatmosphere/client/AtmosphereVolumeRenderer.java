@@ -37,6 +37,14 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
     private static int renderedCellCount;
     private static int renderedSliceCount;
     private static int renderedCoarseCount;
+    // MINECRAFT-399: persistent across frames (not reset at the top of render()) so
+    // CelestialTint#smoothTowards has a "last frame's value" to interpolate from; a per-body
+    // ray-bundle occlusion sample can only take a handful of discrete values (see
+    // celestialFrame's javadoc), and this is what turns that into an actually smooth-over-time
+    // signal rather than a value that jumps straight to each new discrete sample. Reset in
+    // close() (dimension/world change) so a teleport does not slowly fade in from a stale value.
+    private static double sunVisibilityState;
+    private static double moonVisibilityState;
 
     static void render(RenderLevelStageEvent event, ClientLevel level, AtmosphereClientCache cache,
                        Map<AtmosphereRenderMaterial, MaterialClientSession> materials) {
@@ -212,8 +220,6 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
 
     /** Soft horizon band half-width, in direction-Y units (see {@link CelestialTint#horizonWeight}). */
     private static final double HORIZON_SOFTEN = 0.06;
-    /** Per-body occlusion ray step, in blocks. */
-    private static final double OCCLUSION_RAY_STEP = 2.0;
     /** Per-body occlusion ray bound, in blocks: a terrain/building test needs to reach past
      *  ordinary structures, not the full render distance -- bounding it keeps the per-frame cost
      *  fixed regardless of view distance, which the {@code canSeeSky} column check this replaces
@@ -225,6 +231,12 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
      *  than an instant pop, without materially increasing the per-frame ray budget. */
     private static final double OCCLUSION_JITTER_RADIUS = 0.08;
     private static final int OCCLUSION_JITTER_COUNT = 4;
+    /** Per-frame bound on how far {@link CelestialTint#smoothTowards} can move the SMOOTHED
+     *  sun/moon visibility toward each frame's raw (discrete, ray-count-limited) sample: at this
+     *  rate, fully crossing from 0 to 1 takes about a dozen frames (under a quarter second at 60
+     *  FPS) -- enough to visibly smooth the few discrete values the ray bundle can produce into a
+     *  continuous-looking transition, without reading as sluggish or lagging real occlusion changes. */
+    private static final double VISIBILITY_SMOOTHING_STEP = 0.08;
 
     /**
      * Visibility is gated on three independent things, each folding to 0 (no tint, not a guess)
@@ -249,15 +261,24 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
      * conflates the two: a wall or hill directly between the camera and a low sun hides it even
      * with open sky overhead, and a gap in an overhang can reveal a body the camera's own column
      * does not have clear sky above. {@link #bodyOcclusionVisibility} casts a small jittered
-     * bundle of rays toward the body (see {@link CelestialTint#jitterRing}) and returns the
-     * fraction that reach {@link #OCCLUSION_RAY_MAX_DISTANCE} unblocked, so occlusion is a smooth
-     * fraction in {@code [0, 1]}, not a single binary hit/miss -- the camera crossing a cover edge
-     * moves the bundle's rays across that edge one at a time rather than all at once. Each ray
-     * walks outward from the camera in fixed steps and stops, treating the remainder of that ray
-     * as unblocked (the safe default, not a claim of visibility it cannot verify), the moment it
-     * either leaves the loaded world ({@code Level#isLoaded}, never forcing a chunk to load) or
-     * exits the world's build height -- a real body is effectively at infinity, so nothing beyond
-     * the bounded probe distance can be checked either way.
+     * bundle of rays toward the body (see {@link CelestialTint#jitterRing}); each ray is walked
+     * with a 3D grid (voxel) traversal that visits every block cell it passes through, not fixed
+     * world-space sample points -- a point-sampled ray can step clean over a wall only one block
+     * thick if the step size happens to land on either side of it, which a cell-by-cell traversal
+     * cannot do, since every boundary the ray crosses is itself a visited cell. The fraction of
+     * rays that reach {@link #OCCLUSION_RAY_MAX_DISTANCE} unblocked is this frame's RAW occlusion
+     * sample; because the ray bundle only has {@code OCCLUSION_JITTER_COUNT + 1} rays, that raw
+     * sample can only take a handful of discrete values (fifths, with the current count) and is
+     * NOT itself a continuous signal. {@link CelestialTint#smoothTowards} turns it into one:
+     * {@link #sunVisibilityState}/{@link #moonVisibilityState} persist across frames and move
+     * toward each new raw sample by at most {@link #VISIBILITY_SMOOTHING_STEP} per frame, so the
+     * camera crossing a cover edge produces a multi-frame fade in the rendered tint rather than a
+     * jump straight to the next discrete sample. A ray walking outward from the camera stops,
+     * treating the remainder of that ray as unblocked (the safe default, not a claim of
+     * visibility it cannot verify), the moment it either leaves the loaded world
+     * ({@code Level#isLoaded}, never forcing a chunk to load) or exits the world's build height --
+     * a real body is effectively at infinity, so nothing beyond the bounded probe distance can be
+     * checked either way.
      */
     private static CelestialFrame celestialFrame(RenderLevelStageEvent event, ClientLevel level,
                                                   AtmosphereVolumeGeometry.Point forward) {
@@ -269,8 +290,8 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
         boolean rendersSunMoon = level.effects().skyType() == DimensionSpecialEffects.SkyType.NORMAL;
         CelestialTint.Vector sunDir = new CelestialTint.Vector(0, 0, 0);
         CelestialTint.Vector moonDir = new CelestialTint.Vector(0, 0, 0);
-        double sunVisibility = 0;
-        double moonVisibility = 0;
+        double sunRaw = 0;
+        double moonRaw = 0;
         if (rendersSunMoon) {
             float partialTick = event.getPartialTick().getGameTimeDeltaPartialTick(true);
             double sunAngle = level.getSunAngle(partialTick);
@@ -280,10 +301,12 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
             var eye = event.getCamera().getPosition();
             double sunHorizon = CelestialTint.horizonWeight(sunDir.y(), HORIZON_SOFTEN);
             double moonHorizon = CelestialTint.horizonWeight(moonDir.y(), HORIZON_SOFTEN);
-            sunVisibility = sunHorizon > 0 ? sunHorizon * rainFade * bodyOcclusionVisibility(level, eye, sunDir) : 0;
-            moonVisibility = moonHorizon > 0 ? moonHorizon * rainFade * bodyOcclusionVisibility(level, eye, moonDir) : 0;
+            sunRaw = sunHorizon > 0 ? sunHorizon * rainFade * bodyOcclusionVisibility(level, eye, sunDir) : 0;
+            moonRaw = moonHorizon > 0 ? moonHorizon * rainFade * bodyOcclusionVisibility(level, eye, moonDir) : 0;
         }
-        return new CelestialFrame(look, sunDir, moonDir, sunVisibility, moonVisibility,
+        sunVisibilityState = CelestialTint.smoothTowards(sunVisibilityState, sunRaw, VISIBILITY_SMOOTHING_STEP);
+        moonVisibilityState = CelestialTint.smoothTowards(moonVisibilityState, moonRaw, VISIBILITY_SMOOTHING_STEP);
+        return new CelestialFrame(look, sunDir, moonDir, sunVisibilityState, moonVisibilityState,
             config.celestialTintMaxStrength(), unpack(config.sunTintColor()), unpack(config.moonTintColor()));
     }
 
@@ -298,12 +321,29 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
         return (double) clear / rays.length;
     }
 
+    /**
+     * Amanatides-Woo 3D grid traversal: visits every voxel the ray from {@code eye} along
+     * {@code ray} passes through, in order, up to {@link #OCCLUSION_RAY_MAX_DISTANCE} -- unlike
+     * fixed-distance point sampling, this cannot skip over a wall thinner than a sample step,
+     * since every cell boundary the ray crosses is itself one of the visited voxels.
+     */
     private static boolean rayObstructed(ClientLevel level, net.minecraft.world.phys.Vec3 eye, CelestialTint.Vector ray) {
-        for (double distance = OCCLUSION_RAY_STEP; distance <= OCCLUSION_RAY_MAX_DISTANCE; distance += OCCLUSION_RAY_STEP) {
-            BlockPos pos = BlockPos.containing(
-                eye.x + ray.x() * distance, eye.y + ray.y() * distance, eye.z + ray.z() * distance);
+        int x = (int) Math.floor(eye.x), y = (int) Math.floor(eye.y), z = (int) Math.floor(eye.z);
+        int stepX = Double.compare(ray.x(), 0), stepY = Double.compare(ray.y(), 0), stepZ = Double.compare(ray.z(), 0);
+        double tDeltaX = ray.x() != 0 ? Math.abs(1 / ray.x()) : Double.POSITIVE_INFINITY;
+        double tDeltaY = ray.y() != 0 ? Math.abs(1 / ray.y()) : Double.POSITIVE_INFINITY;
+        double tDeltaZ = ray.z() != 0 ? Math.abs(1 / ray.z()) : Double.POSITIVE_INFINITY;
+        double tMaxX = ray.x() != 0 ? ((stepX > 0 ? x + 1 - eye.x : eye.x - x) / Math.abs(ray.x())) : Double.POSITIVE_INFINITY;
+        double tMaxY = ray.y() != 0 ? ((stepY > 0 ? y + 1 - eye.y : eye.y - y) / Math.abs(ray.y())) : Double.POSITIVE_INFINITY;
+        double tMaxZ = ray.z() != 0 ? ((stepZ > 0 ? z + 1 - eye.z : eye.z - z) / Math.abs(ray.z())) : Double.POSITIVE_INFINITY;
+        var pos = new BlockPos.MutableBlockPos();
+        for (double t = 0; t <= OCCLUSION_RAY_MAX_DISTANCE; ) {
+            pos.set(x, y, z);
             if (level.isOutsideBuildHeight(pos) || !level.isLoaded(pos)) return false;
             if (level.getBlockState(pos).getLightBlock(level, pos) >= 15) return true;
+            if (tMaxX < tMaxY && tMaxX < tMaxZ) { x += stepX; t = tMaxX; tMaxX += tDeltaX; }
+            else if (tMaxY < tMaxZ) { y += stepY; t = tMaxY; tMaxY += tDeltaY; }
+            else { z += stepZ; t = tMaxZ; tMaxZ += tDeltaZ; }
         }
         return false;
     }
@@ -331,6 +371,8 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
         renderedCellCount = 0;
         renderedSliceCount = 0;
         renderedCoarseCount = 0;
+        sunVisibilityState = 0;
+        moonVisibilityState = 0;
     }
 
     public static int renderedCellCount() { return renderedCellCount; }

@@ -522,24 +522,32 @@ visible:
   and a low sun hides it even with open sky directly overhead, and a gap in an
   overhang can reveal a body the camera's own overhead column does not have
   clear sky above. A small jittered bundle of 5 rays (1 centre + 4 ring, ~4.6
-  degree radius) is cast toward the body, each walking outward in 2-block steps
-  up to a 96-block bound; the fraction of rays that reach that bound without
-  hitting a fully light-opaque block (`BlockState#getLightBlock >= 15`) is the
-  occlusion visibility, so the tint fades smoothly as the camera's position
-  moves the ray bundle across a cover edge rather than popping all at once. A
-  ray that leaves the loaded world (`Level#isLoaded`, never forcing a chunk to
-  load) or exits the world's build height before hitting anything is treated as
-  unblocked for the rest of its length — a real body is effectively at
-  infinity, so nothing past the bounded probe distance can be checked either
-  way. The 96-block bound and 2-block step are a performance/precision
-  trade-off for an everyday build's walls and roofs, not a guarantee against
-  arbitrarily large structures or sub-2-block gaps.
+  degree radius) is cast toward the body; each ray is walked with a 3D grid
+  (Amanatides-Woo) traversal that visits every voxel it passes through, up to a
+  96-block bound, rather than fixed-distance point samples — a point-sampled
+  ray can step clean over a wall only one block thick if the sample points
+  happen to land on either side of it, which a cell-by-cell traversal cannot
+  do. A ray that leaves the loaded world (`Level#isLoaded`, never forcing a
+  chunk to load) or exits the world's build height before hitting a fully
+  light-opaque block (`BlockState#getLightBlock >= 15`) is treated as unblocked
+  for the rest of its length — a real body is effectively at infinity, so
+  nothing past the bounded probe distance can be checked either way. The
+  96-block bound is a performance/precision trade-off for an everyday build's
+  walls and roofs, not a guarantee against arbitrarily large structures.
+  Because the bundle only has 5 rays, the RAW fraction this produces each
+  frame can only take a handful of discrete values (fifths); that raw sample
+  is then smoothed over time (`CelestialTint#smoothTowards`, persisted
+  per-body across frames, moving at most `0.08` per frame toward the latest
+  raw sample — about a dozen frames, under a quarter second at 60 FPS, to
+  fully cross) so the rendered tint fades gradually as the camera crosses a
+  cover edge rather than jumping straight to the next discrete sample.
 
 No in-game visual confirmation was performed for this feature (no live client in
 this environment); the angular weighting, horizon smoothing, jittered-ray-bundle
-construction, and color-blend math are covered by unit tests (`CelestialTintTest`)
-exercising toward/oblique/away angles, independent sun/moon weighting,
-visibility-zero collapse, horizon-band smoothness, and the bounded-output
+construction, cross-frame visibility smoothing, and color-blend math are covered
+by unit tests (`CelestialTintTest`) exercising toward/oblique/away angles,
+independent sun/moon weighting, visibility-zero collapse, horizon-band
+smoothness, bounded/no-overshoot step-wise smoothing, and the bounded-output
 guarantee, but the actual Minecraft-side wiring (sun angle, sky type, rain,
 block occlusion queries) has not been visually verified in a running client.
 

@@ -161,6 +161,43 @@ class CelestialTintTest {
     }
 
     @Test
+    void smoothTowardsMovesTowardTargetByAtMostMaxStep() {
+        assertEquals(0.3, CelestialTint.smoothTowards(0.2, 1, 0.1), 1e-9);
+        assertEquals(0.1, CelestialTint.smoothTowards(0.2, 0, 0.1), 1e-9);
+    }
+
+    @Test
+    void smoothTowardsLandsExactlyOnTargetOnceWithinRange() {
+        assertEquals(1, CelestialTint.smoothTowards(0.95, 1, 0.1), 1e-9);
+        assertEquals(0.5, CelestialTint.smoothTowards(0.5, 0.5, 0.1), 1e-9);
+    }
+
+    @Test
+    void smoothTowardsNeverOvershootsAcrossManySteps() {
+        double value = 0;
+        for (int i = 0; i < 3; i++) value = CelestialTint.smoothTowards(value, 1, 0.1);
+        assertEquals(0.3, value, 1e-9);
+        assertTrue(value < 1);
+    }
+
+    @Test
+    void smoothTowardsFoldsNonFiniteCurrentToTheClampedTarget() {
+        assertEquals(1, CelestialTint.smoothTowards(Double.NaN, 1, 0.1));
+        assertEquals(0, CelestialTint.smoothTowards(Double.NaN, Double.NaN, 0.1));
+    }
+
+    @Test
+    void smoothTowardsClampsATargetOutsideZeroOne() {
+        assertEquals(1, CelestialTint.smoothTowards(0.95, 2, 0.1), 1e-9);
+    }
+
+    @Test
+    void smoothTowardsJumpsStraightToTargetWithANonPositiveStep() {
+        assertEquals(0.7, CelestialTint.smoothTowards(0.1, 0.7, 0));
+        assertEquals(0.7, CelestialTint.smoothTowards(0.1, 0.7, -1));
+    }
+
+    @Test
     void jitterRingWorksForAStraightOverheadDirection() {
         // The basis construction must fall back to a different reference axis when direction is
         // itself nearly parallel to the default +Y reference, or the cross product degenerates.
