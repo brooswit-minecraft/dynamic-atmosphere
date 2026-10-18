@@ -27,6 +27,7 @@ public final class DynamicAtmosphereClientConfig {
     private static final DoubleOption MAX_DISTANCE_MULTIPLIER;
     private static final DoubleOption FADE_START_FRACTION;
 
+    private static final DoubleOption VAPOR_DARKNESS_OPACITY_BOOST;
     private static final DoubleOption VAPOR_DENSITY;
     private static final DoubleOption SMOKE_DENSITY;
     private static final DoubleOption DUST_DENSITY;
@@ -77,6 +78,15 @@ public final class DynamicAtmosphereClientConfig {
         // obsidianPowderOpticalDensity (renamed by MINECRAFT-16/C2 from enderGasOpticalDensity) 40 -> 0.3.
         // Every value here is paired with the matching AtmosphereRenderMaterial enum literal default
         // (client package) — the two must change together or the renderer's config read stays stale.
+        // MINECRAFT-387: extra optical-density multiplier applied ONLY to Vapor, scaling smoothly
+        // from 1x (no change) at full fog brightness up to this cap as the live fog colour's
+        // luminance approaches black -- the "nearly invisible at night" report. Modelled as
+        // optical density rather than a direct alpha multiply so it composes with the existing
+        // amount/thickness/slicesPerBaseCell transmittance math instead of fighting it; see
+        // AtmosphereRenderMaterial#vaporOpacity for the curve. 1 disables the boost outright
+        // (Vapor behaves exactly as before MINECRAFT-387); the 6 ceiling keeps even pitch-black
+        // fog from saturating to a solid wall at low amounts, which would read as a bug, not fog.
+        VAPOR_DARKNESS_OPACITY_BOOST = decimal(builder, "vaporDarknessOpacityBoost", 3, 1, 6);
         VAPOR_DENSITY = decimal(builder, "vaporOpticalDensity", 1.2, 0, 1000);
         SMOKE_DENSITY = decimal(builder, "smokeOpticalDensity", 4, 0, 1000);
         DUST_DENSITY = decimal(builder, "dustOpticalDensity", 1, 0, 1000);
@@ -147,6 +157,7 @@ public final class DynamicAtmosphereClientConfig {
         return new Snapshot(
             ENABLED.get(), SLICES_PER_BASE_CELL.get(), TRANSITION_TICKS.get(), SELECTION_WORK.get(),
             SLICES_PER_BATCH.get(), MAX_DISTANCE_MULTIPLIER.get(), FADE_START_FRACTION.get(),
+            VAPOR_DARKNESS_OPACITY_BOOST.get(),
             new Material(VAPOR_DENSITY.get(), VAPOR_COLOR.get()),
             new Material(SMOKE_DENSITY.get(), SMOKE_COLOR.get()),
             new Material(DUST_DENSITY.get(), DUST_COLOR.get()),
@@ -225,6 +236,7 @@ public final class DynamicAtmosphereClientConfig {
     public record Snapshot(boolean enabled, int slicesPerBaseCell, int transitionTicks,
                            int selectionWorkPerTick, int slicesPerBatch,
                            double maxDistanceMultiplier, double fadeStartFraction,
+                           double vaporDarknessOpacityBoost,
                            Material vapor, Material smoke,
                            Material dust, Material voidGas, Material exhaust, Material slime,
                            Material obsidianPowder, Material zombieFog, Material netherGas, Material glowGas,

@@ -151,11 +151,16 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
         void draw(AtmosphereVolumeGeometry.Slice slice, AtmosphereRenderMaterial material) {
             if (vertices == null) vertices = buffers.getBuffer(VOLUME);
             float r = material.channel(0, fogColor), g = material.channel(1, fogColor), b = material.channel(2, fogColor);
+            // MINECRAFT-387: only Vapor's alpha is luminance-adjusted; every other material's
+            // slice.alpha() is untouched, same as before this change.
+            float alpha = material == AtmosphereRenderMaterial.VAPOR
+                ? AtmosphereRenderMaterial.vaporOpacity(slice.alpha(), fogColor)
+                : slice.alpha();
             var polygon = slice.vertices();
             for (int i = 1; i < polygon.size() - 1; i++) {
-                vertex(vertices, polygon.getFirst(), slice.alpha(), r, g, b);
-                vertex(vertices, polygon.get(i), slice.alpha(), r, g, b);
-                vertex(vertices, polygon.get(i + 1), slice.alpha(), r, g, b);
+                vertex(vertices, polygon.getFirst(), alpha, r, g, b);
+                vertex(vertices, polygon.get(i), alpha, r, g, b);
+                vertex(vertices, polygon.get(i + 1), alpha, r, g, b);
             }
             renderedSliceCount++;
             if (++slices >= io.github.brooswitminecraft.dynamicatmosphere.DynamicAtmosphereClientConfig.snapshot().slicesPerBatch()) flush();

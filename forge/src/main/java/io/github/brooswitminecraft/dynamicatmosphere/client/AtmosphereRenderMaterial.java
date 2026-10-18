@@ -66,4 +66,33 @@ enum AtmosphereRenderMaterial {
         int colour = tuning().color();
         return ((colour >> (16 - 8 * channel)) & 255) / 255f;
     }
+
+    /**
+     * MINECRAFT-387: Vapor keeps its fog-derived RGB untouched (see {@link #channel}); only its
+     * alpha changes, and only as a function of that same fog colour's luminance. Modelled as
+     * extra optical density rather than a direct alpha multiply: boosting the transmittance
+     * EXPONENT is exactly equivalent to multiplying {@code opticalDensityMultiplier} by the same
+     * factor (compare {@link AtmosphereVolumeGeometry#sliceAlpha}), so it composes with the
+     * existing amount/thickness math instead of fighting it, preserves alpha=0 -> 0 (empty or
+     * fully distance-faded Vapor stays invisible), and stays in [0,1] for any finite exponent
+     * >= 1 without a separate clamp needing to rescue it.
+     * <p>Luminance uses the Rec. 709 weights on the fog triplet already composited by the
+     * shader (no extra gamma step introduced). The darkness term is squared so the curve is flat
+     * near full daylight (dL/dluminance == 0 at luminance 1): ordinary day/dusk/biome fog drift
+     * produces no visible opacity jump, only true near-black fog pushes the exponent toward its
+     * configured cap.
+     * <p>A non-finite luminance (NaN fog channel from some future codec/mod conflict) folds to
+     * luminance 1, i.e. boost disabled -- the safe direction, since it leaves Vapor exactly as it
+     * rendered before this change rather than guessing a dark value that saturates opacity.
+     */
+    static float vaporOpacity(float alpha, float[] fog) {
+        double boost = DynamicAtmosphereClientConfig.snapshot().vaporDarknessOpacityBoost();
+        double luminance = 0.2126 * fog[0] + 0.7152 * fog[1] + 0.0722 * fog[2];
+        if (!Double.isFinite(luminance)) luminance = 1;
+        luminance = Math.clamp(luminance, 0, 1);
+        double darkness = 1 - luminance;
+        double exponent = 1 + (boost - 1) * darkness * darkness;
+        double transmittance = Math.pow(1 - (double) Math.clamp(alpha, 0, 1), exponent);
+        return (float) Math.clamp(1 - transmittance, 0, 1);
+    }
 }
