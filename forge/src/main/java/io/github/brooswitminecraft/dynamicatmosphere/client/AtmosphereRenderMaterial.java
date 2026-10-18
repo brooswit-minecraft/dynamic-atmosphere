@@ -15,10 +15,13 @@ import io.github.brooswitminecraft.dynamicatmosphere.DynamicAtmosphereClientConf
  * Smoke and Void Gas — the two most common heavy materials, both optical density 4x — stay
  * visually distinguishable in play. Obsidian Powder's 0x1A1025 is a PROPOSAL (ATMO-22
  * comment 23234); pending in-game visual confirmation, not a locked value.
+ * MINECRAFT-398: Dust's catalog literal moved from 0x8B4513 (saddle brown) to 0xD2B48C (tan,
+ * a sandier hue); kept in sync with {@code DynamicAtmosphereClientConfig}'s {@code dustColor}
+ * default per the smokeOpticalDensity-trap warning above.
  */
 enum AtmosphereRenderMaterial {
     VAPOR(2, 0, 1.2), SMOKE(2, 0x0D0A08, 4),
-    DUST(0, 0x8B4513, 1), OBSIDIAN_POWDER(0, 0x1A1025, 0.3),
+    DUST(0, 0xD2B48C, 1), OBSIDIAN_POWDER(0, 0x1A1025, 0.3),
     VOID_GAS(1, 0x000000, 4), EXHAUST(0, 0xFFFF00, 1),
     SLIME(1, 0x00FF00, 4), ZOMBIE_FOG(1, 0x808080, 4), NETHER_GAS(1, 0x6B8E23, 4),
     /** MINECRAFT-1 (B2): visual only, rendered unlit -- no real block light. */

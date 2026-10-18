@@ -208,7 +208,7 @@ emission sources, thresholds, and costs did not change.
 | --- | --- | --- | --- | --- |
 | Vapor | 4 blocks | 200 ticks | Minecraft fog/horizon (`vaporColor` defined for config parity, unused by the renderer) | 1.2x |
 | Smoke | 4 blocks | 200 ticks | Very dark warm grey, deliberately not pure black (`smokeColor`, default `0x0D0A08`) | 4x |
-| Dust | 4 blocks | 200 ticks | Brown (`dustColor`, default `0x8B4513`) | 1x |
+| Dust | 4 blocks | 200 ticks | Sandy tan, MINECRAFT-398 (`dustColor`, default `0xD2B48C`) | 1x |
 | Obsidian Powder | 4 blocks | 200 ticks | Dark purple cast, PROPOSED pending in-game visual acceptance (`obsidianPowderColor`, default `0x1A1025`) | 0.3x |
 | Void Gas | 4 blocks | 200 ticks | Black (`voidGasColor`, default `0x000000`) | 4x |
 | Exhaust | 4 blocks | 200 ticks | Yellow (`exhaustColor`, default `0xFFFF00`) | 1x |
@@ -235,6 +235,18 @@ confirmation against Smoke and Void Gas at representative densities. Vapor's
 optical density moved from `1x` to `1.2x`; its colour is unchanged (and, per
 above, not actually read). Dust, Exhaust, Slime, Nether Gas, Glow Gas, and Nether Fog are
 unchanged in both colour and optical density.
+
+MINECRAFT-398 later changed Dust's default colour from `0x8B4513` (saddle
+brown) to `0xD2B48C` (tan), a sandier hue, by request; optical density is
+unchanged. As with every client-config-backed default, this only affects a
+config file not yet generated (or regenerated): a file already written under
+the old default has `dustColor = 0x8B4513` physically present, which is
+indistinguishable from a deliberate override at the file level, so existing
+installs keep the old colour until that line is edited or the file is
+deleted. A `configVersion` bump (see ConfigVersionGuard) was deliberately not
+used to force the new default, since that resets the ENTIRE client config
+file, not just `dustColor` — an unacceptable cost to unrelated settings a
+player may have tuned on purpose.
 
 Nether Fog (MINECRAFT-1 B3) harvests and condenses lava, ultraWarm dimensions
 only: a bounded, palette-gated random check consumes one lava source block per

@@ -113,8 +113,18 @@ public final class DynamicAtmosphereClientConfig {
         builder.comment("Packed 0xRRGGBB. Deliberately NOT pure black (0x000000): off-black keeps Smoke",
             "visually distinct from Void Gas, the other common heavy material at this density.");
         SMOKE_COLOR = integer(builder, "smokeColor", 0x0D0A08, 0x000000, 0xFFFFFF);
+        // MINECRAFT-398: 0x8B4513 (saddle brown) -> 0xD2B48C (tan), a sandier hue per user
+        // request. This changes the SPEC default only: a pre-existing config file already has
+        // the old value physically written (NeoForge materializes every spec default into the
+        // file on first generation), indistinguishable at the file level from a genuine
+        // explicit override, so existing installs keep rendering 0x8B4513 until that file is
+        // deleted/regenerated or the value is edited by hand. A configVersion bump
+        // (ConfigVersionGuard) was deliberately NOT used to force this: it resets the ENTIRE
+        // file, including unrelated settings the player may have deliberately tuned, which is
+        // not an acceptable cost for a single material's default colour. Only fresh installs
+        // (no existing file) pick up the new default automatically.
         builder.comment("Packed 0xRRGGBB.");
-        DUST_COLOR = integer(builder, "dustColor", 0x8B4513, 0x000000, 0xFFFFFF);
+        DUST_COLOR = integer(builder, "dustColor", 0xD2B48C, 0x000000, 0xFFFFFF);
         builder.comment("Packed 0xRRGGBB.");
         VOID_GAS_COLOR = integer(builder, "voidGasColor", 0x000000, 0x000000, 0xFFFFFF);
         builder.comment("Packed 0xRRGGBB.");

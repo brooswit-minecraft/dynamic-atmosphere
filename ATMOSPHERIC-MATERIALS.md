@@ -17,7 +17,7 @@ and never force chunks to load.
 | --- | --- | --- | --- | --- |
 | Vapor | Current fog color | 4x4x4 | 1x to V/2, 2x to V, 4x to 2V | 1.2x |
 | Smoke | Very dark warm grey, not pure black (0x0D0A08) | 4x4x4 | 1x to V/2, 2x to V, 4x to 2V | 4x |
-| Dust | Brown | 4x4x4 | Base cells only | 1x |
+| Dust | Sandy tan, MINECRAFT-398 (0xD2B48C) | 4x4x4 | Base cells only | 1x |
 | Void Gas | Black | 4x4x4 | 1x to V, 2x to 2V | 4x |
 | Exhaust | Yellow | 4x4x4 | Base cells only | 1x |
 | Slime | Green | 4x4x4 | 1x to V, 2x to 2V | 4x |
@@ -30,7 +30,11 @@ MINECRAFT-21 (transferred from MINECRAFT-20) made every Color/Optical density
 value above a client config default (`client.materials.<material>Color` /
 `<material>OpticalDensity`) instead of a hard-coded enum literal; see
 README.md's "Ten Materials" section for the exact key names and the
-Smoke/Obsidian Powder/Vapor value changes.
+Smoke/Obsidian Powder/Vapor value changes. MINECRAFT-398 later changed
+Dust's own default the same way (`dustColor` 0x8B4513 -> 0xD2B48C); because
+the default lives in config, only fresh installs pick it up automatically —
+a config file already generated under the old default has that value
+physically written and keeps rendering it until deleted/edited by hand.
 
 All nine materials now share one render distance and one fade: full opacity
 out to `client.rendering.fadeStartFraction * maxDistance` (defaults 0.75 and
