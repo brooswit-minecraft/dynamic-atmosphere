@@ -497,6 +497,23 @@ public final class DynamicAtmosphereServerConfig {
         return cached;
     }
 
+    /**
+     * MINECRAFT-384: test-only seam. {@link #SPEC} is never actually loaded from a file in a
+     * unit test (there is no running NeoForge config system), so this is the only way to
+     * exercise production cadence functions (e.g. {@code AtmosphereGridLayout.nextSimulationTick})
+     * against a real, non-default {@code simulationIntervalTicks} value instead of a hand-rolled
+     * stand-in cadence lambda. Package-private; production code never calls this.
+     */
+    static void runWithSnapshot(Snapshot override, Runnable body) {
+        Snapshot previous = cached;
+        cached = override;
+        try {
+            body.run();
+        } finally {
+            cached = previous;
+        }
+    }
+
     public static void onLoading(ModConfigEvent.Loading event) { refresh(event); }
     public static void onReloading(ModConfigEvent.Reloading event) { refresh(event); }
     public static void onUnloading(ModConfigEvent.Unloading event) { refresh(event); }

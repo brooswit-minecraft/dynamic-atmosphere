@@ -191,11 +191,40 @@ final class ForgeAtmospherePrototype {
     }
 
     void onServerTick(ServerTickEvent.Post event) {
+        tick(event.getServer(), event.getServer().tickRateManager().runsNormally());
+    }
+
+    /**
+     * MINECRAFT-384: narrow, package-visible, test-only accessor for the freeze-gate regression
+     * tests -- there is no other way to observe that {@link #tick} advances {@code serverTicks}
+     * by exactly one per accepted call and by zero per frozen call, since {@code serverTicks} is
+     * otherwise only read internally. Production code never calls this.
+     */
+    long serverTicksForTesting() {
+        return serverTicks;
+    }
+
+    /**
+     * MINECRAFT-384: the production dispatch body, split out from {@link #onServerTick} so a
+     * test can drive it directly with an explicit {@code runsNormally} flag instead of needing a
+     * live {@link ServerTickEvent.Post}. {@code ServerTickEvent.Post} fires unconditionally from
+     * {@code MinecraftServer.tickServer} every real server tick, including while
+     * {@code tickRateManager().runsNormally()} is false (platform {@code /tick freeze}, which
+     * still runs the server loop for control/network work) -- so without this gate, atmosphere
+     * transport/decay/reaction previously kept advancing purely because wall-clock ticks kept
+     * arriving, even though the simulated world was frozen. {@code runsNormally()} is also true
+     * during a sprint or a single stepped tick while frozen, so those still advance correctly;
+     * only genuinely frozen-and-not-stepping ticks are skipped, and skipping them skips the
+     * {@code serverTicks} counter increment too, so resuming continues from the last real tick
+     * with no wall-time-driven catch-up burst.
+     */
+    void tick(MinecraftServer server, boolean runsNormally) {
+        if (!runsNormally) return;
         serverTicks++;
         importsRemaining = tuning().runtime().maxChunkImportsPerTick();
-        importPendingChunks(event.getServer());
-        drainWaterTransitions(event.getServer());
-        for (ServerLevel level : event.getServer().getAllLevels()) {
+        importPendingChunks(server);
+        drainWaterTransitions(server);
+        for (ServerLevel level : server.getAllLevels()) {
             ForgeSmokeGameplay.drain(level, (pos, amount) -> emitSmoke(level, pos, amount),
                 (pos, amount) -> emitVapor(level, pos, amount));
         }
@@ -206,25 +235,25 @@ final class ForgeAtmospherePrototype {
             beginSmokeProducerCycle();
         }
         beginMaterialProducerCyclesIfDue();
-        processProducerChunks(event.getServer());
-        processSmokeProducerChunks(event.getServer());
-        processMaterialProducerChunks(event.getServer());
+        processProducerChunks(server);
+        processSmokeProducerChunks(server);
+        processMaterialProducerChunks(server);
         pressureAttempts = 0;
         blockedOverflow = 0;
         sourcesProcessed = 0;
         workRemaining = false;
         searchLimited = false;
-        processFans(event.getServer());
-        advanceSimulation(event.getServer());
-        advanceSmokeSimulation(event.getServer());
-        advanceMaterialSimulations(event.getServer());
+        processFans(server);
+        advanceSimulation(server);
+        advanceSmokeSimulation(server);
+        advanceMaterialSimulations(server);
         flushDirtyChunks();
         flushSmokeDirtyChunks();
         flushMaterialDirtyChunks();
         if (serverTicks % tuning().runtime().syncIntervalTicks() == 0) {
-            syncPlayers(event.getServer(), serverTicks % tuning().runtime().fullSnapshotIntervalTicks() == 0);
-            syncSmokePlayers(event.getServer(), serverTicks % tuning().runtime().fullSnapshotIntervalTicks() == 0);
-            syncMaterialPlayers(event.getServer(), serverTicks % tuning().runtime().fullSnapshotIntervalTicks() == 0);
+            syncPlayers(server, serverTicks % tuning().runtime().fullSnapshotIntervalTicks() == 0);
+            syncSmokePlayers(server, serverTicks % tuning().runtime().fullSnapshotIntervalTicks() == 0);
+            syncMaterialPlayers(server, serverTicks % tuning().runtime().fullSnapshotIntervalTicks() == 0);
         }
         flushDirtyChunks();
         flushSmokeDirtyChunks();
