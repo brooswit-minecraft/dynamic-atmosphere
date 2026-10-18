@@ -145,12 +145,14 @@ class DynamicAtmosphereConfigTest {
     void materialColorsAreClientConfigValuesWithTheExpectedDefaults() {
         // MINECRAFT-21: all materials' colours are now client config values, not
         // hard-coded AtmosphereRenderMaterial enum literals. Smoke/Obsidian Powder/Vapor
-        // changed; the rest stay at their long-standing catalog colours.
+        // changed there; MINECRAFT-398 later changed Dust; the rest stay at their
+        // long-standing catalog colours.
         var first = DynamicAtmosphereClientConfig.snapshot();
         assertEquals(0x0D0A08, first.smoke().color(), "Smoke: deliberately NOT pure black");
         assertEquals(0x1A1025, first.obsidianPowder().color(), "Obsidian Powder: PROPOSED, pending visual acceptance");
         assertEquals(0x000000, first.vapor().color());
-        assertEquals(0x8B4513, first.dust().color());
+        // MINECRAFT-398: 0x8B4513 (saddle brown) -> 0xD2B48C (tan), a sandier default.
+        assertEquals(0xD2B48C, first.dust().color());
         assertEquals(0x000000, first.voidGas().color());
         assertEquals(0xFFFF00, first.exhaust().color());
         assertEquals(0x00FF00, first.slime().color());

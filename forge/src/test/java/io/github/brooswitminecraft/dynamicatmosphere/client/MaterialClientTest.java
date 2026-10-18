@@ -277,9 +277,11 @@ class MaterialClientTest {
         assertEquals(13 / 255f, AtmosphereRenderMaterial.SMOKE.channel(0, fog));
         assertEquals(10 / 255f, AtmosphereRenderMaterial.SMOKE.channel(1, fog));
         assertEquals(8 / 255f, AtmosphereRenderMaterial.SMOKE.channel(2, fog));
-        assertEquals(139 / 255f, AtmosphereRenderMaterial.DUST.channel(0, fog));
-        assertEquals(69 / 255f, AtmosphereRenderMaterial.DUST.channel(1, fog));
-        assertEquals(19 / 255f, AtmosphereRenderMaterial.DUST.channel(2, fog));
+        // MINECRAFT-398: Dust colour 0x8B4513 -> 0xD2B48C (sandier tan). Reads the client
+        // config value (via tuning().color()), not the enum's own catalog literal.
+        assertEquals(210 / 255f, AtmosphereRenderMaterial.DUST.channel(0, fog));
+        assertEquals(180 / 255f, AtmosphereRenderMaterial.DUST.channel(1, fog));
+        assertEquals(140 / 255f, AtmosphereRenderMaterial.DUST.channel(2, fog));
         // MINECRAFT-21: Obsidian Powder colour 0x800080 -> 0x1A1025 (proposed).
         assertEquals(26 / 255f, AtmosphereRenderMaterial.OBSIDIAN_POWDER.channel(0, fog));
         assertEquals(16 / 255f, AtmosphereRenderMaterial.OBSIDIAN_POWDER.channel(1, fog));
