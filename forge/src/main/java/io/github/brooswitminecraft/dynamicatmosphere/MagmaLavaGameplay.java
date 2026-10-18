@@ -2,6 +2,7 @@ package io.github.brooswitminecraft.dynamicatmosphere;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
@@ -121,9 +122,22 @@ public final class MagmaLavaGameplay {
     }
 
     public void onServerTick(ServerTickEvent.Post event) {
+        tick(event.getServer(), event.getServer().tickRateManager().runsNormally());
+    }
+
+    /**
+     * MINECRAFT-384: split out from {@link #onServerTick} for the same reason as
+     * {@code ForgeAtmospherePrototype.tick} -- {@code ServerTickEvent.Post} still fires during
+     * platform {@code /tick freeze}, so without this gate a pending lava commit (itself only a
+     * deferred write of an already-rolled decision, see class doc) could land while the
+     * simulated world is frozen. Gating here defers the pending entries to the next
+     * non-frozen tick rather than dropping them.
+     */
+    void tick(MinecraftServer server, boolean runsNormally) {
+        if (!runsNormally) return;
         if (pendingLava.isEmpty()) return;
         for (Map.Entry<ResourceKey<Level>, Set<BlockPos>> entry : pendingLava.entrySet()) {
-            ServerLevel level = event.getServer().getLevel(entry.getKey());
+            ServerLevel level = server.getLevel(entry.getKey());
             if (level == null) continue;
             for (BlockPos pos : entry.getValue()) {
                 // Commit only into a vacated position; a block that took the place within the

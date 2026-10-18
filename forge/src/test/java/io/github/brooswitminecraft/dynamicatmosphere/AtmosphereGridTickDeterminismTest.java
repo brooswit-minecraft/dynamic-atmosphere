@@ -155,23 +155,66 @@ class AtmosphereGridTickDeterminismTest {
             "sanity: the reaction hook's product cell should have been produced at least once");
     }
 
+    /**
+     * Builds a full config snapshot identical to current defaults except for
+     * {@code runtime().simulationIntervalTicks()}. Every grid's cadence function in production
+     * (vapor's {@link AtmosphereGridLayout#nextSimulationTick}, smoke's
+     * {@link SmokeGridLayout#nextSimulationTick}, and every {@link AtmosphereMaterial}'s own
+     * {@code nextSimulationTick}) reads this single shared option -- see
+     * {@code AtmosphereGridLayout.simulationIntervalTicks()}, {@code Vapor.simulationIntervalTicks()}
+     * and {@code AtmosphereMaterial.simulationIntervalTicks()}, all of which delegate to
+     * {@code snapshot().runtime().simulationIntervalTicks()} -- so this one override exercises all
+     * of them identically; they are not independently configurable per grid.
+     */
+    private static DynamicAtmosphereServerConfig.Snapshot withSimulationInterval(int intervalTicks) {
+        var base = DynamicAtmosphereServerConfig.snapshot();
+        var runtime = base.runtime();
+        var overriddenRuntime = new DynamicAtmosphereServerConfig.RuntimeTuning(
+            runtime.syncIntervalTicks(), runtime.fullSnapshotIntervalTicks(), intervalTicks,
+            runtime.producerIntervalTicks(), runtime.maxChunkImportsPerTick(), runtime.maxProducerChunksPerTick(),
+            runtime.maxSmokeProducerChunksPerTick(), runtime.simulationSkipChance());
+        return new DynamicAtmosphereServerConfig.Snapshot(overriddenRuntime, base.vapor(), base.verticalMovement(),
+            base.smoke(), base.dust(), base.voidGas(), base.exhaust(), base.slime(), base.obsidianPowder(),
+            base.glowGas(), base.netherFog(), base.endSand(), base.plantGrowth(), base.integrations(),
+            base.heavyGas(), base.magma(), base.lightning(), base.ghastSpawn(), base.zombieFog(),
+            base.slimePrecipitation(), base.netherGas(), base.dimensions(), base.portalTransferSink());
+    }
+
     @Test
     void equalPassCountsUnderDifferentConfiguredTickRatesAreEachInternallyWallClockInvariant() throws InterruptedException {
-        // Two distinct, explicitly configured cadences -- the exact per-grid seam
-        // ForgeAtmospherePrototype injects per material (e.g. AtmosphereMaterial::nextSimulationTick,
-        // SmokeGridLayout::nextSimulationTick) rather than one assumed global interval.
-        LongUnaryOperator fastCadence = tick -> Math.multiplyExact(Math.floorDiv(tick, 20) + 1, 20L);
-        LongUnaryOperator slowCadence = tick -> Math.multiplyExact(Math.floorDiv(tick, 90) + 1, 90L);
-
-        var fastNoDelay = runSequence(0, fastCadence);
-        var fastWithDelay = runSequence(40, fastCadence);
-        var slowNoDelay = runSequence(0, slowCadence);
-        var slowWithDelay = runSequence(40, slowCadence);
+        // Two distinct, really-configured simulationIntervalTicks values (not hand-rolled
+        // LongUnaryOperator stand-ins), exercised through the actual production cadence
+        // functions (AtmosphereGridLayout::nextSimulationTick, SmokeGridLayout::nextSimulationTick,
+        // AtmosphereMaterial::nextSimulationTick) -- all of which share this one runtime option,
+        // so proving it here through AtmosphereGridLayout's function covers all of them identically.
+        var fastNoDelay = runUnderConfiguredInterval(20, 0);
+        var fastWithDelay = runUnderConfiguredInterval(20, 40);
+        var slowNoDelay = runUnderConfiguredInterval(90, 0);
+        var slowWithDelay = runUnderConfiguredInterval(90, 40);
 
         assertEquals(fastNoDelay, fastWithDelay,
-            "a configured fast (20-tick) cadence must still be wall-clock invariant across equal pass counts");
+            "a really-configured fast (20-tick) simulationIntervalTicks must still be wall-clock invariant "
+                + "across equal pass counts, through the real production cadence function");
         assertEquals(slowNoDelay, slowWithDelay,
-            "a configured slow (90-tick) cadence must still be wall-clock invariant across equal pass counts");
+            "a really-configured slow (90-tick) simulationIntervalTicks must still be wall-clock invariant "
+                + "across equal pass counts, through the real production cadence function");
+    }
+
+    private static List<AtmosphereGrid.Cell<String>> runUnderConfiguredInterval(int intervalTicks, long sleepMillisPerStep)
+        throws InterruptedException {
+        var holder = new Object() {
+            List<AtmosphereGrid.Cell<String>> result;
+            InterruptedException failure;
+        };
+        DynamicAtmosphereServerConfig.runWithSnapshot(withSimulationInterval(intervalTicks), () -> {
+            try {
+                holder.result = runSequence(sleepMillisPerStep, AtmosphereGridLayout::nextSimulationTick);
+            } catch (InterruptedException e) {
+                holder.failure = e;
+            }
+        });
+        if (holder.failure != null) throw holder.failure;
+        return holder.result;
     }
 
     @Test
