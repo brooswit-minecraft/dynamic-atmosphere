@@ -5,10 +5,11 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * MINECRAFT-387: "the darker the vapor atmosphere colour is ... the more opaque it should be".
- * Exercises {@link AtmosphereRenderMaterial#vaporOpacity}, the production path's own luminance
- * curve: {@link AtmosphereVolumeRenderer}'s Batch#draw calls this exact method for VAPOR and
- * passes every other material's slice.alpha() through unchanged (see that file) -- there is no
- * separate/unused helper here to accidentally test instead of the real path.
+ * Exercises {@link AtmosphereRenderMaterial#vaporOpacity} and {@link
+ * AtmosphereRenderMaterial#vaporSliceAlpha} -- the exact methods {@link
+ * AtmosphereVolumeRenderer}'s {@code visit()} calls for every VAPOR slice, and the exact
+ * combination (boost-then-fade, never fade-then-boost) that method requires. There is no
+ * separate/unused helper here standing in for the real renderer routing.
  */
 class AtmosphereVaporOpacityTest {
     private static final double BOOST =
@@ -87,6 +88,16 @@ class AtmosphereVaporOpacityTest {
     }
 
     @Test
+    void nonFiniteInputAlphaFoldsToZeroRatherThanPassingNaNThroughClamp() {
+        // Math.clamp does NOT sanitize NaN (it compares false against both bounds and passes
+        // the value through), so this is handled explicitly before any clamp call.
+        for (float bad : new float[] {Float.NaN, Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY}) {
+            assertEquals(0f, AtmosphereRenderMaterial.vaporOpacity(bad, BLACK));
+            assertTrue(Float.isFinite(AtmosphereRenderMaterial.vaporOpacity(bad, BLACK)));
+        }
+    }
+
+    @Test
     void boostIsEquivalentToScalingOpticalDensityByTheSameExponent() {
         // The curve is specified as extra optical density: boosting the transmittance exponent
         // by k is identical to multiplying opticalDensityMultiplier by k in sliceAlpha's own
@@ -105,14 +116,99 @@ class AtmosphereVaporOpacityTest {
     void nonVaporMaterialsIgnoreFogColourEntirelySoTheyNeverNeedTheBoost() {
         // AtmosphereRenderMaterial#channel documents that only VAPOR reads live fog colour;
         // every other material's channel() is identical regardless of fog. That precondition
-        // is why AtmosphereVolumeRenderer.Batch#draw only ever routes VAPOR through
-        // vaporOpacity and passes every other material's slice.alpha() straight through.
+        // is why AtmosphereVolumeRenderer's visit() only ever routes VAPOR through
+        // vaporSliceAlpha and leaves every other material's slice.alpha() as a plain fade
+        // multiply.
         for (var material : AtmosphereRenderMaterial.values()) {
             if (material == AtmosphereRenderMaterial.VAPOR) continue;
             for (int channel = 0; channel < 3; channel++) {
                 assertEquals(material.channel(channel, WHITE), material.channel(channel, BLACK),
                     "non-vapor material colour must not depend on fog: " + material.name());
             }
+        }
+    }
+
+    // --- vaporSliceAlpha: the production boost-then-fade combination -----------------------
+
+    @Test
+    void boostIsAppliedBeforeFadeNotAfter() {
+        // Regression for the exact rendering-order defect caught in review: boosting an
+        // already-faded alpha (fade-then-boost) makes the fade band disproportionately MORE
+        // opaque than the correct boost-then-fade order, because the boost curve is nonlinear.
+        float rawAlpha = 0.5f;
+        float fade = 0.5f;
+        double boost = 3;
+        float correct = AtmosphereRenderMaterial.vaporSliceAlpha(rawAlpha, fade, BLACK, boost);
+        double boostThenFade = (1 - Math.pow(1 - rawAlpha, boost)) * fade;
+        double fadeThenBoost = 1 - Math.pow(1 - rawAlpha * fade, boost);
+        assertEquals(boostThenFade, correct, 1e-6, "must boost the RAW alpha, then apply fade");
+        assertTrue(Math.abs(correct - fadeThenBoost) > 1e-3,
+            "boost-then-fade and fade-then-boost must differ for a nonlinear boost -- "
+                + "otherwise this test can't tell the two orders apart");
+        // Pin the literal numbers from the review report, so a regression reproduces its exact
+        // failure mode: fade-then-boost would read ~0.578125; boost-then-fade reads 0.4375.
+        assertEquals(0.4375, correct, 1e-6);
+        assertEquals(0.578125, fadeThenBoost, 1e-6);
+    }
+
+    @Test
+    void fullOpacityAtNoFadeMatchesVaporOpacityAlone() {
+        for (float alpha : new float[] {0f, 0.2f, 0.6f, 0.95f}) {
+            for (float[] fog : new float[][] {WHITE, MID, BLACK}) {
+                assertEquals(AtmosphereRenderMaterial.vaporOpacity(alpha, fog),
+                    AtmosphereRenderMaterial.vaporSliceAlpha(alpha, 1f, fog), 1e-6f);
+            }
+        }
+    }
+
+    @Test
+    void zeroFadeStaysFullyInvisibleRegardlessOfAmountOrFogColour() {
+        for (float alpha : new float[] {0f, 0.2f, 0.6f, 0.95f, 1f}) {
+            for (float[] fog : new float[][] {WHITE, MID, BLACK}) {
+                assertEquals(0f, AtmosphereRenderMaterial.vaporSliceAlpha(alpha, 0f, fog));
+            }
+        }
+    }
+
+    @Test
+    void combinationIsMonotonicAcrossAmountThicknessFadeAndEveryBoostLimit() {
+        // Covers boost = 1 (disabled), the configured default, and the 6 ceiling, per review.
+        for (double boost : new double[] {1, BOOST, 6}) {
+            for (float amount : new float[] {50, 200, 800}) {
+                for (double thickness : new double[] {0.5, 2, 8}) {
+                    float rawAlpha = AtmosphereVolumeGeometry.sliceAlpha(amount, thickness);
+                    float previous = AtmosphereRenderMaterial.vaporSliceAlpha(rawAlpha, 1f, BLACK, boost);
+                    for (float fade = 0.9f; fade >= 0f; fade -= 0.1f) {
+                        float current = AtmosphereRenderMaterial.vaporSliceAlpha(rawAlpha, fade, BLACK, boost);
+                        assertTrue(current <= previous + 1e-6f,
+                            "opacity must not increase as fade decreases (amount=" + amount
+                                + " thickness=" + thickness + " boost=" + boost + ")");
+                        assertTrue(current >= 0f && current <= 1f, "alpha must stay in [0,1]");
+                        previous = current;
+                    }
+                    assertEquals(0f, AtmosphereRenderMaterial.vaporSliceAlpha(rawAlpha, 0f, BLACK, boost),
+                        "fully faded vapor must stay invisible regardless of boost");
+                }
+            }
+        }
+    }
+
+    @Test
+    void boostOfOneDisablesTheCurveSoCombinationIsJustRawAlphaTimesFade() {
+        for (float rawAlpha : new float[] {0f, 0.1f, 0.5f, 0.9f}) {
+            for (float fade : new float[] {0f, 0.3f, 1f}) {
+                float combined = AtmosphereRenderMaterial.vaporSliceAlpha(rawAlpha, fade, BLACK, 1);
+                assertEquals(rawAlpha * fade, combined, 1e-6f);
+            }
+        }
+    }
+
+    @Test
+    void nonFiniteFadeFoldsToFullyInvisibleRatherThanPassingNaNThrough() {
+        for (float badFade : new float[] {Float.NaN, Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY}) {
+            float result = AtmosphereRenderMaterial.vaporSliceAlpha(0.5f, badFade, BLACK);
+            assertEquals(0f, result);
+            assertTrue(Float.isFinite(result));
         }
     }
 }

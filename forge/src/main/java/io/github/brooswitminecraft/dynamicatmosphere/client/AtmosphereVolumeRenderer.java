@@ -47,9 +47,14 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
         var look = event.getCamera().getLookVector();
         var camera = new AtmosphereVolumeGeometry.Point(position.x, position.y, position.z);
         var forward = new AtmosphereVolumeGeometry.Point(look.x(), look.y(), look.z());
+        // LevelRenderer installs FogRenderer's biome/weather/dimension color before this stage.
+        // Captured once, up front, so every material this frame (including VAPOR's own
+        // fog-darkness opacity boost, see visit()) reads the exact same fog snapshot used
+        // for VAPOR's RGB -- never a later/different sample.
+        float[] fogColor = RenderSystem.getShaderFogColor().clone();
         var ordered = new AtmosphereSliceOrder();
         for (var entry : materials.entrySet()) {
-            visit(event, level, entry.getValue().cache(), camera, forward, entry.getKey(),
+            visit(event, level, entry.getValue().cache(), camera, forward, entry.getKey(), fogColor,
                 slices -> ordered.add(slices, entry.getKey()));
         }
         boolean mixed = !ordered.isEmpty();
@@ -58,8 +63,6 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
             buffers = MultiBufferSource.immediate(storage);
         }
         float[] color = RenderSystem.getShaderColor().clone();
-        // LevelRenderer installs FogRenderer's biome/weather/dimension color before this stage.
-        float[] fogColor = RenderSystem.getShaderFogColor().clone();
         var shader = RenderSystem.getShader();
         RenderSystem.setShaderColor(1, 1, 1, 1);
         try {
@@ -68,7 +71,7 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
             // stack. These vertices are camera-relative: do not apply that matrix twice.
             // Keep the constant-RGB vapor path unsorted when no other material is visible.
             // Otherwise merge slices, not volume centers: materials can overlap.
-            visit(event, level, cache, camera, forward, AtmosphereRenderMaterial.VAPOR, slices -> {
+            visit(event, level, cache, camera, forward, AtmosphereRenderMaterial.VAPOR, fogColor, slices -> {
                 if (mixed) ordered.add(slices, AtmosphereRenderMaterial.VAPOR);
                 else for (var slice : slices) batch.draw(slice, AtmosphereRenderMaterial.VAPOR);
             });
@@ -90,7 +93,7 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
 
     private static void visit(RenderLevelStageEvent event, ClientLevel level, AtmosphereClientCache cache,
                               AtmosphereVolumeGeometry.Point camera, AtmosphereVolumeGeometry.Point forward,
-                              AtmosphereRenderMaterial material,
+                              AtmosphereRenderMaterial material, float[] fogColor,
                               Consumer<List<AtmosphereVolumeGeometry.Slice>> consume) {
         int viewChunks = Minecraft.getInstance().options.getEffectiveRenderDistance();
         var tuning = material.tuning();
@@ -126,7 +129,18 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
                 if (dx * dx + dz * dz > maxDistance * maxDistance) {
                     slices = AtmosphereVolumeGeometry.clipToReach(slices, maxDistance);
                 }
-                if (fade < 1) {
+                // MINECRAFT-387: Vapor's fog-darkness opacity boost (extra optical density) and
+                // distance fade (a plain post-hoc alpha multiply) must combine in that exact
+                // order -- see AtmosphereRenderMaterial#vaporSliceAlpha. Every other material's
+                // fade behaviour is unchanged.
+                if (material == AtmosphereRenderMaterial.VAPOR) {
+                    var adjusted = new ArrayList<AtmosphereVolumeGeometry.Slice>(slices.size());
+                    for (var slice : slices) {
+                        adjusted.add(new AtmosphereVolumeGeometry.Slice(slice.depth(),
+                            AtmosphereRenderMaterial.vaporSliceAlpha(slice.alpha(), fade, fogColor), slice.vertices()));
+                    }
+                    slices = adjusted;
+                } else if (fade < 1) {
                     var faded = new ArrayList<AtmosphereVolumeGeometry.Slice>(slices.size());
                     for (var slice : slices) {
                         faded.add(new AtmosphereVolumeGeometry.Slice(slice.depth(), slice.alpha() * fade, slice.vertices()));
@@ -151,16 +165,14 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
         void draw(AtmosphereVolumeGeometry.Slice slice, AtmosphereRenderMaterial material) {
             if (vertices == null) vertices = buffers.getBuffer(VOLUME);
             float r = material.channel(0, fogColor), g = material.channel(1, fogColor), b = material.channel(2, fogColor);
-            // MINECRAFT-387: only Vapor's alpha is luminance-adjusted; every other material's
-            // slice.alpha() is untouched, same as before this change.
-            float alpha = material == AtmosphereRenderMaterial.VAPOR
-                ? AtmosphereRenderMaterial.vaporOpacity(slice.alpha(), fogColor)
-                : slice.alpha();
+            // MINECRAFT-387: Vapor's fog-darkness opacity boost is already baked into
+            // slice.alpha() by visit() (applied before distance fade -- see there); every
+            // other material's alpha is likewise already final by the time it reaches here.
             var polygon = slice.vertices();
             for (int i = 1; i < polygon.size() - 1; i++) {
-                vertex(vertices, polygon.getFirst(), alpha, r, g, b);
-                vertex(vertices, polygon.get(i), alpha, r, g, b);
-                vertex(vertices, polygon.get(i + 1), alpha, r, g, b);
+                vertex(vertices, polygon.getFirst(), slice.alpha(), r, g, b);
+                vertex(vertices, polygon.get(i), slice.alpha(), r, g, b);
+                vertex(vertices, polygon.get(i + 1), slice.alpha(), r, g, b);
             }
             renderedSliceCount++;
             if (++slices >= io.github.brooswitminecraft.dynamicatmosphere.DynamicAtmosphereClientConfig.snapshot().slicesPerBatch()) flush();

@@ -84,15 +84,46 @@ enum AtmosphereRenderMaterial {
      * <p>A non-finite luminance (NaN fog channel from some future codec/mod conflict) folds to
      * luminance 1, i.e. boost disabled -- the safe direction, since it leaves Vapor exactly as it
      * rendered before this change rather than guessing a dark value that saturates opacity.
+     * A non-finite input alpha folds to 0 (fully transparent): {@code Math.clamp} does NOT
+     * sanitize {@code NaN} (a NaN compares false against both bounds and passes through
+     * unchanged), so that case is handled explicitly, before any clamp, rather than relying on
+     * clamp to rescue it.
      */
     static float vaporOpacity(float alpha, float[] fog) {
-        double boost = DynamicAtmosphereClientConfig.snapshot().vaporDarknessOpacityBoost();
+        return vaporOpacity(alpha, fog, DynamicAtmosphereClientConfig.snapshot().vaporDarknessOpacityBoost());
+    }
+
+    /** Same curve as {@link #vaporOpacity(float, float[])}, with the boost cap given explicitly
+     *  (instead of read from the live config) so tests can exercise every limit (1, the
+     *  configured default, and the 6 ceiling) without depending on a mutable global default. */
+    static float vaporOpacity(float alpha, float[] fog, double boost) {
+        if (!Float.isFinite(alpha)) return 0f;
         double luminance = 0.2126 * fog[0] + 0.7152 * fog[1] + 0.0722 * fog[2];
         if (!Double.isFinite(luminance)) luminance = 1;
         luminance = Math.clamp(luminance, 0, 1);
         double darkness = 1 - luminance;
         double exponent = 1 + (boost - 1) * darkness * darkness;
-        double transmittance = Math.pow(1 - (double) Math.clamp(alpha, 0, 1), exponent);
+        double transmittance = Math.pow(1 - Math.clamp((double) alpha, 0, 1), exponent);
         return (float) Math.clamp(1 - transmittance, 0, 1);
+    }
+
+    /**
+     * The exact combination {@link AtmosphereVolumeRenderer}'s {@code visit()} uses for every
+     * VAPOR slice: the fog-darkness boost (extra optical density) applied to the RAW
+     * density-derived alpha, THEN distance fade (a plain post-hoc alpha multiply) on the
+     * boosted result -- never the other order. Boosting an already-faded alpha would make the
+     * fade band disproportionately more opaque than the unfaded volume, since the boost is
+     * nonlinear in alpha. Kept as one method precisely so a renderer edit that reorders or
+     * drops either step breaks here instead of only being reachable by eye in a live client.
+     */
+    static float vaporSliceAlpha(float rawAlpha, float fade, float[] fog) {
+        return vaporSliceAlpha(rawAlpha, fade, fog, DynamicAtmosphereClientConfig.snapshot().vaporDarknessOpacityBoost());
+    }
+
+    /** Same combination as {@link #vaporSliceAlpha(float, float, float[])}, with the boost cap
+     *  given explicitly; see that overload's javadoc for why the ordering matters. */
+    static float vaporSliceAlpha(float rawAlpha, float fade, float[] fog, double boost) {
+        if (!Float.isFinite(fade)) return 0f;
+        return (float) Math.clamp((double) vaporOpacity(rawAlpha, fog, boost) * fade, 0, 1);
     }
 }
