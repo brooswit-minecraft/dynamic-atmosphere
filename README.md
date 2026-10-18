@@ -487,6 +487,70 @@ Void Gas and Slime multiply optical density by four and Smoke by two before
 thickness-integrated alpha; Obsidian Powder uses 40x. This changes rendering only, not
 material amounts, capacity, or simulation fullness.
 
+### Sun/Moon Viewing-Angle Tint (MINECRAFT-399)
+
+Every material's rendered color (including Vapor's fog-derived color) blends
+toward the live sun color (`client.rendering.sunTintColor`, default `0xFFCB82`) the more
+directly the camera looks at a visible sun, and toward the live moon color
+(`client.rendering.moonTintColor`, default `0xA9C4E8`) the more directly it looks at a
+visible moon — a smoothstep of the angle between the camera's look direction and
+the body's direction, zero past 90 degrees off and rising to a configurable cap
+(`client.rendering.celestialTintMaxStrength`, default `0.35`, range `0`-`1`) looking
+straight at it. The result is a bounded convex combination of the material's own
+color and the sun/moon color, never an override, so a material cannot lose its
+identity at any angle; `celestialTintMaxStrength = 0` disables the effect outright.
+
+Sun and moon directions are derived from `Level#getSunAngle` using the same
+rotation vanilla's own `LevelRenderer#renderSky` applies to the sun/moon quads
+(moon is diametrically opposite the sun, as vanilla draws it). A body contributes
+nothing — not merely a dim tint — when any of the following hold, matching
+vanilla's own sun/moon visibility rather than assuming time of day alone means
+visible:
+
+- The current dimension's `DimensionSpecialEffects.SkyType` is not `NORMAL`
+  (the Nether and the End render no sun/moon quads at all).
+- The body's direction is below the local horizon (negative world Y), smoothed
+  by a small band either side of the horizon (`horizonWeight`, ~3.4 degrees)
+  rather than a bare sign check, so crossing the horizon fades the tint out
+  instead of popping it off instantly.
+- Rain is falling: scaled by `1 - getRainLevel`, the same fade vanilla applies to
+  the sun/moon quads themselves, so the tint fades out in step with the sun/moon
+  fading into cloud, with no separate thunder/clear-sky case.
+- Terrain/building occlusion is checked PER BODY, toward that body's own
+  direction from the camera — not a single shared "can the camera see the sky
+  overhead" check, which conflates the two: a wall or hill between the camera
+  and a low sun hides it even with open sky directly overhead, and a gap in an
+  overhang can reveal a body the camera's own overhead column does not have
+  clear sky above. A small jittered bundle of 5 rays (1 centre + 4 ring, ~4.6
+  degree radius) is cast toward the body; each ray is walked with a 3D grid
+  (Amanatides-Woo) traversal that visits every voxel it passes through, up to a
+  96-block bound, rather than fixed-distance point samples — a point-sampled
+  ray can step clean over a wall only one block thick if the sample points
+  happen to land on either side of it, which a cell-by-cell traversal cannot
+  do. A ray that leaves the loaded world (`Level#isLoaded`, never forcing a
+  chunk to load) or exits the world's build height before hitting a fully
+  light-opaque block (`BlockState#getLightBlock >= 15`) is treated as unblocked
+  for the rest of its length — a real body is effectively at infinity, so
+  nothing past the bounded probe distance can be checked either way. The
+  96-block bound is a performance/precision trade-off for an everyday build's
+  walls and roofs, not a guarantee against arbitrarily large structures.
+  Because the bundle only has 5 rays, the RAW fraction this produces each
+  frame can only take a handful of discrete values (fifths); that raw sample
+  is then smoothed over time (`CelestialTint#smoothTowards`, persisted
+  per-body across frames, moving at most `0.08` per frame toward the latest
+  raw sample — about a dozen frames, under a quarter second at 60 FPS, to
+  fully cross) so the rendered tint fades gradually as the camera crosses a
+  cover edge rather than jumping straight to the next discrete sample.
+
+No in-game visual confirmation was performed for this feature (no live client in
+this environment); the angular weighting, horizon smoothing, jittered-ray-bundle
+construction, cross-frame visibility smoothing, and color-blend math are covered
+by unit tests (`CelestialTintTest`) exercising toward/oblique/away angles,
+independent sun/moon weighting, visibility-zero collapse, horizon-band
+smoothness, bounded/no-overshoot step-wise smoothing, and the bounded-output
+guarantee, but the actual Minecraft-side wiring (sun angle, sky type, rain,
+block occlusion queries) has not been visually verified in a running client.
+
 With the default four slices per base cell, 4-block Vapor and Smoke cells use
 1-block slice spacing at every LOD. Alpha remains integrated over each slice's
 thickness, preserving total optical density. Zero-density volumes exit before
