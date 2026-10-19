@@ -89,12 +89,20 @@ class VoidGasGameplayTest {
             "the regression only means something if more ineligible candidates precede the eligible one than the limit");
 
         var consumeCalls = new ArrayList<Integer>();
+        var limitSeen = new ArrayList<Integer>();
         boolean readied = VoidGasGameplay.<FakeCandidate>readyOneVillagerVia(5,
             cost -> { consumeCalls.add(cost); return true; },
             c -> c.eligible,
             c -> c.breadReceived++,
-            (eligible2, limit) -> VoidGasGameplay.boundedMatchesForTesting(candidates, eligible2, limit));
+            (eligible2, limit) -> {
+                limitSeen.add(limit);
+                return VoidGasGameplay.boundedMatchesForTesting(candidates, eligible2, limit);
+            });
 
+        // Hard-coded to the literal 1, not VoidGasGameplay.VILLAGER_SELECTION_LIMIT: if that
+        // constant itself regressed back to a larger pool, comparing against itself would still
+        // pass and this would stop protecting the one-result production requirement.
+        assertEquals(List.of(1), limitSeen, "readyOneVillagerVia must request exactly one successful result");
         assertTrue(readied);
         assertEquals(List.of(5), consumeCalls, "exactly one charge");
         assertEquals(1, eligible.breadReceived);
