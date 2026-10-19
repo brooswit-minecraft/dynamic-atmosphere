@@ -108,6 +108,18 @@ final class ForgeAtmospherePrototype {
     private final PacedSyncQueue<UUID, AtmosphereSyncPlanner.Update<ResourceKey<Level>>> syncQueue =
         new PacedSyncQueue<>(ForgeAtmospherePrototype::operationWeight, AtmosphereSyncPlanner.Update::reset,
             ForgeAtmospherePrototype::splitAtmosphereUpdate);
+    /**
+     * MINECRAFT-436 review (second round): a player due for a periodic full resync, found busy
+     * (still draining a prior generation) or never reached this tick (an earlier channel in
+     * rotation order exhausted the shared budget before this channel's turn), must not simply
+     * lose that due-ness -- otherwise repeated due/busy alignment, or a rotation phase-lock, can
+     * starve a channel's periodic resync indefinitely even though its ordinary data keeps flowing
+     * fine. Each channel remembers "this player is owed a periodic resync" here until it is
+     * actually idle and applies it (see {@code syncPlayer}/{@code syncSmokePlayer}/{@code
+     * syncMaterialPlayer}), independent of whether this tick's budget or rotation order even
+     * reached that channel.
+     */
+    private final Set<UUID> pendingFullSnapshot = new HashSet<>();
     private final AtmosphereGrid<ResourceKey<Level>> smokeGrid =
         new AtmosphereGrid<>(SmokeGridLayout::nextSimulationTick);
     private final AtmosphereProducerSchedule<ChunkKey> smokeProducerSchedule = new AtmosphereProducerSchedule<>();
@@ -116,12 +128,16 @@ final class ForgeAtmospherePrototype {
     private final PacedSyncQueue<UUID, SmokeSyncPlanner.Update<ResourceKey<Level>>> smokeSyncQueue =
         new PacedSyncQueue<>(ForgeAtmospherePrototype::operationWeight, SmokeSyncPlanner.Update::reset,
             ForgeAtmospherePrototype::splitSmokeUpdate);
+    /** See {@link #pendingFullSnapshot}; same latch, for the smoke channel. */
+    private final Set<UUID> pendingSmokeFullSnapshot = new HashSet<>();
     private final Map<AtmosphereMaterial, AtmosphereGrid<ResourceKey<Level>>> materialGrids =
         createMaterialGrids();
     private final Map<AtmosphereMaterial, SmokeSyncPlanner<UUID, ResourceKey<Level>>> materialSyncPlanners =
         createMaterialSyncPlanners();
     private final Map<AtmosphereMaterial, PacedSyncQueue<UUID, SmokeSyncPlanner.Update<ResourceKey<Level>>>> materialSyncQueues =
         createMaterialSyncQueues();
+    /** See {@link #pendingFullSnapshot}; same latch, one per material channel. */
+    private final Map<AtmosphereMaterial, Set<UUID>> pendingMaterialFullSnapshot = createMaterialPendingFullSnapshots();
     private final DustGameplay dustGameplay = DustGameplay.create();
     private final ObsidianPowderGameplay obsidianPowderGameplay = ObsidianPowderGameplay.create();
     private final VoidGasGameplay voidGasGameplay = VoidGasGameplay.create();
@@ -183,6 +199,14 @@ final class ForgeAtmospherePrototype {
                 ForgeAtmospherePrototype::splitSmokeUpdate));
         }
         return queues;
+    }
+
+    private static Map<AtmosphereMaterial, Set<UUID>> createMaterialPendingFullSnapshots() {
+        var sets = new EnumMap<AtmosphereMaterial, Set<UUID>>(AtmosphereMaterial.class);
+        for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
+            sets.put(material, new HashSet<>());
+        }
+        return sets;
     }
 
     /** Operation-count weight of one planned batch: chunks plus cells, the unit the budget counts in. */
@@ -395,10 +419,13 @@ final class ForgeAtmospherePrototype {
         if (event.getEntity() instanceof ServerPlayer player) {
             syncPlanner.disconnect(player.getUUID());
             syncQueue.release(player.getUUID());
+            pendingFullSnapshot.remove(player.getUUID());
             smokeSyncPlanner.disconnect(player.getUUID());
             smokeSyncQueue.release(player.getUUID());
+            pendingSmokeFullSnapshot.remove(player.getUUID());
             materialSyncPlanners.values().forEach(planner -> planner.disconnect(player.getUUID()));
             materialSyncQueues.values().forEach(queue -> queue.release(player.getUUID()));
+            pendingMaterialFullSnapshot.values().forEach(pending -> pending.remove(player.getUUID()));
         }
     }
 
@@ -460,10 +487,13 @@ final class ForgeAtmospherePrototype {
         AtmosphereWaterTransitions.clear();
         syncPlanner.clear();
         syncQueue.clear();
+        pendingFullSnapshot.clear();
         smokeSyncPlanner.clear();
         smokeSyncQueue.clear();
+        pendingSmokeFullSnapshot.clear();
         materialSyncPlanners.values().forEach(SmokeSyncPlanner::clear);
         materialSyncQueues.values().forEach(PacedSyncQueue::clear);
+        pendingMaterialFullSnapshot.values().forEach(Set::clear);
     }
 
     // Package-visible so the disposable command-tree fixture tests cover the
@@ -519,10 +549,13 @@ final class ForgeAtmospherePrototype {
             () -> materialProducerSchedules.values().forEach(AtmosphereProducerSchedule::clear),
             syncPlanner::clear,
             syncQueue::clear,
+            pendingFullSnapshot::clear,
             smokeSyncPlanner::clear,
             smokeSyncQueue::clear,
+            pendingSmokeFullSnapshot::clear,
             () -> materialSyncPlanners.values().forEach(SmokeSyncPlanner::clear),
-            () -> materialSyncQueues.values().forEach(PacedSyncQueue::clear));
+            () -> materialSyncQueues.values().forEach(PacedSyncQueue::clear),
+            () -> pendingMaterialFullSnapshot.values().forEach(Set::clear));
 
         source.sendSuccess(() -> Component.literal(
             "Deleted loaded Dynamic Atmosphere data only: " + formatDumpReport(report)
@@ -1802,7 +1835,7 @@ final class ForgeAtmospherePrototype {
     @FunctionalInterface
     private interface PlayerSyncChannel {
         /** Syncs one channel for one player under at most {@code budget} operations; returns ops actually sent. */
-        int sync(ServerPlayer player, boolean periodicDue, int budget);
+        int sync(ServerPlayer player, int budget);
     }
 
     /**
@@ -1842,22 +1875,26 @@ final class ForgeAtmospherePrototype {
         List<UUID> connected = players.stream().map(ServerPlayer::getUUID).toList();
         syncPlanner.retainPlayers(connected);
         syncQueue.retainPlayers(connected);
+        pendingFullSnapshot.retainAll(connected);
         smokeSyncPlanner.retainPlayers(connected);
         smokeSyncQueue.retainPlayers(connected);
+        pendingSmokeFullSnapshot.retainAll(connected);
         for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
             materialSyncPlanners.get(material).retainPlayers(connected);
             materialSyncQueues.get(material).retainPlayers(connected);
+            pendingMaterialFullSnapshot.get(material).retainAll(connected);
         }
         if (players.isEmpty()) return;
 
         var capacities = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer>();
         var channels = new ArrayList<PlayerSyncChannel>();
-        channels.add((player, due, budget) -> syncPlayer(player, due, budget, capacities));
-        channels.add((player, due, budget) -> syncSmokePlayer(player, due, budget));
+        channels.add((player, budget) -> syncPlayer(player, budget, capacities));
+        channels.add((player, budget) -> syncSmokePlayer(player, budget));
         for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
             SmokeSyncPlanner<UUID, ResourceKey<Level>> planner = materialSyncPlanners.get(material);
             PacedSyncQueue<UUID, SmokeSyncPlanner.Update<ResourceKey<Level>>> queue = materialSyncQueues.get(material);
-            channels.add((player, due, budget) -> syncMaterialPlayer(player, material, planner, queue, due, budget));
+            Set<UUID> pending = pendingMaterialFullSnapshot.get(material);
+            channels.add((player, budget) -> syncMaterialPlayer(player, material, planner, queue, pending, budget));
         }
 
         int channelCount = channels.size();
@@ -1867,17 +1904,27 @@ final class ForgeAtmospherePrototype {
 
         int totalBudget = tuning().runtime().maxSyncOperationsPerPlayerPerTick();
         for (ServerPlayer player : players) {
-            boolean periodicDue = dueForStaggeredFullSnapshot(player.getUUID(), callIndex, slotsPerInterval);
+            UUID id = player.getUUID();
+            // MINECRAFT-436 review (second round): latch "due" into every channel's own pending
+            // set unconditionally, BEFORE budget allocation -- never only for channels this
+            // tick's rotation/budget actually reaches -- so a channel skipped this tick (budget
+            // exhausted by earlier channels, or still busy) still owes this player a periodic
+            // resync and will apply it the moment it is next idle, not lose it silently.
+            if (dueForStaggeredFullSnapshot(id, callIndex, slotsPerInterval)) {
+                pendingFullSnapshot.add(id);
+                pendingSmokeFullSnapshot.add(id);
+                for (Set<UUID> pending : pendingMaterialFullSnapshot.values()) pending.add(id);
+            }
             List<BudgetedChannel> bound = channels.stream()
-                .<BudgetedChannel>map(channel -> (due, budget) -> channel.sync(player, due, budget))
+                .<BudgetedChannel>map(channel -> budget -> channel.sync(player, budget))
                 .toList();
-            distributeBudget(bound, periodicDue, totalBudget, rotation);
+            distributeBudget(bound, totalBudget, rotation);
         }
     }
 
     @FunctionalInterface
     interface BudgetedChannel {
-        int sync(boolean periodicDue, int budget);
+        int sync(int budget);
     }
 
     /**
@@ -1890,13 +1937,12 @@ final class ForgeAtmospherePrototype {
      * involved) specifically so this allocation arithmetic is directly unit-testable without the
      * {@code MinecraftServer}/{@code ServerPlayer} harness this repo does not have.
      */
-    static int distributeBudget(List<BudgetedChannel> channels, boolean periodicDue, int totalBudget,
-            int rotation) {
+    static int distributeBudget(List<BudgetedChannel> channels, int totalBudget, int rotation) {
         int remaining = totalBudget;
         int channelCount = channels.size();
         for (int i = 0; i < channelCount && remaining > 0; i++) {
             BudgetedChannel channel = channels.get(Math.floorMod(rotation + i, channelCount));
-            remaining -= channel.sync(periodicDue, remaining);
+            remaining -= channel.sync(remaining);
         }
         return totalBudget - remaining;
     }
@@ -1905,7 +1951,7 @@ final class ForgeAtmospherePrototype {
     private static final int DEMO_SYNC_BUDGET = 1 << 20;
 
     private void syncPlayer(ServerPlayer player) {
-        syncPlayer(player, false, DEMO_SYNC_BUDGET, new HashMap<>());
+        syncPlayer(player, DEMO_SYNC_BUDGET, new HashMap<>());
     }
 
     /**
@@ -1915,13 +1961,17 @@ final class ForgeAtmospherePrototype {
      * a cheap peek needing only the dimension/viewRadius already in hand, no chunk/cell gather),
      * so a real change still supersedes immediately even mid-drain ("superseding immediately on
      * genuine dimension/view changes"). The periodic trigger is different: it is only ever
-     * honored when the queue is already idle, so a periodic refresh can never interrupt -- and
-     * thereby discard -- its own still-in-flight predecessor ("preserve eventual completion for
-     * periodic refreshes"). Skipping planning while idle-but-not-due, or busy-but-unchanged, also
-     * bounds the queue to at most one generation's worth of batches at a time, regardless of
-     * elapsed ticks or arrival rate ("bound or coalesce pending deltas").
+     * honored when the queue is already idle, consuming the latch in {@link #pendingFullSnapshot}
+     * (set unconditionally in {@code syncAllPlayers}, regardless of whether this channel's turn
+     * and budget are even reached that tick -- MINECRAFT-436 review, second round: a periodic
+     * due-ness must never be silently lost to busy/skipped alignment), so a periodic refresh can
+     * never interrupt -- and thereby discard -- its own still-in-flight predecessor, yet is also
+     * never simply forgotten if this channel is busy or starved right on its one due tick.
+     * Skipping planning while idle-but-not-due, or busy-but-unchanged, also bounds the queue to
+     * at most one generation's worth of batches at a time, regardless of elapsed ticks or arrival
+     * rate ("bound or coalesce pending deltas").
      */
-    private int syncPlayer(ServerPlayer player, boolean periodicDue, int budget,
+    private int syncPlayer(ServerPlayer player, int budget,
         Map<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer> capacities) {
         UUID id = player.getUUID();
         ResourceKey<Level> dimension = player.serverLevel().dimension();
@@ -1930,7 +1980,7 @@ final class ForgeAtmospherePrototype {
         boolean idle = !syncQueue.hasPending(id);
         boolean genuineChange = !idle && syncPlanner.wouldForceReset(id, dimension, viewRadius);
         if (idle || genuineChange) {
-            if (idle && periodicDue) syncPlanner.reset(id);
+            if (idle && pendingFullSnapshot.remove(id)) syncPlanner.reset(id);
             var nearby = new ArrayList<AtmosphereGrid.Cell<ResourceKey<Level>>>();
             var authoritativeChunks = new ArrayList<AtmosphereSyncPlanner.Chunk>();
             // Use Minecraft's subscription, including changes to client/server view distance.
@@ -1976,8 +2026,8 @@ final class ForgeAtmospherePrototype {
         return consumed;
     }
 
-    /** See {@link #syncPlayer(ServerPlayer, boolean, int, Map)}'s doc for the idle/genuine-change planning gate. */
-    private int syncSmokePlayer(ServerPlayer player, boolean periodicDue, int budget) {
+    /** See {@link #syncPlayer(ServerPlayer, int, Map)}'s doc for the idle/genuine-change/pending-due gate. */
+    private int syncSmokePlayer(ServerPlayer player, int budget) {
         UUID id = player.getUUID();
         ResourceKey<Level> dimension = player.serverLevel().dimension();
         var trackingView = player.getChunkTrackingView();
@@ -1985,7 +2035,7 @@ final class ForgeAtmospherePrototype {
         boolean idle = !smokeSyncQueue.hasPending(id);
         boolean genuineChange = !idle && smokeSyncPlanner.wouldForceReset(id, dimension, viewRadius);
         if (idle || genuineChange) {
-            if (idle && periodicDue) smokeSyncPlanner.reset(id);
+            if (idle && pendingSmokeFullSnapshot.remove(id)) smokeSyncPlanner.reset(id);
             var scope = new ArrayList<SmokeSyncPlanner.Chunk>();
             var visible = new ArrayList<SmokeSyncPlanner.Cell>();
             trackingView.forEach(chunk -> {
@@ -2021,13 +2071,13 @@ final class ForgeAtmospherePrototype {
         return consumed;
     }
 
-    /** See {@link #syncPlayer(ServerPlayer, boolean, int, Map)}'s doc for the idle/genuine-change planning gate. */
+    /** See {@link #syncPlayer(ServerPlayer, int, Map)}'s doc for the idle/genuine-change/pending-due gate. */
     private int syncMaterialPlayer(
         ServerPlayer player,
         AtmosphereMaterial material,
         SmokeSyncPlanner<UUID, ResourceKey<Level>> planner,
         PacedSyncQueue<UUID, SmokeSyncPlanner.Update<ResourceKey<Level>>> queue,
-        boolean periodicDue,
+        Set<UUID> pendingFullSnapshotForMaterial,
         int budget
     ) {
         UUID id = player.getUUID();
@@ -2037,7 +2087,7 @@ final class ForgeAtmospherePrototype {
         boolean idle = !queue.hasPending(id);
         boolean genuineChange = !idle && planner.wouldForceReset(id, dimension, viewRadius);
         if (idle || genuineChange) {
-            if (idle && periodicDue) planner.reset(id);
+            if (idle && pendingFullSnapshotForMaterial.remove(id)) planner.reset(id);
             var scope = new ArrayList<SmokeSyncPlanner.Chunk>();
             var visible = new ArrayList<SmokeSyncPlanner.Cell>();
             trackingView.forEach(chunk -> {
