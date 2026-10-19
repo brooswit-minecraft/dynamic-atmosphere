@@ -122,6 +122,21 @@ final class ForgeAtmospherePrototype {
      * reached that channel.
      */
     private final Set<UUID> pendingFullSnapshot = new HashSet<>();
+    /**
+     * MINECRAFT-436: per-chunk "has this chunk's amount data actually changed" revision, bumped
+     * in {@link #flushDirtyChunks} exactly when a cell in that chunk is found genuinely dirty
+     * (an amount change or removal, never merely touched) -- the same signal flushDirtyChunks
+     * already computes for persistence, reused here rather than duplicated. Paired with {@link
+     * ForgeTerrainFacts#generation}, which already unifies capacity-affecting block-change
+     * invalidation across Vapor/Smoke/every material, this is enough to safely cache a chunk's
+     * built cell list across ticks (see {@link #chunkCellCache}): a cache hit requires the SAME
+     * revision AND the SAME terrain generation as when it was built, so both amount-only and
+     * capacity-only changes are still always picked up, just without re-deriving a chunk's cells
+     * on a tick where it provably has not changed either way.
+     */
+    private final Map<ChunkKey, Long> amountRevision = new HashMap<>();
+    /** See {@link #amountRevision}'s doc; the cross-tick cache it, and terrain generation, gate. */
+    private final Map<ChunkKey, CachedChunkCells<AtmosphereSyncPlanner.Cell>> chunkCellCache = new HashMap<>();
     private final AtmosphereGrid<ResourceKey<Level>> smokeGrid =
         new AtmosphereGrid<>(SmokeGridLayout::nextSimulationTick);
     private final AtmosphereProducerSchedule<ChunkKey> smokeProducerSchedule = new AtmosphereProducerSchedule<>();
@@ -132,6 +147,10 @@ final class ForgeAtmospherePrototype {
             ForgeAtmospherePrototype::splitSmokeUpdate);
     /** See {@link #pendingFullSnapshot}; same latch, for the smoke channel. */
     private final Set<UUID> pendingSmokeFullSnapshot = new HashSet<>();
+    /** See {@link #amountRevision}; same revision tracking, for the smoke grid. */
+    private final Map<ChunkKey, Long> smokeAmountRevision = new HashMap<>();
+    /** See {@link #chunkCellCache}; same cross-tick cache, for the smoke channel. */
+    private final Map<ChunkKey, CachedChunkCells<SmokeSyncPlanner.Cell>> smokeChunkCellCache = new HashMap<>();
     private final Map<AtmosphereMaterial, AtmosphereGrid<ResourceKey<Level>>> materialGrids =
         createMaterialGrids();
     private final Map<AtmosphereMaterial, SmokeSyncPlanner<UUID, ResourceKey<Level>>> materialSyncPlanners =
@@ -140,6 +159,11 @@ final class ForgeAtmospherePrototype {
         createMaterialSyncQueues();
     /** See {@link #pendingFullSnapshot}; same latch, one per material channel. */
     private final Map<AtmosphereMaterial, Set<UUID>> pendingMaterialFullSnapshot = createMaterialPendingFullSnapshots();
+    /** See {@link #amountRevision}; one revision map per material channel. */
+    private final Map<AtmosphereMaterial, Map<ChunkKey, Long>> materialAmountRevision = createMaterialAmountRevisions();
+    /** See {@link #chunkCellCache}; one cross-tick cache per material channel. */
+    private final Map<AtmosphereMaterial, Map<ChunkKey, CachedChunkCells<SmokeSyncPlanner.Cell>>> materialChunkCellCaches =
+        createMaterialChunkCellCaches();
     private final DustGameplay dustGameplay = DustGameplay.create();
     private final ObsidianPowderGameplay obsidianPowderGameplay = ObsidianPowderGameplay.create();
     private final VoidGasGameplay voidGasGameplay = VoidGasGameplay.create();
@@ -210,6 +234,30 @@ final class ForgeAtmospherePrototype {
         }
         return sets;
     }
+
+    private static Map<AtmosphereMaterial, Map<ChunkKey, Long>> createMaterialAmountRevisions() {
+        var revisions = new EnumMap<AtmosphereMaterial, Map<ChunkKey, Long>>(AtmosphereMaterial.class);
+        for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
+            revisions.put(material, new HashMap<>());
+        }
+        return revisions;
+    }
+
+    private static Map<AtmosphereMaterial, Map<ChunkKey, CachedChunkCells<SmokeSyncPlanner.Cell>>>
+    createMaterialChunkCellCaches() {
+        var caches = new EnumMap<AtmosphereMaterial,
+            Map<ChunkKey, CachedChunkCells<SmokeSyncPlanner.Cell>>>(AtmosphereMaterial.class);
+        for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
+            caches.put(material, new HashMap<>());
+        }
+        return caches;
+    }
+
+    /**
+     * MINECRAFT-436: one chunk's built cell list, stamped with the revision/generation pair it
+     * was built under. See {@link #amountRevision}'s doc for how a cache hit is decided.
+     */
+    record CachedChunkCells<C>(long amountRevision, long terrainGeneration, List<C> cells) { }
 
     /** Operation-count weight of one planned batch: chunks plus cells, the unit the budget counts in. */
     private static int operationWeight(AtmosphereSyncPlanner.Update<?> update) {
@@ -401,6 +449,17 @@ final class ForgeAtmospherePrototype {
                     for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
                         state.materialCells.get(material).keySet().forEach(materialGrids.get(material)::remove);
                     }
+                    // MINECRAFT-436: an unloaded chunk's entry would otherwise sit in these
+                    // cross-tick caches forever (a slow, unbounded leak over a long server
+                    // session as players explore); evict it alongside the chunk state itself.
+                    amountRevision.remove(key);
+                    chunkCellCache.remove(key);
+                    smokeAmountRevision.remove(key);
+                    smokeChunkCellCache.remove(key);
+                    for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
+                        materialAmountRevision.get(material).remove(key);
+                        materialChunkCellCaches.get(material).remove(key);
+                    }
                 }
             };
             if (level.getServer().isSameThread()) {
@@ -488,12 +547,18 @@ final class ForgeAtmospherePrototype {
         syncPlanner.clear();
         syncQueue.clear();
         pendingFullSnapshot.clear();
+        amountRevision.clear();
+        chunkCellCache.clear();
         smokeSyncPlanner.clear();
         smokeSyncQueue.clear();
         pendingSmokeFullSnapshot.clear();
+        smokeAmountRevision.clear();
+        smokeChunkCellCache.clear();
         materialSyncPlanners.values().forEach(SmokeSyncPlanner::clear);
         materialSyncQueues.values().forEach(PacedSyncQueue::clear);
         pendingMaterialFullSnapshot.values().forEach(Set::clear);
+        materialAmountRevision.values().forEach(Map::clear);
+        materialChunkCellCaches.values().forEach(Map::clear);
     }
 
     // Package-visible so the disposable command-tree fixture tests cover the
@@ -550,12 +615,18 @@ final class ForgeAtmospherePrototype {
             syncPlanner::clear,
             syncQueue::clear,
             pendingFullSnapshot::clear,
+            amountRevision::clear,
+            chunkCellCache::clear,
             smokeSyncPlanner::clear,
             smokeSyncQueue::clear,
             pendingSmokeFullSnapshot::clear,
+            smokeAmountRevision::clear,
+            smokeChunkCellCache::clear,
             () -> materialSyncPlanners.values().forEach(SmokeSyncPlanner::clear),
             () -> materialSyncQueues.values().forEach(PacedSyncQueue::clear),
-            () -> pendingMaterialFullSnapshot.values().forEach(Set::clear));
+            () -> pendingMaterialFullSnapshot.values().forEach(Set::clear),
+            () -> materialAmountRevision.values().forEach(Map::clear),
+            () -> materialChunkCellCaches.values().forEach(Map::clear));
 
         source.sendSuccess(() -> Component.literal(
             "Deleted loaded Dynamic Atmosphere data only: " + formatDumpReport(report)
@@ -1886,30 +1957,14 @@ final class ForgeAtmospherePrototype {
         if (players.isEmpty()) return;
 
         var capacities = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer>();
-        // MINECRAFT-436: reusable immutable per-chunk cell snapshots, shared across every
-        // overlapping player view THIS sync tick, instead of each player independently re-reading
-        // the grid and recomputing capacity for the same chunk's cells. See the class doc on
-        // #atmosphereCellsForChunk for why this is scoped to one tick rather than cached across
-        // ticks (a cross-tick cache needs a capacity-change signal this change deliberately does
-        // not add, to avoid touching the terrain-capacity cache/mixin files MINECRAFT-434 owns).
-        var chunkCellCache = new HashMap<ChunkKey, List<AtmosphereSyncPlanner.Cell>>();
-        var smokeChunkCellCache = new HashMap<ChunkKey, List<SmokeSyncPlanner.Cell>>();
-        var materialChunkCellCaches = new EnumMap<AtmosphereMaterial, Map<ChunkKey, List<SmokeSyncPlanner.Cell>>>(
-            AtmosphereMaterial.class);
-        for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
-            materialChunkCellCaches.put(material, new HashMap<>());
-        }
-
         var channels = new ArrayList<PlayerSyncChannel>();
-        channels.add((player, budget) -> syncPlayer(player, budget, capacities, chunkCellCache));
-        channels.add((player, budget) -> syncSmokePlayer(player, budget, smokeChunkCellCache));
+        channels.add((player, budget) -> syncPlayer(player, budget, capacities));
+        channels.add((player, budget) -> syncSmokePlayer(player, budget));
         for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
             SmokeSyncPlanner<UUID, ResourceKey<Level>> planner = materialSyncPlanners.get(material);
             PacedSyncQueue<UUID, SmokeSyncPlanner.Update<ResourceKey<Level>>> queue = materialSyncQueues.get(material);
             Set<UUID> pending = pendingMaterialFullSnapshot.get(material);
-            Map<ChunkKey, List<SmokeSyncPlanner.Cell>> materialChunkCellCache = materialChunkCellCaches.get(material);
-            channels.add((player, budget) -> syncMaterialPlayer(
-                player, material, planner, queue, pending, materialChunkCellCache, budget));
+            channels.add((player, budget) -> syncMaterialPlayer(player, material, planner, queue, pending, budget));
         }
 
         int channelCount = channels.size();
@@ -1966,15 +2021,40 @@ final class ForgeAtmospherePrototype {
     private static final int DEMO_SYNC_BUDGET = 1 << 20;
 
     private void syncPlayer(ServerPlayer player) {
-        syncPlayer(player, DEMO_SYNC_BUDGET, new HashMap<>(), new HashMap<>());
+        syncPlayer(player, DEMO_SYNC_BUDGET, new HashMap<>());
     }
 
     /**
-     * Builds one chunk's immutable list of visible cells (capacity already resolved), the shared
-     * unit {@link #syncPlayer} caches per tick across every overlapping player's view. {@code
-     * capacities} memoizes {@link #capacityAt} by cell key for the lifetime of one sync tick,
-     * same as before this change -- this only adds sharing the resulting {@code Cell} list itself
-     * (and the grid reads that built it) across players, not a new source of staleness.
+     * Returns {@code key}'s cached cell list if it is still valid -- same {@code revisions}
+     * entry (see {@link #amountRevision}'s doc) and same {@code generation} (the caller's current
+     * {@link ForgeTerrainFacts#generation}) as when it was built -- or rebuilds it via {@code
+     * builder} and caches the fresh result otherwise. {@code builder} does the actual grid read,
+     * capacity resolution, and {@code Cell} construction (one implementation per grid: {@code
+     * atmosphereCellsForChunk}/{@code smokeCellsForChunk}/{@code materialCellsForChunk}); this
+     * method is the single place that decides WHETHER that work is needed at all. See {@link
+     * #amountRevision}'s doc for why these two signals together are sufficient to always pick up
+     * both amount-only and capacity-only changes. A pure, static, key-type-generic algorithm
+     * (taking {@code generation} as a plain {@code long} rather than deriving it from a {@code
+     * ChunkState} itself) specifically so it is directly unit-testable with no {@code
+     * LevelChunk}/{@code ChunkState} involved at all.
+     */
+    static <K, C> List<C> cachedChunkCells(Map<K, CachedChunkCells<C>> cache, Map<K, Long> revisions,
+            K key, long generation, Supplier<List<C>> builder) {
+        long revision = revisions.getOrDefault(key, 0L);
+        CachedChunkCells<C> cached = cache.get(key);
+        if (cached != null && cached.amountRevision() == revision && cached.terrainGeneration() == generation) {
+            return cached.cells();
+        }
+        List<C> cells = builder.get();
+        cache.put(key, new CachedChunkCells<>(revision, generation, cells));
+        return cells;
+    }
+
+    /**
+     * Builds one chunk's immutable list of visible cells (capacity already resolved) -- the
+     * actual per-chunk work {@link #cachedChunkCells} decides whether to redo. {@code capacities}
+     * memoizes {@link #capacityAt} by cell key for the lifetime of one sync tick, same as before
+     * this change.
      */
     private List<AtmosphereSyncPlanner.Cell> atmosphereCellsForChunk(ServerLevel level, ChunkState state,
             Map<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer> capacities) {
@@ -2036,8 +2116,7 @@ final class ForgeAtmospherePrototype {
      * rate ("bound or coalesce pending deltas").
      */
     private int syncPlayer(ServerPlayer player, int budget,
-        Map<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer> capacities,
-        Map<ChunkKey, List<AtmosphereSyncPlanner.Cell>> chunkCellCache) {
+        Map<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer> capacities) {
         UUID id = player.getUUID();
         ResourceKey<Level> dimension = player.serverLevel().dimension();
         var trackingView = player.getChunkTrackingView();
@@ -2050,10 +2129,10 @@ final class ForgeAtmospherePrototype {
             var visible = new ArrayList<AtmosphereSyncPlanner.Cell>();
             // Use Minecraft's subscription, including changes to client/server view distance.
             // ensureImported only reads already loaded chunks and retains its per-tick budget.
-            // MINECRAFT-436: one chunk's cell list (with capacity already resolved) is built at
-            // most once per sync tick and reused for every player whose view includes it this
-            // tick (see #atmosphereCellsForChunk), instead of every overlapping player
-            // independently re-reading the grid and recomputing capacity for the same cells.
+            // MINECRAFT-436: one chunk's cell list (with capacity already resolved) is cached
+            // across ticks (see #cachedChunkCells) and reused for every player whose view
+            // includes it, instead of every overlapping player independently re-reading the grid
+            // and recomputing capacity for the same cells on every tick.
             trackingView.forEach(chunk -> {
                 ChunkState state = ensureImported(player.serverLevel(), chunk.x, chunk.z);
                 if (state == null || !state.readable) {
@@ -2061,8 +2140,9 @@ final class ForgeAtmospherePrototype {
                 }
                 authoritativeChunks.add(new AtmosphereSyncPlanner.Chunk(chunk.x, chunk.z));
                 ChunkKey key = new ChunkKey(dimension, chunk.x, chunk.z);
-                visible.addAll(chunkCellCache.computeIfAbsent(key,
-                    ignored -> atmosphereCellsForChunk(player.serverLevel(), state, capacities)));
+                visible.addAll(cachedChunkCells(chunkCellCache, amountRevision, key,
+                    ForgeTerrainFacts.generation(state.chunk),
+                    () -> atmosphereCellsForChunk(player.serverLevel(), state, capacities)));
             });
             syncQueue.enqueue(id, syncPlanner.plan(id, dimension, viewRadius, authoritativeChunks, visible));
         }
@@ -2084,9 +2164,8 @@ final class ForgeAtmospherePrototype {
         return consumed;
     }
 
-    /** See {@link #syncPlayer(ServerPlayer, int, Map, Map)}'s doc for the idle/genuine-change/pending-due gate. */
-    private int syncSmokePlayer(ServerPlayer player, int budget,
-            Map<ChunkKey, List<SmokeSyncPlanner.Cell>> smokeChunkCellCache) {
+    /** See {@link #syncPlayer(ServerPlayer, int, Map)}'s doc for the idle/genuine-change/pending-due gate. */
+    private int syncSmokePlayer(ServerPlayer player, int budget) {
         UUID id = player.getUUID();
         ResourceKey<Level> dimension = player.serverLevel().dimension();
         var trackingView = player.getChunkTrackingView();
@@ -2097,14 +2176,15 @@ final class ForgeAtmospherePrototype {
             if (idle && pendingSmokeFullSnapshot.remove(id)) smokeSyncPlanner.reset(id);
             var scope = new ArrayList<SmokeSyncPlanner.Chunk>();
             var visible = new ArrayList<SmokeSyncPlanner.Cell>();
-            // MINECRAFT-436: shared per-tick chunk cell cache; see #atmosphereCellsForChunk's doc.
+            // MINECRAFT-436: cross-tick shared chunk cell cache; see #cachedChunkCells's doc.
             trackingView.forEach(chunk -> {
                 ChunkState state = ensureImported(player.serverLevel(), chunk.x, chunk.z);
                 if (state == null || !state.smokeReadable) return;
                 scope.add(new SmokeSyncPlanner.Chunk(chunk.x, chunk.z));
                 ChunkKey key = new ChunkKey(dimension, chunk.x, chunk.z);
-                visible.addAll(smokeChunkCellCache.computeIfAbsent(key,
-                    ignored -> smokeCellsForChunk(player.serverLevel(), state)));
+                visible.addAll(cachedChunkCells(smokeChunkCellCache, smokeAmountRevision, key,
+                    ForgeTerrainFacts.generation(state.chunk),
+                    () -> smokeCellsForChunk(player.serverLevel(), state)));
             });
             smokeSyncQueue.enqueue(id, smokeSyncPlanner.plan(id, dimension, viewRadius, scope, visible));
         }
@@ -2132,7 +2212,6 @@ final class ForgeAtmospherePrototype {
         SmokeSyncPlanner<UUID, ResourceKey<Level>> planner,
         PacedSyncQueue<UUID, SmokeSyncPlanner.Update<ResourceKey<Level>>> queue,
         Set<UUID> pendingFullSnapshotForMaterial,
-        Map<ChunkKey, List<SmokeSyncPlanner.Cell>> materialChunkCellCache,
         int budget
     ) {
         UUID id = player.getUUID();
@@ -2145,14 +2224,18 @@ final class ForgeAtmospherePrototype {
             if (idle && pendingFullSnapshotForMaterial.remove(id)) planner.reset(id);
             var scope = new ArrayList<SmokeSyncPlanner.Chunk>();
             var visible = new ArrayList<SmokeSyncPlanner.Cell>();
-            // MINECRAFT-436: shared per-tick chunk cell cache; see #atmosphereCellsForChunk's doc.
+            Map<ChunkKey, CachedChunkCells<SmokeSyncPlanner.Cell>> materialChunkCellCache =
+                materialChunkCellCaches.get(material);
+            Map<ChunkKey, Long> materialRevision = materialAmountRevision.get(material);
+            // MINECRAFT-436: cross-tick shared chunk cell cache; see #cachedChunkCells's doc.
             trackingView.forEach(chunk -> {
                 ChunkState state = ensureImported(player.serverLevel(), chunk.x, chunk.z);
                 if (state == null || !state.materialReadable.contains(material)) return;
                 scope.add(new SmokeSyncPlanner.Chunk(chunk.x, chunk.z));
                 ChunkKey key = new ChunkKey(dimension, chunk.x, chunk.z);
-                visible.addAll(materialChunkCellCache.computeIfAbsent(key,
-                    ignored -> materialCellsForChunk(player.serverLevel(), material, state)));
+                visible.addAll(cachedChunkCells(materialChunkCellCache, materialRevision, key,
+                    ForgeTerrainFacts.generation(state.chunk),
+                    () -> materialCellsForChunk(player.serverLevel(), material, state)));
             });
             queue.enqueue(id, planner.plan(id, dimension, viewRadius, scope, visible));
         }
@@ -2502,6 +2585,7 @@ final class ForgeAtmospherePrototype {
             dirtyChunks.add(chunkKey);
         }
         for (ChunkKey key : dirtyChunks) {
+            amountRevision.merge(key, 1L, Long::sum);
             ChunkState state = chunks.get(key);
             try {
                 ForgeAtmosphereStorage.write(state.chunk, List.copyOf(state.cells.values()));
@@ -2532,6 +2616,7 @@ final class ForgeAtmospherePrototype {
             dirtyChunks.add(chunkKey);
         }
         for (ChunkKey key : dirtyChunks) {
+            smokeAmountRevision.merge(key, 1L, Long::sum);
             ChunkState state = chunks.get(key);
             try {
                 ForgeSmokeStorage.write(state.chunk, List.copyOf(state.smokeCells.values()));
@@ -2565,7 +2650,9 @@ final class ForgeAtmospherePrototype {
                 }
                 dirtyChunks.add(chunkKey);
             }
+            Map<ChunkKey, Long> revisionForMaterial = materialAmountRevision.get(material);
             for (ChunkKey key : dirtyChunks) {
+                revisionForMaterial.merge(key, 1L, Long::sum);
                 ChunkState state = chunks.get(key);
                 try {
                     ForgeMaterialStorage.write(state.chunk, material,

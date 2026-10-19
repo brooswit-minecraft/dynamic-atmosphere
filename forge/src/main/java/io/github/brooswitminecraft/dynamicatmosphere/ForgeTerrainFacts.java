@@ -27,6 +27,9 @@ public final class ForgeTerrainFacts {
 
     static TerrainFactsCache get(LevelChunk chunk) { return chunk.getData(CACHE.get()); }
 
+    /** See {@link TerrainFactsCache#generation()}. */
+    static long generation(LevelChunk chunk) { return get(chunk).generation(); }
+
     public static void blockChanged(LevelChunk chunk, BlockPos pos, BlockState previous, BlockState next) {
         if (previous == null || chunk.getLevel().isClientSide) return;
         var cache = chunk.getExistingDataOrNull(CACHE.get());
