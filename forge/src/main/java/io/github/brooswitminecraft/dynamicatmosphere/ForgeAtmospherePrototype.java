@@ -34,14 +34,13 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 import java.util.Comparator;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Deque;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -159,9 +158,11 @@ final class ForgeAtmospherePrototype {
      * MINECRAFT-435: a finite, persisted-per-chunk queue of Nether portal positions still owed an
      * Obsidian Powder emission from the most recently completed scan -- populated once a scan
      * exhausts and drained to empty (at most {@code portalTransferSink.maxSourcesPerCall} per
-     * call) before a new scan may begin for that chunk's emission leg.
+     * call) before a new scan may begin for that chunk's emission leg. An {@link Iterator} over
+     * the scan's own result set, rather than a copy into a queue, so handing off an arbitrarily
+     * large completed scan's positions costs nothing extra beyond the scan itself.
      */
-    private final Map<ChunkKey, Deque<BlockPos>> obsidianPortalEmissionQueue = new HashMap<>();
+    private final Map<ChunkKey, Iterator<BlockPos>> obsidianPortalEmissionQueue = new HashMap<>();
     /**
      * MINECRAFT-435: per-material, per-chunk sub-hook completion tracking for {@link
      * #processMaterialProducerChunks} -- a hook that already reported done for the chunk's
@@ -793,19 +794,19 @@ final class ForgeAtmospherePrototype {
      */
     private boolean sampleObsidianPowderPortalEmission(ServerLevel level, LevelChunk chunk) {
         ChunkKey key = chunkKey(level, chunk);
-        Deque<BlockPos> queue = obsidianPortalEmissionQueue.get(key);
+        Iterator<BlockPos> queue = obsidianPortalEmissionQueue.get(key);
         if (queue == null) {
             Optional<PortalChunkScanner.Scan> scan = scanPortalsBounded(level, chunk);
             if (scan.isEmpty()) return false;
             if (scan.get().netherPortals().isEmpty()) return true;
-            queue = new ArrayDeque<>(scan.get().netherPortals());
+            queue = scan.get().netherPortals().iterator();
             obsidianPortalEmissionQueue.put(key, queue);
         }
         int budget = tuning().portalTransferSink().maxSourcesPerCall();
-        var batch = new HashSet<BlockPos>(Math.min(budget, queue.size()));
-        for (int i = 0; i < budget && !queue.isEmpty(); i++) batch.add(queue.poll());
+        var batch = new HashSet<BlockPos>(budget);
+        for (int i = 0; i < budget && queue.hasNext(); i++) batch.add(queue.next());
         obsidianPowderGameplay.onLoadedChunkProducerCheck(level, batch);
-        if (queue.isEmpty()) {
+        if (!queue.hasNext()) {
             obsidianPortalEmissionQueue.remove(key);
             return true;
         }

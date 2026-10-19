@@ -96,8 +96,8 @@ public final class PortalTransferSink {
      * transfer attempt from the current pass -- populated once (from a freshly completed
      * discovery) and drained to empty before a new pass may begin for that chunk.
      */
-    private final Map<ResourceKey<Level>, Map<Long, Deque<BlockPos>>> pendingNetherTransfers = new HashMap<>();
-    private final Map<ResourceKey<Level>, Map<Long, Deque<BlockPos>>> pendingEndTransfers = new HashMap<>();
+    private final Map<ResourceKey<Level>, Map<Long, SourceQueue>> pendingNetherTransfers = new HashMap<>();
+    private final Map<ResourceKey<Level>, Map<Long, SourceQueue>> pendingEndTransfers = new HashMap<>();
     /**
      * MINECRAFT-435: opportunistic cache of the last resolved End destination, checked first
      * (O(1)) so a repeatedly-valid destination never pays for {@link #resolveEndDestination}'s
@@ -241,7 +241,10 @@ public final class PortalTransferSink {
     public void clearPendingWork(ResourceKey<Level> dimension, long chunkKey) {
         var netherQueue = queueFor(pendingNetherTransfers, dimension, chunkKey);
         if (netherQueue != null) {
-            for (BlockPos pos : netherQueue) abandonNetherSelection(dimension, pos);
+            while (!netherQueue.isEmpty()) {
+                abandonNetherSelection(dimension, netherQueue.peek());
+                netherQueue.poll();
+            }
         }
         clearQueue(pendingNetherTransfers, dimension, chunkKey);
         clearQueue(pendingEndTransfers, dimension, chunkKey);
@@ -325,26 +328,65 @@ public final class PortalTransferSink {
         return false;
     }
 
+    /**
+     * MINECRAFT-435: peek/poll view over a discovery's own result set via a single live {@link
+     * Iterator}, never a copy into an {@link ArrayDeque} -- so handing an arbitrarily large
+     * just-completed discovery off to its pending-transfer queue costs nothing beyond the
+     * discovery itself. {@code peek()}/{@code isEmpty()} pull at most one element ahead of what
+     * {@code poll()} has consumed.
+     */
+    static final class SourceQueue {
+        private final Iterator<BlockPos> source;
+        private BlockPos peeked;
+        private boolean hasPeeked;
+
+        SourceQueue(Iterator<BlockPos> source) {
+            this.source = source;
+        }
+
+        boolean isEmpty() {
+            if (hasPeeked) return false;
+            if (!source.hasNext()) return true;
+            peeked = source.next();
+            hasPeeked = true;
+            return false;
+        }
+
+        BlockPos peek() {
+            if (!hasPeeked) {
+                peeked = source.next();
+                hasPeeked = true;
+            }
+            return peeked;
+        }
+
+        void poll() {
+            peek();
+            hasPeeked = false;
+            peeked = null;
+        }
+    }
+
     static void ensureQueue(
-        Map<ResourceKey<Level>, Map<Long, Deque<BlockPos>>> queues,
+        Map<ResourceKey<Level>, Map<Long, SourceQueue>> queues,
         ResourceKey<Level> dimension, long chunkKey, Set<BlockPos> positions
     ) {
         if (positions.isEmpty()) return;
         // computeIfAbsent on the inner map only creates an entry if one is not already there, so
         // a still-draining prior pass's queue is never stomped by a fresh (re-)discovery.
         queues.computeIfAbsent(dimension, ignored -> new HashMap<>())
-            .computeIfAbsent(chunkKey, ignored -> new ArrayDeque<>(positions));
+            .computeIfAbsent(chunkKey, ignored -> new SourceQueue(positions.iterator()));
     }
 
-    static Deque<BlockPos> queueFor(
-        Map<ResourceKey<Level>, Map<Long, Deque<BlockPos>>> queues, ResourceKey<Level> dimension, long chunkKey
+    static SourceQueue queueFor(
+        Map<ResourceKey<Level>, Map<Long, SourceQueue>> queues, ResourceKey<Level> dimension, long chunkKey
     ) {
         var byChunk = queues.get(dimension);
         return byChunk == null ? null : byChunk.get(chunkKey);
     }
 
     static void clearQueue(
-        Map<ResourceKey<Level>, Map<Long, Deque<BlockPos>>> queues, ResourceKey<Level> dimension, long chunkKey
+        Map<ResourceKey<Level>, Map<Long, SourceQueue>> queues, ResourceKey<Level> dimension, long chunkKey
     ) {
         var byChunk = queues.get(dimension);
         if (byChunk != null) byChunk.remove(chunkKey);
@@ -358,21 +400,25 @@ public final class PortalTransferSink {
         if (observedThisScan.isEmpty()) {
             byChunk.remove(chunkKey);
         } else {
-            byChunk.put(chunkKey, Set.copyOf(observedThisScan));
+            // observedThisScan is a scan's own freshly-allocated result set (never aliased by the
+            // caller afterward -- see PortalChunkScanner.scan), so it is stored directly rather
+            // than defensively copied, avoiding an O(n) copy of what could be an arbitrarily large
+            // densely-populated chunk's portal positions.
+            byChunk.put(chunkKey, observedThisScan);
         }
     }
 
     /**
      * MINECRAFT-435: in-progress state for the End leg's resumable "is there any eligible
      * destination" search -- which registry chunk entry to resume at (a {@link NavigableMap}
-     * cursor, wrapping around), the FIRST chunk key this particular scan attempt examined (to
-     * detect a full wraparound -- see {@link #advanceEndCandidateScan}), which position within the
-     * current entry's set to resume at, and the first eligible position found (if any).
-     * Package-private fields: driven entirely by {@link #advanceEndCandidateScan}.
+     * cursor, wrapping around), every chunk key visited so far THIS scan attempt (to detect a
+     * full pass over the registry robustly -- see {@link #advanceEndCandidateScan}), which
+     * position within the current entry's set to resume at, and the first eligible position found
+     * (if any). Package-private fields: driven entirely by {@link #advanceEndCandidateScan}.
      */
     static final class EndCandidateScan {
         long nextChunkKey = Long.MIN_VALUE;
-        Long startChunkKey;
+        final Set<Long> visitedChunkKeys = new HashSet<>();
         Iterator<BlockPos> currentChunkPositions = Collections.emptyIterator();
         BlockPos found;
         boolean done;
@@ -398,10 +444,17 @@ public final class PortalTransferSink {
      * (a yield point, returning with neither {@link EndCandidateScan#done} set nor anything found
      * yet), never how much of the registry the OVERALL (possibly many-call) search attempt may
      * cover: {@link EndCandidateScan#done} only becomes {@code true} once a position is found, or
-     * once the cursor has walked every distinct chunk entry currently in the registry and wrapped
-     * back around to the first one THIS scan attempt examined -- a genuinely finite full search
-     * over the registry as it exists right now, never a search that gives up after an arbitrary
-     * partial window and calls that a definitive "nothing exists".</p>
+     * once {@code visitedChunkKeys} covers every distinct chunk entry currently in the registry --
+     * a genuinely finite full search over the registry as it exists right now, never a search that
+     * gives up after an arbitrary partial window and calls that a definitive "nothing exists".
+     * Tracking every VISITED key (rather than detecting a wraparound back to a single remembered
+     * starting key) stays correct even if the registry changes mid-scan, including the chunk entry
+     * this scan attempt started at being removed entirely (e.g. its only portal destroyed and
+     * rescanned as empty) -- that starting key would then never be seen again by {@code
+     * ceilingKey}/{@code higherKey}, so a wraparound keyed on it specifically would never fire and
+     * the scan would loop forever; re-hitting ANY already-visited key, or simply having visited as
+     * many distinct keys as the registry currently holds, both correctly signal a completed pass
+     * regardless of such changes.</p>
      */
     static void advanceEndCandidateScan(
         NavigableMap<Long, Set<BlockPos>> registry, int maxChunkEntriesPerCall,
@@ -416,13 +469,19 @@ public final class PortalTransferSink {
         while (budget.hasRemaining()) {
             if (!scan.currentChunkPositions.hasNext()) {
                 if (entriesStartedThisCall >= maxChunkEntriesPerCall) return; // yield for this call; not done
+                if (scan.visitedChunkKeys.size() >= registry.size()) {
+                    // Visited as many distinct keys as currently exist -- a complete pass, even if
+                    // the registry shrank (including losing this attempt's own starting entry)
+                    // since the scan began.
+                    scan.done = true;
+                    return;
+                }
                 Long key = registry.ceilingKey(scan.nextChunkKey);
                 if (key == null) key = registry.firstKey();
-                if (scan.startChunkKey == null) {
-                    scan.startChunkKey = key;
-                } else if (key.equals(scan.startChunkKey)) {
-                    // Wrapped all the way around the registry as it currently exists without
-                    // finding anything -- a genuine full search, not merely a partial window.
+                if (!scan.visitedChunkKeys.add(key)) {
+                    // Already visited this key earlier in the pass -- the registry shrank enough
+                    // that the cursor cycled back sooner than visitedChunkKeys.size() predicted.
+                    // Nothing new left to examine either way.
                     scan.done = true;
                     return;
                 }
@@ -577,8 +636,12 @@ public final class PortalTransferSink {
      * snapshot {@link Iterator} over the pool (taken once, when selection begins, since the pool
      * itself is immutable discovery data for the duration of one pass), the running nearest-so-far
      * ELIGIBLE candidate and its squared distance, and which {@link NetherBoxKey} to release the
-     * pool reference for once selection completes. Package-private fields: driven entirely by
-     * {@link #advanceNetherSelection}.
+     * pool reference for once selection completes. Package-private fields: driven by {@link
+     * #advanceNetherSelection}, with {@link #finalizeNetherSelection} additionally resetting
+     * {@code remaining}/{@code best}/{@code bestDistanceSquared}/{@code done} to restart a
+     * finished selection whose final live revalidation found {@code best} had gone stale in the
+     * meantime, so the next-nearest genuinely live candidate is still found rather than the whole
+     * source being given up on.
      */
     static final class NetherSelectionScan {
         Iterator<BlockPos> remaining;
@@ -618,6 +681,38 @@ public final class PortalTransferSink {
             }
         }
         if (!selection.remaining.hasNext()) selection.done = true;
+    }
+
+    /**
+     * MINECRAFT-435: finalizes an already-{@link NetherSelectionScan#done done} selection with
+     * one final live revalidation of its retained winner before it is actually used --
+     * {@code selection.best} may have been chosen several calls ago (whenever it last improved on
+     * the running best) and never revisited since, so it could have gone stale (its chunk
+     * unloaded, or the block itself changed) in the meantime without anything in {@link
+     * #advanceNetherSelection} ever rechecking it again. On a miss, restarts the selection over
+     * {@code pool} rather than giving up on the source entirely -- the live recheck naturally
+     * rejects the same now-stale candidate again on the restart, so this always makes forward
+     * progress toward the next-nearest genuinely live candidate. Each restart is itself
+     * budget-bounded and resumable exactly like the original selection pass, never unbounded. Pure
+     * and injectable like {@link #advanceNetherSelection}, for the same reason.
+     *
+     * @return {@code true} once revalidation (and however many restarts it took) concluded with a
+     *     winner confirmed live right now, or no winner at all; {@code false} if a restart's own
+     *     budget ran out mid-scan and the caller must retry this exact source later.
+     */
+    static boolean finalizeNetherSelection(
+        BlockPos anchor, int maxRadius, NetherSelectionScan selection, Collection<BlockPos> pool,
+        Budget budget, Predicate<BlockPos> isEligible
+    ) {
+        while (selection.best != null && !isEligible.test(selection.best)) {
+            selection.best = null;
+            selection.bestDistanceSquared = Long.MAX_VALUE;
+            selection.remaining = pool.iterator();
+            selection.done = false;
+            advanceNetherSelection(anchor, maxRadius, selection, budget, isEligible);
+            if (!selection.done) return false;
+        }
+        return true;
     }
 
     /**
@@ -678,7 +773,10 @@ public final class PortalTransferSink {
      * been destroyed, and a destroyed source is never a valid transfer source regardless of what
      * the atmosphere grid still records there. The source-amount check then runs so a portal with
      * nothing to transfer never pays for the (bounded, but still non-free) destination search at
-     * all.
+     * all. Once the SELECTION itself completes, its retained winner -- possibly chosen several
+     * calls ago -- is also given one final live revalidation right before it's actually used,
+     * restarting the selection over the shared pool if it has since gone stale, so a destination
+     * that died between selection and use can never be transferred to.
      *
      * @return {@code true} if this source was fully handled this call (transferred, declined, or
      *     found to have nothing to transfer) and the caller should advance past it; {@code false}
@@ -732,6 +830,11 @@ public final class PortalTransferSink {
         }
         advanceNetherSelection(anchor, NETHER_LINK_SEARCH_RADIUS, selection, candidateBudget, isEligible);
         if (!selection.done) return false;
+        DiscoveredPool discovered = netherDiscoveredPools.get(selection.boxKey);
+        if (!finalizeNetherSelection(anchor, NETHER_LINK_SEARCH_RADIUS, selection, discovered.positions,
+            candidateBudget, isEligible)) {
+            return false;
+        }
         netherSelectionScans.remove(sourceKey);
         releasePoolReference(selection.boxKey);
         if (selection.best != null) {

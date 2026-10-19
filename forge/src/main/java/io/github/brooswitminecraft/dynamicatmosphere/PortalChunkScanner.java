@@ -58,7 +58,11 @@ final class PortalChunkScanner {
             progress.nextSection = boundedResult.nextSection();
             return new Result(progress, false, null);
         }
-        return new Result(null, true, new Scan(Set.copyOf(progress.nether), Set.copyOf(progress.end)));
+        // progress is discarded here (never returned to the caller, and a fresh Progress is
+        // created on the next scan() for this chunk) -- its nether/end sets are handed off as-is
+        // rather than defensively copied, avoiding an O(n) copy of a result that could otherwise
+        // be arbitrarily large for a densely-populated chunk.
+        return new Result(null, true, new Scan(progress.nether, progress.end));
     }
 
     private PortalChunkScanner() { }
