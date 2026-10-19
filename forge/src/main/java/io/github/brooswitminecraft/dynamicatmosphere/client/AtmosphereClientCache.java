@@ -33,6 +33,8 @@ public final class AtmosphereClientCache {
     }
 
     private final Map<Cell, Amount> cells = new LinkedHashMap<>(16, 0.75f, true);
+    private final Map<Chunk, Set<Cell>> chunkMembers = new LinkedHashMap<>();
+    private final Set<Chunk> dirtyChunks = new java.util.LinkedHashSet<>();
     private final AtmosphereLodHierarchy lod;
     private final int baseCellSize;
     private final int cellBudget;
@@ -78,6 +80,8 @@ public final class AtmosphereClientCache {
 
     public void clear() {
         cells.clear();
+        chunkMembers.clear();
+        dirtyChunks.clear();
         lod.clear();
         snapshot = null;
         snapshotChunks = null;
@@ -126,6 +130,8 @@ public final class AtmosphereClientCache {
             if (wholeViewSnapshot) {
                 Map<Cell, Amount> previous = new LinkedHashMap<>(cells);
                 cells.clear();
+                dirtyChunks.addAll(chunkMembers.keySet());
+                chunkMembers.clear();
                 lod.clear();
                 reconcile(previous, snapshot.values());
             } else {
@@ -158,6 +164,31 @@ public final class AtmosphereClientCache {
             .map(entry -> new Update(entry.getKey(), entry.getValue().material(), entry.getValue().capacity())).toList();
     }
 
+    /**
+     * Only the chunks that changed since the last call, keyed by chunk; a chunk mapped to an
+     * empty list means every cell it held was removed (explicit deletion signal), so a checkpoint
+     * writer never has to re-export or re-serialize chunks that did not change.
+     */
+    public Map<Chunk, List<Update>> exportDirty() {
+        if (dirtyChunks.isEmpty()) return Map.of();
+        var result = new LinkedHashMap<Chunk, List<Update>>();
+        for (Chunk key : dirtyChunks) {
+            Set<Cell> members = chunkMembers.get(key);
+            if (members == null || members.isEmpty()) {
+                result.put(key, List.of());
+            } else {
+                var list = new ArrayList<Update>(members.size());
+                for (Cell cell : members) {
+                    Amount amount = cells.get(cell);
+                    list.add(new Update(cell, amount.material(), amount.capacity()));
+                }
+                result.put(key, list);
+            }
+        }
+        dirtyChunks.clear();
+        return result;
+    }
+
     /** Seed before receiving authority; cached visuals appear immediately and do not authorize deltas. */
     public void restore(List<Update> updates) {
         if (hasSnapshot) return;
@@ -166,7 +197,7 @@ public final class AtmosphereClientCache {
             int capacity = Math.clamp(update.capacity(), 0, 1000);
             float fullness = capacity == 0 ? 0 : Math.min(1000, material * 1000.0f / capacity);
             if (material > 0 && !cells.containsKey(update.cell())) {
-                put(update.cell(), new Amount(fullness, fullness, tick, material, capacity));
+                put(update.cell(), new Amount(fullness, fullness, tick, material, capacity), true);
             }
         }
         trim();
@@ -199,6 +230,7 @@ public final class AtmosphereClientCache {
             var entry = iterator.next();
             if (!detailedView.test(entry.getKey())) {
                 lod.remove(entry.getKey(), tick);
+                markRemoved(entry.getKey());
                 iterator.remove();
                 revision++;
             }
@@ -216,16 +248,29 @@ public final class AtmosphereClientCache {
                 continue;
             }
             if (old != null && old.material() == material && old.capacity() == capacity) {
-                put(update.cell(), old);
+                put(update.cell(), old, false);
                 continue;
             }
-            put(update.cell(), new Amount(old == null ? 0 : old.at(tick), target, tick, material, capacity));
+            put(update.cell(), new Amount(old == null ? 0 : old.at(tick), target, tick, material, capacity), true);
         }
     }
 
-    private void put(Cell cell, Amount amount) {
+    private void put(Cell cell, Amount amount, boolean dirty) {
         cells.put(cell, amount);
         lod.put(cell, amount.from(), amount.target(), amount.since(), tick);
+        Chunk key = chunk(cell);
+        chunkMembers.computeIfAbsent(key, ignored -> new HashSet<>()).add(cell);
+        if (dirty) dirtyChunks.add(key);
+    }
+
+    private void markRemoved(Cell cell) {
+        Chunk key = chunk(cell);
+        Set<Cell> members = chunkMembers.get(key);
+        if (members != null) {
+            members.remove(cell);
+            if (members.isEmpty()) chunkMembers.remove(key);
+        }
+        dirtyChunks.add(key);
     }
 
     AtmosphereLodHierarchy.Selection lodSelection(double x, double y, double z, int viewChunks) {
@@ -240,6 +285,7 @@ public final class AtmosphereClientCache {
             Amount amount = entry.getValue();
             if (amount.material() != 0 || tick - amount.since() < amount.duration()) return false;
             lod.remove(entry.getKey(), tick);
+            markRemoved(entry.getKey());
             return true;
         })) revision++;
     }

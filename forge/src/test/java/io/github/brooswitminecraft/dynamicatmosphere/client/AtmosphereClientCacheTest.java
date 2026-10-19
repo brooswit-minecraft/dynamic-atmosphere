@@ -54,6 +54,32 @@ class AtmosphereClientCacheTest {
     }
 
     @Test
+    void exportDirtyOnlyReportsChangedChunksAndClearsAfterEachCall() {
+        var cache = new AtmosphereClientCache();
+        var chunkA = new AtmosphereClientCache.Chunk(-1, 0);
+        var chunkB = new AtmosphereClientCache.Chunk(0, 0);
+        cache.changeDimension("overworld");
+        cache.restore(List.of(update(A, 400), update(B, 600)));
+        assertEquals(java.util.Map.of(chunkA, List.of(update(A, 400)), chunkB, List.of(update(B, 600))), cache.exportDirty());
+        assertTrue(cache.exportDirty().isEmpty()); // Nothing changed since the last export.
+
+        cache.apply("overworld", true, true, List.of(chunkA), List.of(update(A, 900)));
+        assertEquals(java.util.Map.of(chunkA, List.of(update(A, 900))), cache.exportDirty()); // chunk B untouched.
+    }
+
+    @Test
+    void exportDirtyMarksAFullyRemovedChunkAsAnEmptyList() {
+        var cache = new AtmosphereClientCache();
+        var chunkA = new AtmosphereClientCache.Chunk(-1, 0);
+        cache.changeDimension("overworld");
+        cache.apply("overworld", true, true, List.of(chunkA), List.of(update(A, 900)));
+        cache.exportDirty();
+        cache.apply("overworld", false, false, List.of(), List.of(update(A, 0)));
+        settle(cache);
+        assertEquals(java.util.Map.of(chunkA, List.of()), cache.exportDirty());
+    }
+
+    @Test
     void memoryBudgetEvictsOutsideViewLruButNeverTruncatesDetailedView() {
         var cache = new AtmosphereClientCache(2);
         cache.changeDimension("overworld");
