@@ -45,6 +45,22 @@ public final class AtmosphereGrid<D> {
     private final LongUnaryOperator nextSimulationTick;
     private long nextSequence;
 
+    // spreadOneHop is only ever invoked synchronously from the server tick thread, never
+    // reentrantly, so these scratch buffers can be cleared and reused instead of allocated
+    // fresh on every call.
+    private final Set<CellKey<D>> spreadLocalKeys = new LinkedHashSet<>();
+    private final Map<CellKey<D>, Integer> spreadCapacitySnapshot = new HashMap<>();
+    private final Map<CellKey<D>, Integer> spreadAmountSnapshot = new HashMap<>();
+    private final Map<TransferEdge<D>, Integer> spreadProposals = new LinkedHashMap<>();
+    private final Map<CellKey<D>, Integer> spreadIncoming = new HashMap<>();
+    private final Map<CellKey<D>, Integer> spreadDeltas = new LinkedHashMap<>();
+    // One reused neighbor-list slot per source index: holds that source's canTransfer-eligible
+    // neighbors, computed once per spreadOneHop call and consumed by both passes below.
+    private final List<List<CellKey<D>>> spreadNeighborPool = new ArrayList<>();
+    private final List<CellKey<D>> spreadNeighborhoodBuf = new ArrayList<>(NEIGHBOR_OFFSETS.length + 1);
+    private final List<Integer> spreadCapacitiesBuf = new ArrayList<>(NEIGHBOR_OFFSETS.length + 1);
+    private int[] spreadDeficits = new int[NEIGHBOR_OFFSETS.length + 1];
+
     public AtmosphereGrid() {
         this(AtmosphereGridLayout::nextSimulationTick);
     }
@@ -315,43 +331,59 @@ public final class AtmosphereGrid<D> {
         List<CellKey<D>> sources,
         BiPredicate<CellKey<D>, CellKey<D>> canTransfer
     ) {
-        Set<CellKey<D>> localKeys = new LinkedHashSet<>();
-        for (CellKey<D> source : sources) {
+        Set<CellKey<D>> localKeys = spreadLocalKeys;
+        localKeys.clear();
+        while (spreadNeighborPool.size() < sources.size()) {
+            spreadNeighborPool.add(new ArrayList<>(NEIGHBOR_OFFSETS.length));
+        }
+        for (int i = 0; i < sources.size(); i++) {
+            CellKey<D> source = sources.get(i);
+            List<CellKey<D>> validNeighbors = spreadNeighborPool.get(i);
+            validNeighbors.clear();
             localKeys.add(source);
             for (CellKey<D> neighbor : neighbors(source)) {
-                if (canTransfer.test(source, neighbor)) localKeys.add(neighbor);
+                if (canTransfer.test(source, neighbor)) {
+                    validNeighbors.add(neighbor);
+                    localKeys.add(neighbor);
+                }
             }
         }
-        Map<CellKey<D>, Integer> capacitySnapshot = new HashMap<>();
+        Map<CellKey<D>, Integer> capacitySnapshot = spreadCapacitySnapshot;
+        capacitySnapshot.clear();
         for (CellKey<D> key : localKeys) {
             capacitySnapshot.put(key, capacityAt.applyAsInt(key));
         }
-        Map<CellKey<D>, Integer> amountSnapshot = new HashMap<>();
+        Map<CellKey<D>, Integer> amountSnapshot = spreadAmountSnapshot;
+        amountSnapshot.clear();
         for (CellKey<D> key : localKeys) {
             Cell<D> cell = cells.get(key);
             amountSnapshot.put(key, cell == null ? 0 : cell.amount);
         }
-        Map<TransferEdge<D>, Integer> proposals = new LinkedHashMap<>();
-        Map<CellKey<D>, Integer> incoming = new HashMap<>();
+        Map<TransferEdge<D>, Integer> proposals = spreadProposals;
+        proposals.clear();
+        Map<CellKey<D>, Integer> incoming = spreadIncoming;
+        incoming.clear();
 
-        for (CellKey<D> sourceKey : sources) {
+        for (int i = 0; i < sources.size(); i++) {
+            CellKey<D> sourceKey = sources.get(i);
             int sourceAmount = amountSnapshot.getOrDefault(sourceKey, 0);
             int sourceCapacity = capacitySnapshot.get(sourceKey);
             if (sourceAmount <= 0 || sourceCapacity < 0) {
                 continue;
             }
 
-            List<CellKey<D>> neighborhood = new ArrayList<>();
-            List<Integer> capacities = new ArrayList<>();
+            List<CellKey<D>> neighborhood = spreadNeighborhoodBuf;
+            List<Integer> capacities = spreadCapacitiesBuf;
+            neighborhood.clear();
+            capacities.clear();
             neighborhood.add(sourceKey);
             capacities.add(boundedCapacity(sourceCapacity));
             long totalAmount = sourceAmount;
             int totalCapacity = boundedCapacity(sourceCapacity);
 
-            for (CellKey<D> neighbor : neighbors(sourceKey)) {
-                if (!canTransfer.test(sourceKey, neighbor)) {
-                    continue;
-                }
+            // Reuse the neighbor list already computed (and canTransfer-filtered) above instead
+            // of recomputing neighbors(sourceKey) and re-running canTransfer for this source.
+            for (CellKey<D> neighbor : spreadNeighborPool.get(i)) {
                 int capacity = capacitySnapshot.get(neighbor);
                 if (capacity <= 0) {
                     continue;
@@ -368,9 +400,13 @@ public final class AtmosphereGrid<D> {
 
             int sourceTarget = weightedTarget(totalAmount, capacities.getFirst(), totalCapacity);
             int available = Math.max(0, sourceAmount - sourceTarget);
-            int[] deficits = new int[neighborhood.size()];
+            int neighborhoodSize = neighborhood.size();
+            if (spreadDeficits.length < neighborhoodSize) {
+                spreadDeficits = new int[neighborhoodSize];
+            }
+            int[] deficits = spreadDeficits;
             int totalDeficit = 0;
-            for (int index = 1; index < neighborhood.size(); index++) {
+            for (int index = 1; index < neighborhoodSize; index++) {
                 CellKey<D> neighbor = neighborhood.get(index);
                 int neighborAmount = amountSnapshot.getOrDefault(neighbor, 0);
                 int target = weightedTarget(totalAmount, capacities.get(index), totalCapacity);
@@ -380,7 +416,7 @@ public final class AtmosphereGrid<D> {
             // Share a limited source proportionally; fixed face order must not favor X over Z.
             // Integer remainders stay at the source rather than favoring the first neighbor.
             int outgoing = Math.min(available, totalDeficit);
-            for (int index = 1; index < neighborhood.size() && outgoing > 0; index++) {
+            for (int index = 1; index < neighborhoodSize && outgoing > 0; index++) {
                 CellKey<D> neighbor = neighborhood.get(index);
                 int transfer = (int) ((long) outgoing * deficits[index] / totalDeficit);
                 if (transfer > 0) {
@@ -392,7 +428,8 @@ public final class AtmosphereGrid<D> {
 
         // Resolve competing sources together. Only pre-spread spare capacity is available,
         // so incoming material cannot be respent and source order cannot claim space first.
-        Map<CellKey<D>, Integer> deltas = new LinkedHashMap<>();
+        Map<CellKey<D>, Integer> deltas = spreadDeltas;
+        deltas.clear();
         for (var proposal : proposals.entrySet()) {
             var edge = proposal.getKey();
             int requested = incoming.get(edge.destination);

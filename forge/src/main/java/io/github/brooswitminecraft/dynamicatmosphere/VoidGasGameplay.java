@@ -1,5 +1,6 @@
 package io.github.brooswitminecraft.dynamicatmosphere;
 
+import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -10,6 +11,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.entity.EntityTypeTest;
 import net.minecraft.world.phys.AABB;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 
@@ -107,11 +109,13 @@ public final class VoidGasGameplay {
 
     private static void readyOneVillager(ServerLevel level, BlockPos cellOrigin, int cost, int breedingBread) {
         AABB bounds = cellBounds(cellOrigin, AtmosphereMaterial.VOID_GAS.cellSize());
-        List<Villager> villagers = level.getEntitiesOfClass(Villager.class, bounds,
-            candidate -> bounds.contains(candidate.position()) && eligibleVillager(candidate, breedingBread));
-        int checked = 0;
+        // Only the first successful candidate is ever used; bound the underlying scan itself
+        // instead of collecting every eligible villager in the cell before capping the loop.
+        List<Villager> villagers = new ArrayList<>();
+        level.getEntities(EntityTypeTest.forClass(Villager.class), bounds,
+            candidate -> bounds.contains(candidate.position()) && eligibleVillager(candidate, breedingBread),
+            villagers, MAX_VILLAGER_CANDIDATES);
         for (Villager villager : villagers) {
-            if (checked++ >= MAX_VILLAGER_CANDIDATES) break;
             if (!DynamicAtmosphereMod.consumeMaterial(level, AtmosphereMaterial.VOID_GAS, cellOrigin, cost)) return;
             villager.getInventory().addItem(new ItemStack(Items.BREAD, breedingBread));
             return;

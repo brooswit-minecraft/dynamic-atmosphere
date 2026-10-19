@@ -4,6 +4,7 @@ import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.LivingEntity;
@@ -109,8 +110,14 @@ public final class ExhaustGameplay {
         }
     }
 
-    /** Called exactly once for an Exhaust cell selected by its simulation turn. */
-    public int processTurn(ServerLevel level, BlockPos source, Iterable<? extends LivingEntity> entities) {
+    /**
+     * Called exactly once for an Exhaust cell selected by its simulation turn. The entity
+     * supplier is only invoked once suffocation is eligible, so inactive cells never issue the
+     * underlying living-entity spatial query.
+     */
+    public int processTurn(
+        ServerLevel level, BlockPos source, Supplier<Iterable<? extends LivingEntity>> entitiesSupplier
+    ) {
         Optional<AtmosphereMaterialState> state =
             DynamicAtmosphereMod.materialState(level, AtmosphereMaterial.EXHAUST, source);
         if (state.isEmpty()) return 0;
@@ -123,7 +130,7 @@ public final class ExhaustGameplay {
 
         int damaged = 0;
         Set<UUID> visited = new HashSet<>();
-        for (LivingEntity entity : entities) {
+        for (LivingEntity entity : entitiesSupplier.get()) {
             BlockPos exposure = BlockPos.containing(entity.getEyePosition());
             if (!visited.add(entity.getUUID()) || !entity.isAlive() || entity.level() != level
                 || !sameExhaustCell(source, exposure)) continue;

@@ -1,5 +1,6 @@
 package io.github.brooswitminecraft.dynamicatmosphere;
 
+import java.util.function.Supplier;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.effect.MobEffectInstance;
@@ -53,13 +54,19 @@ public final class NetherGasGameplay {
         onPassiveBlockSample(level, pos, chunk.getBlockState(pos));
     }
 
-    /** Called once for a processed Nether Gas cell whose exposed entities are supplied by the caller. */
-    public void processTurn(ServerLevel level, BlockPos cellOrigin, Iterable<? extends LivingEntity> entities) {
+    /**
+     * Called once for a processed Nether Gas cell. The entity supplier is only invoked when the
+     * cell's amount/capacity make an effect eligible, so inactive cells never issue the
+     * underlying living-entity spatial query.
+     */
+    public void processTurn(
+        ServerLevel level, BlockPos cellOrigin, Supplier<Iterable<? extends LivingEntity>> entitiesSupplier
+    ) {
         DynamicAtmosphereServerConfig.NetherGas config = DynamicAtmosphereServerConfig.snapshot().netherGas();
         DynamicAtmosphereMod.materialState(level, AtmosphereMaterial.NETHER_GAS, cellOrigin).ifPresent(state -> {
             CellEffect effect = effectFor(state.amount(), state.capacity(), config.mildFullness(), config.dangerousFullness());
             if (!effect.active()) return;
-            for (LivingEntity entity : entities) {
+            for (LivingEntity entity : entitiesSupplier.get()) {
                 if (!entity.isAlive()) continue;
                 if (effect.mild()) {
                     entity.addEffect(new MobEffectInstance(MobEffects.CONFUSION, EFFECT_DURATION_TICKS, MILD_AMPLIFIER));
