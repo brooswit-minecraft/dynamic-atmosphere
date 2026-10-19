@@ -46,6 +46,20 @@ final class SmokeSyncPlanner<P, D> {
     }
 
     /**
+     * MINECRAFT-436: a pure peek, mutating no state, at whether {@link #plan} would produce a
+     * forced reset for this player right now -- i.e. a genuine dimension or view-distance change,
+     * never inferred from chunk/cell set size. Lets a caller detect a genuine change cheaply
+     * (using only the dimension/viewRadius it already has in hand, with no chunk/cell gather)
+     * even while it is deliberately not calling {@code plan} this tick for an unrelated reason
+     * (e.g. still draining a prior generation through a paced send queue), so it can still react
+     * immediately to a real change instead of only noticing it once that unrelated reason clears.
+     */
+    boolean wouldForceReset(P player, D dimension, int viewRadius) {
+        PlayerView<D> previous = views.get(player);
+        return previous == null || !previous.dimension().equals(dimension) || previous.viewRadius() != viewRadius;
+    }
+
+    /**
      * {@code viewRadius} is the chunk-tracking view's own radius (e.g. {@code ChunkTrackingView.Positioned
      * .viewDistance()}), used ONLY to tell a real view-distance change apart from the tracked-chunk set merely
      * sliding as the player crosses a chunk boundary — never inferred from the chunk/cell set size.
