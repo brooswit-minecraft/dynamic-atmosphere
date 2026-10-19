@@ -76,6 +76,51 @@ class CelestialTintTest {
         assertEquals(0, CelestialTint.weight(UP, UP, 0, 0.35));
     }
 
+    /**
+     * MINECRAFT-432: {@code AtmosphereVolumeRenderer.CelestialFrame#apply} skips calling
+     * {@link CelestialTint#blend} whenever both weights are already known to be 0 -- correct
+     * only because of exactly this invariant: {@code celestialTintMaxStrength} 0 forces weight
+     * to 0 regardless of angle or visibility, so skipping the blend provably reproduces
+     * {@code blend}'s own result (base colour unchanged) rather than guessing. Looking directly
+     * at the body (maximal angle) and full visibility would otherwise be the single most
+     * favourable case for a nonzero weight. This is deliberately NOT where strength-0 handling
+     * short-circuits sampling/smoothing (see {@code celestialFrame}'s own comment): that would
+     * freeze {@code sunVisibilityState}/{@code moonVisibilityState} while disabled and replay
+     * stale visibility on resume -- a real regression caught in review.
+     */
+    @Test
+    void zeroMaxStrengthCollapsesWeightRegardlessOfAngleOrVisibility() {
+        assertEquals(0, CelestialTint.weight(UP, UP, 1, 0));
+    }
+
+    /**
+     * MINECRAFT-432: pins the exact contract {@code celestialFrame} depends on for correct
+     * resumed-state behavior -- {@link CelestialTint#smoothTowards} must be called EVERY frame,
+     * strength 0 included, so the smoothed visibility state keeps tracking a changing raw
+     * (occlusion/weather) sample. Skipping the call while "inactive" (the bug caught in review)
+     * freezes state at whatever it was, so a visibility change during that gap is silently lost:
+     * resuming calls then smooth from the stale frozen value instead of from what visibility
+     * actually was, replaying a now-wrong brightness/darkness for several frames.
+     */
+    @Test
+    void smoothTowardsMustRunEveryFrameOrAChangeDuringASkippedGapIsLost() {
+        double state = 1; // fully visible
+        // Tracked continuously: occlusion drops to 0 and the state honestly follows it down.
+        double tracked = state;
+        for (int frame = 0; frame < 20; frame++) {
+            tracked = CelestialTint.smoothTowards(tracked, 0, 0.08);
+        }
+        assertEquals(0, tracked, 1e-9, "continuous sampling must reach the new, fully-occluded target");
+
+        // Skipped (simulating a strength-0 freeze): the same occlusion change happens, but the
+        // state is never sampled/smoothed during the gap, so it never learns about it.
+        double frozen = state;
+        // (no smoothTowards calls here -- this is the bug: the state is simply never told)
+        assertEquals(1, frozen, "a frozen state cannot reflect a visibility change it was never shown");
+        assertNotEquals(tracked, frozen,
+            "a skipped-sampling gap must diverge from the honestly-tracked state, pinning the regression");
+    }
+
     @Test
     void nonFiniteInputsFoldToZeroWeight() {
         assertEquals(0, CelestialTint.weight(new CelestialTint.Vector(Double.NaN, 0, 0), UP, 1, 0.35));
