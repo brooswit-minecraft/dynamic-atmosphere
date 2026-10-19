@@ -115,6 +115,56 @@ public final class AtmosphereDiskCache {
         trim();
     }
 
+    public static AtmosphereClientCache.Chunk chunkOf(AtmosphereClientCache.Cell cell) {
+        return new AtmosphereClientCache.Chunk(
+            AtmosphereGridLayout.chunkCoordinate(cell.x()), AtmosphereGridLayout.chunkCoordinate(cell.z()));
+    }
+
+    /**
+     * Writes only the given chunks, each either replaced wholesale or (an empty cell list) deleted;
+     * unlike {@link #save}, this never re-serializes or re-hashes chunks the caller did not name.
+     */
+    public synchronized void saveDelta(String namespace,
+                                       Map<AtmosphereClientCache.Chunk, List<AtmosphereClientCache.Update>> deltas) throws IOException {
+        if (deltas.isEmpty()) return;
+        Path directory = directory(namespace);
+        Files.createDirectories(directory);
+        for (var entry : deltas.entrySet()) {
+            String name = entry.getKey().x() + "_" + entry.getKey().z() + ".bin";
+            Path target = directory.resolve(name);
+            List<AtmosphereClientCache.Update> cells = entry.getValue().stream()
+                .filter(update -> update.amount() > 0).toList();
+            if (cells.isEmpty()) {
+                Files.deleteIfExists(target);
+                continue;
+            }
+            var sorted = new ArrayList<>(cells);
+            sorted.sort(Comparator.comparingInt((AtmosphereClientCache.Update u) -> u.cell().x())
+                .thenComparingInt(u -> u.cell().y()).thenComparingInt(u -> u.cell().z()));
+            var bytes = new ByteArrayOutputStream();
+            try (var out = new DataOutputStream(bytes)) {
+                out.writeInt(MAGIC); out.writeInt(entry.getKey().x()); out.writeInt(entry.getKey().z());
+                out.writeInt(sorted.size());
+                for (var update : sorted) {
+                    out.writeInt(update.cell().x()); out.writeInt(update.cell().y()); out.writeInt(update.cell().z());
+                    out.writeInt(update.amount()); out.writeInt(update.capacity());
+                }
+            }
+            byte[] data = bytes.toByteArray();
+            if (Files.exists(target) && Files.size(target) == data.length
+                && Arrays.equals(Files.readAllBytes(target), data)) continue;
+            Path temporary = Files.createTempFile(directory, "chunk-", ".tmp");
+            try {
+                Files.write(temporary, data);
+                try { Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE); }
+                catch (AtomicMoveNotSupportedException unsupported) {
+                    Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
+                }
+            } finally { Files.deleteIfExists(temporary); }
+        }
+        trim();
+    }
+
     private Path directory(String namespace) {
         if (!namespace.matches("[0-9a-f]{64}")) throw new IllegalArgumentException("Invalid cache namespace");
         return root.resolve(namespace);

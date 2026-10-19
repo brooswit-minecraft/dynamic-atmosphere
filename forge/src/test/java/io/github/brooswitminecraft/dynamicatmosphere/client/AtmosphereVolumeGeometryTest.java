@@ -65,6 +65,28 @@ class AtmosphereVolumeGeometryTest {
             }
         }
     }
+
+    /**
+     * MINECRAFT-432: pins {@code coarseSlices}' pre-existing (if asymmetric) alpha formula --
+     * {@code baseCellSize} is {@link AtmosphereVolumeGeometry#CELL_SIZE} (4), NOT the 16-block
+     * box size/spacing this method otherwise uses for its geometry. A refactor regression that
+     * passed 16 as baseCellSize instead (caught in review) would quarter the computed optical
+     * depth below for identical amount/thickness inputs, since {@code sliceAlpha}'s exponent is
+     * proportional to {@code thickness / baseCellSize}.
+     */
+    @Test
+    void coarseGeometryAlphaUsesCellSizeNotTheSixteenBlockBoxSizeAsBaseCellSize() {
+        // Camera placed so the box's near/far depths (16, 32) land exactly on 16-block grid
+        // planes: one full-thickness (16) slice, with no partial end-slab fraction to account for.
+        var camera = new AtmosphereVolumeGeometry.Point(8, 8, -16);
+        var slices = AtmosphereVolumeGeometry.coarseSlices(0, 0, 0, 500, camera,
+            new AtmosphereVolumeGeometry.Point(0, 0, 1));
+        assertEquals(1, slices.size(),
+            "a camera-aligned 16-block box with 16-block spacing must yield exactly one full-thickness slice");
+        assertEquals(AtmosphereVolumeGeometry.sliceAlpha(500, 16, AtmosphereVolumeGeometry.CELL_SIZE),
+            slices.getFirst().alpha(), 1.0e-6f,
+            "coarse alpha must integrate against CELL_SIZE, not the 16-block box size, as baseCellSize");
+    }
     private static final AtmosphereClientCache.Cell CELL = new AtmosphereClientCache.Cell(0, 0, 0);
     private static final AtmosphereVolumeGeometry.Point FORWARD = new AtmosphereVolumeGeometry.Point(0, 0, 1);
 
@@ -161,5 +183,55 @@ class AtmosphereVolumeGeometryTest {
         assertEquals(1, AtmosphereVolumeGeometry.fadeMultiplier(50, 100, 100));
         assertEquals(0, AtmosphereVolumeGeometry.fadeMultiplier(100, 100, 100));
         assertEquals(0, AtmosphereVolumeGeometry.fadeMultiplier(150, 100, 100));
+    }
+
+    // --- MINECRAFT-432: a single per-frame basis passed into geometry generation must produce
+    // --- exactly the geometry the old per-call "normalize look, rebuild right/up" path did.
+
+    @Test
+    void precomputedBasisProducesIdenticalGeometryToRecomputingItPerCall() {
+        var tree = new AtmosphereLodHierarchy();
+        tree.put(new AtmosphereClientCache.Cell(3, 0, -2), 1000, 1000, 0, 0);
+        var volume = tree.select(0, 0, 0, 4, 0).volumes().getFirst();
+        var camera = new AtmosphereVolumeGeometry.Point(2, 2, -2);
+        for (var look : List.of(new AtmosphereVolumeGeometry.Point(0, 0, 1),
+            new AtmosphereVolumeGeometry.Point(1, 1, 1), new AtmosphereVolumeGeometry.Point(0, 1, 0),
+            new AtmosphereVolumeGeometry.Point(0, -1, 0))) {
+            var viaLook = AtmosphereVolumeGeometry.lodSlices(volume, 500, camera, look, 1);
+            var basis = AtmosphereVolumeGeometry.Basis.of(look);
+            var viaBasis = AtmosphereVolumeGeometry.lodSlices(volume, 500, camera, basis, 1,
+                io.github.brooswitminecraft.dynamicatmosphere.DynamicAtmosphereClientConfig.snapshot().slicesPerBaseCell(),
+                raw -> raw);
+            assertEquals(viaLook, viaBasis,
+                "a precomputed Basis must generate byte-for-byte the same slices as the look-vector path");
+        }
+    }
+
+    // --- MINECRAFT-432: folding the final opacity/fade adjustment into slice generation itself
+    // --- (an AlphaAdjust hook) must leave every slice's alpha exactly as a post-hoc multiply
+    // --- over the unadjusted slices would have, while depth/vertices stay untouched.
+
+    @Test
+    void alphaAdjustHookMatchesApplyingTheSameAdjustmentAfterGeneration() {
+        var tree = new AtmosphereLodHierarchy();
+        tree.put(new AtmosphereClientCache.Cell(5, 0, 5), 1000, 1000, 0, 0);
+        var volume = tree.select(0, 0, 0, 4, 0).volumes().getFirst();
+        var camera = new AtmosphereVolumeGeometry.Point(2, 2, -2);
+        var basis = AtmosphereVolumeGeometry.Basis.of(new AtmosphereVolumeGeometry.Point(0, 0, 1));
+        int slicesPerBaseCell =
+            io.github.brooswitminecraft.dynamicatmosphere.DynamicAtmosphereClientConfig.snapshot().slicesPerBaseCell();
+        var unadjusted = AtmosphereVolumeGeometry.lodSlices(volume, 500, camera, basis, 1, slicesPerBaseCell, raw -> raw);
+        assertFalse(unadjusted.isEmpty());
+        float fade = 0.4f;
+        var foldedIn = AtmosphereVolumeGeometry.lodSlices(volume, 500, camera, basis, 1, slicesPerBaseCell,
+            raw -> raw * fade);
+        assertEquals(unadjusted.size(), foldedIn.size());
+        for (int i = 0; i < unadjusted.size(); i++) {
+            var before = unadjusted.get(i);
+            var after = foldedIn.get(i);
+            assertEquals(before.depth(), after.depth());
+            assertEquals(before.vertices(), after.vertices());
+            assertEquals(before.alpha() * fade, after.alpha(), 1e-6f);
+        }
     }
 }

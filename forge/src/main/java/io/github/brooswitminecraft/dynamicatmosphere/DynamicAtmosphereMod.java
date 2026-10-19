@@ -57,11 +57,9 @@ public class DynamicAtmosphereMod {
         modEventBus.addListener(AtmosphereNetwork::register);
         DynamicAtmosphereRegistry.register(modEventBus);
         ForgeAtmosphereStorage.register(modEventBus);
-        ForgeAtmosphereCapacity.register(modEventBus);
         ForgeSmokeStorage.register(modEventBus);
-        ForgeSmokeCapacity.register(modEventBus);
         ForgeMaterialStorage.register(modEventBus);
-        ForgeMaterialCapacity.register(modEventBus);
+        ForgeTerrainFacts.register(modEventBus);
         prototype = new ForgeAtmospherePrototype();
         NeoForge.EVENT_BUS.addListener(prototype::onServerTick);
         NeoForge.EVENT_BUS.addListener(prototype::onChunkLoad);

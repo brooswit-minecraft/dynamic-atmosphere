@@ -3,6 +3,7 @@ package io.github.brooswitminecraft.dynamicatmosphere;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -18,7 +19,17 @@ import java.util.function.Consumer;
 import java.util.function.LongUnaryOperator;
 import java.util.function.ToIntFunction;
 
-/** A bounded-work, server-owned atmospheric material grid. */
+/**
+ * A bounded-work, server-owned atmospheric material grid.
+ *
+ * <p>{@code spreadOneHop}'s scratch buffers are pooled per-grid and reused call to call instead
+ * of allocated fresh every time, but a nested {@code spread} call -- one of {@code capacityAt},
+ * {@code canTransfer}, {@code beforeSpread}, {@code afterSpread}, or {@code shouldSimulate}
+ * calling back into {@code spread} on this same grid instance while an outer call is still in
+ * progress -- checks out its own independent frame from the pool rather than touching the outer
+ * call's live state, so nesting stays safe (if rare: no current Forge capacity/transfer callback
+ * recurses into spread). See {@link #spreadOneHop}.
+ */
 public final class AtmosphereGrid<D> {
     public static final int CELL_SIZE = AtmosphereGridLayout.CELL_SIZE;
     public static final int MAX_AMOUNT = 1_000;
@@ -44,6 +55,13 @@ public final class AtmosphereGrid<D> {
     private final Map<CellKey<D>, OverflowSearch<D>> overflowSearches = new HashMap<>();
     private final LongUnaryOperator nextSimulationTick;
     private long nextSequence;
+
+    // Pool of reusable spreadOneHop scratch frames (see SpreadFrame below). The common,
+    // non-reentrant case checks out and returns the same single frame every call -- zero
+    // allocation after the first. A nested call (while an outer one is still in progress) finds
+    // the pool empty and allocates its own frame, so it never touches the outer call's live
+    // state; both frames return to the pool afterward for future reuse.
+    private final Deque<SpreadFrame<D>> spreadFramePool = new ArrayDeque<>();
 
     public AtmosphereGrid() {
         this(AtmosphereGridLayout::nextSimulationTick);
@@ -309,49 +327,103 @@ public final class AtmosphereGrid<D> {
         overflowSearches.clear();
     }
 
+    /**
+     * One call's worth of spreadOneHop scratch state, pooled rather than allocated fresh per
+     * call. A nested spreadOneHop call checks out a different frame instance (see
+     * {@link #spreadFramePool}), so it can never alias or corrupt an outer call's live frame.
+     */
+    private static final class SpreadFrame<D> {
+        final Set<CellKey<D>> localKeys = new LinkedHashSet<>();
+        final Map<CellKey<D>, Integer> capacitySnapshot = new HashMap<>();
+        final Map<CellKey<D>, Integer> amountSnapshot = new HashMap<>();
+        final Map<TransferEdge<D>, Integer> proposals = new LinkedHashMap<>();
+        final Map<CellKey<D>, Integer> incoming = new HashMap<>();
+        final Map<CellKey<D>, Integer> deltas = new LinkedHashMap<>();
+        // One neighbor-list slot per source index: holds that source's canTransfer-eligible
+        // neighbors, computed once per call and consumed by both passes below.
+        final List<List<CellKey<D>>> neighborPool = new ArrayList<>();
+        final List<CellKey<D>> neighborhoodBuf = new ArrayList<>(NEIGHBOR_OFFSETS.length + 1);
+        final List<Integer> capacitiesBuf = new ArrayList<>(NEIGHBOR_OFFSETS.length + 1);
+        int[] deficits = new int[NEIGHBOR_OFFSETS.length + 1];
+    }
+
     private int spreadOneHop(
         long tick,
         ToIntFunction<CellKey<D>> capacityAt,
         List<CellKey<D>> sources,
         BiPredicate<CellKey<D>, CellKey<D>> canTransfer
     ) {
-        Set<CellKey<D>> localKeys = new LinkedHashSet<>();
-        for (CellKey<D> source : sources) {
+        SpreadFrame<D> frame = spreadFramePool.poll();
+        if (frame == null) {
+            frame = new SpreadFrame<>();
+        }
+        try {
+            return spreadOneHop(frame, tick, capacityAt, sources, canTransfer);
+        } finally {
+            spreadFramePool.push(frame);
+        }
+    }
+
+    private int spreadOneHop(
+        SpreadFrame<D> frame,
+        long tick,
+        ToIntFunction<CellKey<D>> capacityAt,
+        List<CellKey<D>> sources,
+        BiPredicate<CellKey<D>, CellKey<D>> canTransfer
+    ) {
+        Set<CellKey<D>> localKeys = frame.localKeys;
+        localKeys.clear();
+        while (frame.neighborPool.size() < sources.size()) {
+            frame.neighborPool.add(new ArrayList<>(NEIGHBOR_OFFSETS.length));
+        }
+        for (int i = 0; i < sources.size(); i++) {
+            CellKey<D> source = sources.get(i);
+            List<CellKey<D>> validNeighbors = frame.neighborPool.get(i);
+            validNeighbors.clear();
             localKeys.add(source);
             for (CellKey<D> neighbor : neighbors(source)) {
-                if (canTransfer.test(source, neighbor)) localKeys.add(neighbor);
+                if (canTransfer.test(source, neighbor)) {
+                    validNeighbors.add(neighbor);
+                    localKeys.add(neighbor);
+                }
             }
         }
-        Map<CellKey<D>, Integer> capacitySnapshot = new HashMap<>();
+        Map<CellKey<D>, Integer> capacitySnapshot = frame.capacitySnapshot;
+        capacitySnapshot.clear();
         for (CellKey<D> key : localKeys) {
             capacitySnapshot.put(key, capacityAt.applyAsInt(key));
         }
-        Map<CellKey<D>, Integer> amountSnapshot = new HashMap<>();
+        Map<CellKey<D>, Integer> amountSnapshot = frame.amountSnapshot;
+        amountSnapshot.clear();
         for (CellKey<D> key : localKeys) {
             Cell<D> cell = cells.get(key);
             amountSnapshot.put(key, cell == null ? 0 : cell.amount);
         }
-        Map<TransferEdge<D>, Integer> proposals = new LinkedHashMap<>();
-        Map<CellKey<D>, Integer> incoming = new HashMap<>();
+        Map<TransferEdge<D>, Integer> proposals = frame.proposals;
+        proposals.clear();
+        Map<CellKey<D>, Integer> incoming = frame.incoming;
+        incoming.clear();
 
-        for (CellKey<D> sourceKey : sources) {
+        for (int i = 0; i < sources.size(); i++) {
+            CellKey<D> sourceKey = sources.get(i);
             int sourceAmount = amountSnapshot.getOrDefault(sourceKey, 0);
             int sourceCapacity = capacitySnapshot.get(sourceKey);
             if (sourceAmount <= 0 || sourceCapacity < 0) {
                 continue;
             }
 
-            List<CellKey<D>> neighborhood = new ArrayList<>();
-            List<Integer> capacities = new ArrayList<>();
+            List<CellKey<D>> neighborhood = frame.neighborhoodBuf;
+            List<Integer> capacities = frame.capacitiesBuf;
+            neighborhood.clear();
+            capacities.clear();
             neighborhood.add(sourceKey);
             capacities.add(boundedCapacity(sourceCapacity));
             long totalAmount = sourceAmount;
             int totalCapacity = boundedCapacity(sourceCapacity);
 
-            for (CellKey<D> neighbor : neighbors(sourceKey)) {
-                if (!canTransfer.test(sourceKey, neighbor)) {
-                    continue;
-                }
+            // Reuse the neighbor list already computed (and canTransfer-filtered) above instead
+            // of recomputing neighbors(sourceKey) and re-running canTransfer for this source.
+            for (CellKey<D> neighbor : frame.neighborPool.get(i)) {
                 int capacity = capacitySnapshot.get(neighbor);
                 if (capacity <= 0) {
                     continue;
@@ -368,9 +440,13 @@ public final class AtmosphereGrid<D> {
 
             int sourceTarget = weightedTarget(totalAmount, capacities.getFirst(), totalCapacity);
             int available = Math.max(0, sourceAmount - sourceTarget);
-            int[] deficits = new int[neighborhood.size()];
+            int neighborhoodSize = neighborhood.size();
+            if (frame.deficits.length < neighborhoodSize) {
+                frame.deficits = new int[neighborhoodSize];
+            }
+            int[] deficits = frame.deficits;
             int totalDeficit = 0;
-            for (int index = 1; index < neighborhood.size(); index++) {
+            for (int index = 1; index < neighborhoodSize; index++) {
                 CellKey<D> neighbor = neighborhood.get(index);
                 int neighborAmount = amountSnapshot.getOrDefault(neighbor, 0);
                 int target = weightedTarget(totalAmount, capacities.get(index), totalCapacity);
@@ -380,7 +456,7 @@ public final class AtmosphereGrid<D> {
             // Share a limited source proportionally; fixed face order must not favor X over Z.
             // Integer remainders stay at the source rather than favoring the first neighbor.
             int outgoing = Math.min(available, totalDeficit);
-            for (int index = 1; index < neighborhood.size() && outgoing > 0; index++) {
+            for (int index = 1; index < neighborhoodSize && outgoing > 0; index++) {
                 CellKey<D> neighbor = neighborhood.get(index);
                 int transfer = (int) ((long) outgoing * deficits[index] / totalDeficit);
                 if (transfer > 0) {
@@ -392,7 +468,8 @@ public final class AtmosphereGrid<D> {
 
         // Resolve competing sources together. Only pre-spread spare capacity is available,
         // so incoming material cannot be respent and source order cannot claim space first.
-        Map<CellKey<D>, Integer> deltas = new LinkedHashMap<>();
+        Map<CellKey<D>, Integer> deltas = frame.deltas;
+        deltas.clear();
         for (var proposal : proposals.entrySet()) {
             var edge = proposal.getKey();
             int requested = incoming.get(edge.destination);

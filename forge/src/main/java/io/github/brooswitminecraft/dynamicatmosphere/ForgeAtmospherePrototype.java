@@ -22,6 +22,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.levelgen.Heightmap;
@@ -35,6 +36,7 @@ import net.neoforged.neoforge.network.PacketDistributor;
 import java.util.Comparator;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Deque;
 import java.util.EnumMap;
 import java.util.EnumSet;
@@ -49,6 +51,10 @@ import java.util.UUID;
 import java.util.Optional;
 import java.util.Objects;
 import java.util.function.BiPredicate;
+import java.util.function.Function;
+import java.util.function.IntUnaryOperator;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.function.ToIntFunction;
 import org.slf4j.Logger;
 
@@ -335,9 +341,7 @@ final class ForgeAtmospherePrototype {
     void onChunkUnload(ChunkEvent.Unload event) {
         if (event.getLevel() instanceof ServerLevel level && event.getChunk() instanceof LevelChunk chunk) {
             Runnable unload = () -> {
-                ForgeAtmosphereCapacity.clear(chunk);
-                ForgeSmokeCapacity.clear(chunk);
-                ForgeMaterialCapacity.clear(chunk);
+                ForgeTerrainFacts.clear(chunk);
                 ChunkKey key = chunkKey(level, chunk);
                 pendingLoads.remove(key, chunk);
                 // MINECRAFT-435: an in-progress resumable section scan for this position must
@@ -535,9 +539,7 @@ final class ForgeAtmospherePrototype {
                 return count;
             }
             public void clearCapacities() {
-                ForgeAtmosphereCapacity.clear(state.chunk);
-                ForgeSmokeCapacity.clear(state.chunk);
-                ForgeMaterialCapacity.clear(state.chunk);
+                ForgeTerrainFacts.clear(state.chunk);
             }
         };
     }
@@ -1277,14 +1279,14 @@ final class ForgeAtmospherePrototype {
                 if (material == AtmosphereMaterial.NETHER_GAS) {
                     int size = material.cellSize();
                     netherGasGameplay.processTurn(cellLevel, origin,
-                        cellLevel.getEntitiesOfClass(net.minecraft.world.entity.LivingEntity.class,
+                        () -> cellLevel.getEntitiesOfClass(net.minecraft.world.entity.LivingEntity.class,
                             new net.minecraft.world.phys.AABB(origin).expandTowards(size - 1, size - 1, size - 1)));
                     dissipateHeavyGas(cellLevel, materialGrid, key, capacityAt);
                 }
                 if (material == AtmosphereMaterial.EXHAUST) {
                     int size = material.cellSize();
                     exhaustGameplay.processTurn(cellLevel, origin,
-                        cellLevel.getEntitiesOfClass(net.minecraft.world.entity.LivingEntity.class,
+                        () -> cellLevel.getEntitiesOfClass(net.minecraft.world.entity.LivingEntity.class,
                             new net.minecraft.world.phys.AABB(origin).expandTowards(size - 1, size - 1, size - 1)));
                     growPlants(cellLevel, materialGrid, key, size, capacityAt);
                     capacities.clear();
@@ -1482,22 +1484,24 @@ final class ForgeAtmospherePrototype {
             })) {
             var level = server.getLevel(chunkKey.dimension());
             var state = chunks.get(chunkKey);
-            var positions = ForgeFanTransport.activeFanPositions(state.chunk);
+            var fanCache = ForgeFanTransport.ChunkFanCache.forLevel(level, config.createFanTransportPerRpm());
+            var positions = fanCache.positionsInChunk(chunkKey.x(), chunkKey.z());
             if (positions.isEmpty()) continue;
-            if (state.readable) applyFanCells(level, positions, grid, AtmosphereGrid.CELL_SIZE,
+            if (state.readable) applyFanCells(level, positions, grid, AtmosphereGrid.CELL_SIZE, fanCache,
                 key -> capacityAt(level, key), (from, to) -> canTransferDown(server, from, to, false));
-            if (state.smokeReadable) applyFanCells(level, positions, smokeGrid, SmokeGridLayout.CELL_SIZE,
+            if (state.smokeReadable) applyFanCells(level, positions, smokeGrid, SmokeGridLayout.CELL_SIZE, fanCache,
                 key -> smokeCapacityAt(level, key), (from, to) -> canTransferDown(server, from, to, true));
             for (var material : AtmosphereMaterial.values()) {
                 if (state.materialReadable.contains(material)) applyFanCells(level, positions,
-                    materialGrids.get(material), material.cellSize(), key -> materialCapacityAt(level, material, key),
+                    materialGrids.get(material), material.cellSize(), fanCache,
+                    key -> materialCapacityAt(level, material, key),
                     (from, to) -> canMaterialTransferDown(server, material, from, to));
             }
         }
     }
 
     private void applyFanCells(ServerLevel level, List<BlockPos> positions,
-        AtmosphereGrid<ResourceKey<Level>> target, int size,
+        AtmosphereGrid<ResourceKey<Level>> target, int size, ForgeFanTransport.ChunkFanCache fanCache,
         ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacity,
         BiPredicate<AtmosphereGrid.CellKey<ResourceKey<Level>>, AtmosphereGrid.CellKey<ResourceKey<Level>>> canTransfer) {
         if (!AtmosphereFanTransport.supportsCellSize(size)) return;
@@ -1505,12 +1509,12 @@ final class ForgeAtmospherePrototype {
         for (var pos : positions) {
             var key = new AtmosphereGrid.CellKey<>(level.dimension(), Math.floorDiv(pos.getX(), size),
                 Math.floorDiv(pos.getY(), size), Math.floorDiv(pos.getZ(), size));
-            if (seen.add(key)) applyFans(level, target, key, size, capacity, canTransfer);
+            if (seen.add(key)) applyFans(level, target, key, size, fanCache, capacity, canTransfer);
         }
     }
 
     private void applyFans(ServerLevel level, AtmosphereGrid<ResourceKey<Level>> target,
-        AtmosphereGrid.CellKey<ResourceKey<Level>> source, int size,
+        AtmosphereGrid.CellKey<ResourceKey<Level>> source, int size, ForgeFanTransport.ChunkFanCache fanCache,
         ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacity,
         BiPredicate<AtmosphereGrid.CellKey<ResourceKey<Level>>, AtmosphereGrid.CellKey<ResourceKey<Level>>> canTransfer) {
         fanCellsChecked++;
@@ -1518,8 +1522,7 @@ final class ForgeAtmospherePrototype {
         int sourceCapacity = capacity.applyAsInt(source);
         if (sourceCapacity < 0) return;
         BlockPos origin = new BlockPos(source.x() * size, source.y() * size, source.z() * size);
-        for (var request : ForgeFanTransport.collect(level, origin, size,
-            tuning().integrations().createFanTransportPerRpm())) {
+        for (var request : fanCache.requestsInCell(origin, size)) {
             fanRequests++;
             var current = target.get(source);
             var directions = Direction.values();
@@ -2049,31 +2052,11 @@ final class ForgeAtmospherePrototype {
         }
         ChunkState state = ensureImported(level, AtmosphereGridLayout.chunkCoordinate(key.x()),
             AtmosphereGridLayout.chunkCoordinate(key.z()));
-        if (state == null || !state.readable) {
-            return -1;
-        }
-        var cached = ForgeAtmosphereCapacity.get(state.chunk);
-        int known = cached.get(key.x(), key.y(), key.z());
-        if (known >= 0) return known;
-        int size = AtmosphereGrid.CELL_SIZE;
-        int air = 0;
-        boolean bedrock = false;
-        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-        for (int y = 0; y < size; y++) {
-            for (int z = 0; z < size; z++) {
-                for (int x = 0; x < size; x++) {
-                    pos.set(key.x() * size + x, key.y() * size + y, key.z() * size + z);
-                    if (level.isInWorldBounds(pos)) {
-                        var block = state.chunk.getBlockState(pos);
-                        if (ForgeCapacityBlockClassifier.isEmptySpace(block)) air++;
-                        if (ForgeCapacityBlockClassifier.blocksDownwardTransfer(block)) bedrock = true;
-                    }
-                }
-            }
-        }
-        int capacity = AtmosphereGridLayout.capacityForAirBlocks(air);
-        cached.put(key.x(), key.y(), key.z(), capacity, bedrock);
-        return capacity;
+        if (state == null) return -1;
+        var facts = ForgeTerrainFacts.get(state.chunk);
+        return sharedCapacity(state.readable, facts, key.x(), key.y(), key.z(),
+            () -> scanCell(level, state.chunk, key.x(), key.y(), key.z(), AtmosphereGrid.CELL_SIZE),
+            AtmosphereGridLayout::capacityForAirBlocks);
     }
 
     private int smokeCapacityAt(ServerLevel level, AtmosphereGrid.CellKey<ResourceKey<Level>> key) {
@@ -2083,30 +2066,11 @@ final class ForgeAtmospherePrototype {
             || originY + SmokeGridLayout.CELL_SIZE <= level.getMinBuildHeight()) return 0;
         ChunkState state = ensureImported(level, SmokeGridLayout.chunkCoordinate(key.x()),
             SmokeGridLayout.chunkCoordinate(key.z()));
-        if (state == null || !state.smokeReadable) return -1;
-        var cache = ForgeSmokeCapacity.get(state.chunk);
-        int known = cache.get(key.x(), key.y(), key.z());
-        if (known >= 0) return known;
-        int air = 0;
-        boolean bedrock = false;
-        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-        for (int y = 0; y < SmokeGridLayout.CELL_SIZE; y++) {
-            for (int z = 0; z < SmokeGridLayout.CELL_SIZE; z++) {
-                for (int x = 0; x < SmokeGridLayout.CELL_SIZE; x++) {
-                    pos.set(key.x() * SmokeGridLayout.CELL_SIZE + x,
-                        key.y() * SmokeGridLayout.CELL_SIZE + y,
-                        key.z() * SmokeGridLayout.CELL_SIZE + z);
-                    if (level.isInWorldBounds(pos)) {
-                        var block = state.chunk.getBlockState(pos);
-                        if (ForgeCapacityBlockClassifier.isEmptySpace(block)) air++;
-                        if (ForgeCapacityBlockClassifier.blocksDownwardTransfer(block)) bedrock = true;
-                    }
-                }
-            }
-        }
-        int capacity = SmokeGridLayout.capacityForAirBlocks(air);
-        cache.put(key.x(), key.y(), key.z(), capacity, bedrock);
-        return capacity;
+        if (state == null) return -1;
+        var facts = ForgeTerrainFacts.get(state.chunk);
+        return sharedCapacity(state.smokeReadable, facts, key.x(), key.y(), key.z(),
+            () -> scanCell(level, state.chunk, key.x(), key.y(), key.z(), SmokeGridLayout.CELL_SIZE),
+            SmokeGridLayout::capacityForAirBlocks);
     }
 
     private int materialCapacityAt(
@@ -2119,27 +2083,58 @@ final class ForgeAtmospherePrototype {
         long originY = (long) key.y() * size;
         if (originY >= level.getMaxBuildHeight() || originY + size <= level.getMinBuildHeight()) return 0;
         ChunkState state = ensureImported(level, material.chunkCoordinate(key.x()), material.chunkCoordinate(key.z()));
-        if (state == null || !state.materialReadable.contains(material)) return -1;
-        MaterialCapacityCache cache = ForgeMaterialCapacity.get(state.chunk, material);
-        int known = cache.get(key.x(), key.y(), key.z());
-        if (known >= 0) return known;
+        if (state == null) return -1;
+        var facts = ForgeTerrainFacts.get(state.chunk);
+        return sharedCapacity(state.materialReadable.contains(material), facts, key.x(), key.y(), key.z(),
+            () -> scanCell(level, state.chunk, key.x(), key.y(), key.z(), size),
+            material::capacityForAirBlocks);
+    }
+
+    /**
+     * The production seam every one of Vapor/Smoke/material capacity lookups funnels through:
+     * an unreadable grid returns -1 regardless of what another grid has already warmed into the
+     * shared {@code facts} cache (so a warmed cache never authorizes an unreadable grid's capacity
+     * or downward transfer), and a readable grid derives its own capacity from the shared terrain
+     * facts, scanning (and caching) only when those facts are not already known.
+     */
+    static int sharedCapacity(
+        boolean readable,
+        TerrainFactsCache facts,
+        int cellX,
+        int cellY,
+        int cellZ,
+        Supplier<TerrainFactsCache.Scan> scan,
+        IntUnaryOperator capacityForAirBlocks
+    ) {
+        if (!readable) return -1;
+        int air = facts.emptyBlockCount(cellX, cellY, cellZ, scan);
+        return capacityForAirBlocks.applyAsInt(air);
+    }
+
+    private static TerrainFactsCache.Scan scanCell(
+        ServerLevel level,
+        LevelChunk chunk,
+        int cellX,
+        int cellY,
+        int cellZ,
+        int size
+    ) {
         int air = 0;
         boolean bedrock = false;
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         for (int y = 0; y < size; y++) {
             for (int z = 0; z < size; z++) {
                 for (int x = 0; x < size; x++) {
-                    pos.set(key.x() * size + x, key.y() * size + y, key.z() * size + z);
-                    if (!level.isInWorldBounds(pos)) continue;
-                    var block = state.chunk.getBlockState(pos);
-                    if (ForgeCapacityBlockClassifier.isEmptySpace(block)) air++;
-                    if (ForgeCapacityBlockClassifier.blocksDownwardTransfer(block)) bedrock = true;
+                    pos.set(cellX * size + x, cellY * size + y, cellZ * size + z);
+                    if (level.isInWorldBounds(pos)) {
+                        var block = chunk.getBlockState(pos);
+                        if (ForgeCapacityBlockClassifier.isEmptySpace(block)) air++;
+                        if (ForgeCapacityBlockClassifier.blocksDownwardTransfer(block)) bedrock = true;
+                    }
                 }
             }
         }
-        int capacity = material.capacityForAirBlocks(air);
-        cache.put(key.x(), key.y(), key.z(), capacity, bedrock);
-        return capacity;
+        return new TerrainFactsCache.Scan(air, bedrock);
     }
 
     private boolean canTransferDown(
@@ -2157,9 +2152,7 @@ final class ForgeAtmospherePrototype {
             (smoke ? SmokeGridLayout.chunkCoordinate(source.x()) : AtmosphereGridLayout.chunkCoordinate(source.x())),
             (smoke ? SmokeGridLayout.chunkCoordinate(source.z()) : AtmosphereGridLayout.chunkCoordinate(source.z()))));
         if (state == null) return false;
-        int bedrock = smoke
-            ? ForgeSmokeCapacity.get(state.chunk).downwardBarrier(source.x(), source.y(), source.z())
-            : ForgeAtmosphereCapacity.get(state.chunk).downwardBarrier(source.x(), source.y(), source.z());
+        int bedrock = ForgeTerrainFacts.get(state.chunk).downwardBarrier(source.x(), source.y(), source.z());
         return bedrock == 0;
     }
 
@@ -2176,7 +2169,7 @@ final class ForgeAtmospherePrototype {
         ChunkState state = chunks.get(new ChunkKey(source.dimension(), material.chunkCoordinate(source.x()),
             material.chunkCoordinate(source.z())));
         return state != null
-            && ForgeMaterialCapacity.get(state.chunk, material).downwardBarrier(source.x(), source.y(), source.z()) == 0;
+            && ForgeTerrainFacts.get(state.chunk).downwardBarrier(source.x(), source.y(), source.z()) == 0;
     }
 
     /**
@@ -2303,9 +2296,9 @@ final class ForgeAtmospherePrototype {
             flushMaterialDirtyChunks();
             previous.cells.keySet().forEach(grid::remove);
             previous.smokeCells.keySet().forEach(smokeGrid::remove);
-            for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
-                previous.materialCells.get(material).keySet().forEach(materialGrids.get(material)::remove);
-            }
+            // Material eviction is folded into reimportMaterialCells below so the old
+            // incarnation's eviction and the new incarnation's import for the same material run
+            // back-to-back as one seam -- see that method's Javadoc.
             // MINECRAFT-435: this chunk instance is being replaced WITHOUT an intervening
             // onChunkUnload callback (that path already calls clearScanCursors itself) -- any
             // resumable per-chunk state keyed by this position (section cursors, accumulated
@@ -2340,13 +2333,11 @@ final class ForgeAtmospherePrototype {
                 level.dimension().location(), exception.getMessage());
         }
         for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
+            Map<AtmosphereGrid.CellKey<ResourceKey<Level>>, MaterialChunkData.Cell> previousMaterialCells =
+                previous == null ? null : previous.materialCells.get(material);
             try {
-                for (MaterialChunkData.Cell cell : ForgeMaterialStorage.read(chunk, material)) {
-                    var cellKey = new AtmosphereGrid.CellKey<>(level.dimension(), cell.x(), cell.y(), cell.z());
-                    state.materialCells.get(material).put(cellKey, cell);
-                    materialGrids.get(material).restore(new AtmosphereGrid.Cell<>(
-                        cellKey, cell.amount(), 0, Long.MIN_VALUE, serverTicks), serverTicks);
-                }
+                reimportMaterialCells(materialGrids.get(material), level.dimension(), chunk, material,
+                    previousMaterialCells, state.materialCells.get(material), serverTicks);
             } catch (IllegalStateException exception) {
                 state.materialReadable.remove(material);
                 LOGGER.warn("Skipping {} simulation for chunk {} in {}: {}", material.id(), chunk.getPos(),
@@ -2354,6 +2345,49 @@ final class ForgeAtmospherePrototype {
             }
         }
         return state;
+    }
+
+    /**
+     * MINECRAFT-437 review follow-up: the material-persistence half of {@link #ensureImported}'s
+     * old-incarnation-swap sequence for one material -- evict the old incarnation's cells (if any)
+     * from the live grid, then import the new incarnation's own stored cells via
+     * {@link ForgeMaterialStorage#read} and restore them into the grid. Extracted as a standalone
+     * method operating on real production types ({@link AtmosphereGrid}, {@link ChunkAccess},
+     * {@link ForgeMaterialStorage}) with no {@code ChunkState}/{@code LevelChunk}/
+     * {@code ServerLevel} dependency, so {@code MaterialIncarnationSwapSeamTest} can call it
+     * directly with two {@code ProtoChunk}-backed incarnations at the same coordinates -- this
+     * repo's test suite has no {@code ServerLevel} stand-in to drive {@link #ensureImported} itself
+     * end to end (see {@code ForgeAtmospherePrototypeFreezeGateTest}'s class Javadoc), so the global
+     * {@link #flushDirtyChunks}/{@link #flushSmokeDirtyChunks}/{@link #flushMaterialDirtyChunks}
+     * calls that precede this swap in {@code ensureImported} (and already persist a dirty old
+     * incarnation before it is evicted) remain covered separately: by this method's caller for
+     * wiring, and by {@code MaterialDirtyChunkCollectorTest}/
+     * {@code ForgeMaterialStorageProductionChunkTest} for the real collector and
+     * {@code writeBatch} pieces that compose them.
+     *
+     * @param previousMaterialCells the old incarnation's persisted-cells map for this material, or
+     *     {@code null} if there was no old incarnation at these coordinates (a first import)
+     * @param newMaterialCells the new incarnation's (initially empty) persisted-cells map for this
+     *     material, mutated in place exactly as production's inline import loop previously did
+     */
+    static void reimportMaterialCells(
+        AtmosphereGrid<ResourceKey<Level>> materialGrid,
+        ResourceKey<Level> dimension,
+        ChunkAccess newChunk,
+        AtmosphereMaterial material,
+        Map<AtmosphereGrid.CellKey<ResourceKey<Level>>, MaterialChunkData.Cell> previousMaterialCells,
+        Map<AtmosphereGrid.CellKey<ResourceKey<Level>>, MaterialChunkData.Cell> newMaterialCells,
+        long serverTicks
+    ) {
+        if (previousMaterialCells != null) {
+            previousMaterialCells.keySet().forEach(materialGrid::remove);
+        }
+        for (MaterialChunkData.Cell cell : ForgeMaterialStorage.read(newChunk, material)) {
+            var cellKey = new AtmosphereGrid.CellKey<>(dimension, cell.x(), cell.y(), cell.z());
+            newMaterialCells.put(cellKey, cell);
+            materialGrid.restore(new AtmosphereGrid.Cell<>(cellKey, cell.amount(), 0, Long.MIN_VALUE, serverTicks),
+                serverTicks);
+        }
     }
 
     private void flushDirtyChunks() {
@@ -2418,40 +2452,103 @@ final class ForgeAtmospherePrototype {
         }
     }
 
+    /**
+     * MINECRAFT-437: collects every dirty material across all materials' grids first, grouped by
+     * chunk, so a chunk with several materials dirty in the same flush gets exactly one batched
+     * {@link ForgeMaterialStorage#writeBatch} publish instead of one {@code write} per material.
+     *
+     * <p>Per material, the actual drain-and-materialize work is delegated to
+     * {@link #collectMaterialDirtyChunkUpdates}, which is the piece
+     * {@code MaterialDirtyChunkCollectorTest} pins directly: exactly one {@link List#copyOf} per
+     * (chunk, material) pair that had at least one dirty cell in this flush, not one per dirty
+     * cell -- mirroring the pre-batching behavior, which collected a per-material
+     * {@code dirtyChunks} set before copying once per changed chunk/material.
+     */
     private void flushMaterialDirtyChunks() {
+        Map<ChunkKey, Map<AtmosphereMaterial, List<MaterialChunkData.Cell>>> perChunkUpdates = new LinkedHashMap<>();
         for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
             AtmosphereGrid<ResourceKey<Level>> materialGrid = materialGrids.get(material);
-            Set<ChunkKey> dirtyChunks = new LinkedHashSet<>();
-            for (var key : materialGrid.drainDirtyKeys()) {
-                ChunkKey chunkKey = new ChunkKey(key.dimension(), material.chunkCoordinate(key.x()),
-                    material.chunkCoordinate(key.z()));
-                ChunkState state = chunks.get(chunkKey);
-                if (state == null || !state.materialReadable.contains(material)) continue;
-                var persistedCells = state.materialCells.get(material);
-                var cell = materialGrid.get(key);
-                if (cell == null) {
-                    if (persistedCells.remove(key) == null) continue;
-                } else {
-                    var persisted = persistedCells.get(key);
-                    if (persisted != null && persisted.amount() == cell.amount()) continue;
-                    persistedCells.put(key,
-                        new MaterialChunkData.Cell(key.x(), key.y(), key.z(), cell.amount()));
-                }
-                dirtyChunks.add(chunkKey);
-            }
-            for (ChunkKey key : dirtyChunks) {
-                ChunkState state = chunks.get(key);
-                try {
-                    ForgeMaterialStorage.write(state.chunk, material,
-                        List.copyOf(state.materialCells.get(material).values()));
-                } catch (IllegalStateException exception) {
-                    state.materialReadable.remove(material);
-                    state.materialCells.get(material).keySet().forEach(materialGrid::remove);
-                    LOGGER.warn("Preserving unreadable {} data for chunk {} in {}: {}", material.id(),
-                        state.chunk.getPos(), key.dimension().location(), exception.getMessage());
-                }
+            Map<ChunkKey, List<MaterialChunkData.Cell>> updates = collectMaterialDirtyChunkUpdates(
+                materialGrid.drainDirtyKeys(),
+                key -> new ChunkKey(key.dimension(), material.chunkCoordinate(key.x()),
+                    material.chunkCoordinate(key.z())),
+                chunkKey -> {
+                    ChunkState state = chunks.get(chunkKey);
+                    return state != null && state.materialReadable.contains(material);
+                },
+                key -> {
+                    var cell = materialGrid.get(key);
+                    return cell == null ? null : cell.amount();
+                },
+                chunkKey -> chunks.get(chunkKey).materialCells.get(material),
+                List::copyOf);
+            for (var entry : updates.entrySet()) {
+                perChunkUpdates.computeIfAbsent(entry.getKey(), unused -> new EnumMap<>(AtmosphereMaterial.class))
+                    .put(material, entry.getValue());
             }
         }
+        for (var entry : perChunkUpdates.entrySet()) {
+            ChunkKey key = entry.getKey();
+            ChunkState state = chunks.get(key);
+            Map<AtmosphereMaterial, IllegalStateException> failures =
+                ForgeMaterialStorage.writeBatch(state.chunk, entry.getValue());
+            for (var failure : failures.entrySet()) {
+                AtmosphereMaterial material = failure.getKey();
+                state.materialReadable.remove(material);
+                state.materialCells.get(material).keySet().forEach(materialGrids.get(material)::remove);
+                LOGGER.warn("Preserving unreadable {} data for chunk {} in {}: {}", material.id(),
+                    state.chunk.getPos(), key.dimension().location(), failure.getValue().getMessage());
+            }
+        }
+    }
+
+    /**
+     * MINECRAFT-437: the per-material dirty-key drain and per-touched-chunk materialization at
+     * the heart of {@link #flushMaterialDirtyChunks()}, extracted as a standalone, dimension-type-
+     * agnostic method so {@code MaterialDirtyChunkCollectorTest} can pin its {@code materialize}
+     * (production: {@link List#copyOf}) call cardinality with plain maps -- no {@code ChunkState},
+     * {@code AtmosphereGrid}, or {@code LevelChunk} required.
+     *
+     * <p>For each key in {@code dirtyKeys}: resolves its chunk via {@code toChunkKey}, skips it if
+     * {@code isTrackedAndReadable} rejects that chunk, then updates the chunk's persisted-cells map
+     * (obtained via {@code persistedCellsFor}, which must return a stable, mutable, non-null map
+     * for any accepted chunk key) exactly as the inline loop previously did: remove the key if
+     * {@code currentAmount} returns {@code null}, skip if the stored amount is already equal to the
+     * live amount, otherwise upsert it. Only the <em>chunk key</em> of each touched dirty key is
+     * recorded while draining -- never the persisted-cells snapshot itself. Once every dirty key has
+     * been drained, each distinct touched chunk is visited exactly once to call
+     * {@code materialize} on its persisted-cells map and record the result -- so {@code materialize}
+     * runs exactly once per (chunk) that had at least one net change from this batch of dirty keys,
+     * regardless of how many of that chunk's keys were dirty.
+     */
+    static <D> Map<ChunkKey, List<MaterialChunkData.Cell>> collectMaterialDirtyChunkUpdates(
+        Iterable<AtmosphereGrid.CellKey<D>> dirtyKeys,
+        Function<AtmosphereGrid.CellKey<D>, ChunkKey> toChunkKey,
+        Predicate<ChunkKey> isTrackedAndReadable,
+        Function<AtmosphereGrid.CellKey<D>, Integer> currentAmount,
+        Function<ChunkKey, Map<AtmosphereGrid.CellKey<D>, MaterialChunkData.Cell>> persistedCellsFor,
+        Function<Collection<MaterialChunkData.Cell>, List<MaterialChunkData.Cell>> materialize
+    ) {
+        Set<ChunkKey> touchedChunks = new LinkedHashSet<>();
+        for (AtmosphereGrid.CellKey<D> key : dirtyKeys) {
+            ChunkKey chunkKey = toChunkKey.apply(key);
+            if (!isTrackedAndReadable.test(chunkKey)) continue;
+            Map<AtmosphereGrid.CellKey<D>, MaterialChunkData.Cell> persistedCells = persistedCellsFor.apply(chunkKey);
+            Integer amount = currentAmount.apply(key);
+            if (amount == null) {
+                if (persistedCells.remove(key) == null) continue;
+            } else {
+                var persisted = persistedCells.get(key);
+                if (persisted != null && persisted.amount() == amount) continue;
+                persistedCells.put(key, new MaterialChunkData.Cell(key.x(), key.y(), key.z(), amount));
+            }
+            touchedChunks.add(chunkKey);
+        }
+        Map<ChunkKey, List<MaterialChunkData.Cell>> result = new LinkedHashMap<>();
+        for (ChunkKey chunkKey : touchedChunks) {
+            result.put(chunkKey, materialize.apply(persistedCellsFor.apply(chunkKey).values()));
+        }
+        return result;
     }
 
     private static ChunkKey chunkKey(ServerLevel level, LevelChunk chunk) {
@@ -2481,7 +2578,9 @@ final class ForgeAtmospherePrototype {
         return Optional.of(result.completedScan());
     }
 
-    private record ChunkKey(ResourceKey<Level> dimension, int x, int z) {
+    // Package-visible (not private) solely so MaterialDirtyChunkCollectorTest -- which pins the
+    // List.copyOf cardinality of collectMaterialDirtyChunkUpdates below -- can name this type.
+    record ChunkKey(ResourceKey<Level> dimension, int x, int z) {
     }
 
     static final class DumpReport {
