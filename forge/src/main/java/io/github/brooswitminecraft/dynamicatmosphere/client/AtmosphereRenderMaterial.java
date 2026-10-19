@@ -46,7 +46,13 @@ enum AtmosphereRenderMaterial {
     }
 
     DynamicAtmosphereClientConfig.Material tuning() {
-        var config = DynamicAtmosphereClientConfig.snapshot();
+        return tuning(DynamicAtmosphereClientConfig.snapshot());
+    }
+
+    /** Same lookup, with the config snapshot given explicitly so a per-frame caller reads the
+     *  one snapshot it already captured for the whole frame, rather than each material call
+     *  taking its own independent (and potentially differently-timed) snapshot. */
+    DynamicAtmosphereClientConfig.Material tuning(DynamicAtmosphereClientConfig.Snapshot config) {
         return switch (this) {
             case VAPOR -> config.vapor();
             case SMOKE -> config.smoke();
@@ -63,10 +69,16 @@ enum AtmosphereRenderMaterial {
     }
 
     float channel(int channel, float[] fog) {
+        return channel(channel, fog, DynamicAtmosphereClientConfig.snapshot());
+    }
+
+    /** Same channel lookup, with the config snapshot given explicitly; see {@link #tuning(
+     *  DynamicAtmosphereClientConfig.Snapshot)}. */
+    float channel(int channel, float[] fog, DynamicAtmosphereClientConfig.Snapshot config) {
         // Reads the CLIENT CONFIG colour, not this enum's own rgb literal: the literal is
         // the catalog default only (see class javadoc re: the smokeOpticalDensity trap).
         if (this == VAPOR) return fog[channel];
-        int colour = tuning().color();
+        int colour = tuning(config).color();
         return ((colour >> (16 - 8 * channel)) & 255) / 255f;
     }
 

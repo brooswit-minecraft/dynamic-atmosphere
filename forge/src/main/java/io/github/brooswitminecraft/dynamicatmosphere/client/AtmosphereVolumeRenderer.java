@@ -1,6 +1,6 @@
 package io.github.brooswitminecraft.dynamicatmosphere.client;
 
-import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -51,21 +51,30 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
         renderedCellCount = 0;
         renderedSliceCount = 0;
         renderedCoarseCount = 0;
-        if (!io.github.brooswitminecraft.dynamicatmosphere.DynamicAtmosphereClientConfig.snapshot().enabled()) return;
+        // MINECRAFT-432: one config snapshot for the whole frame, threaded explicitly into every
+        // material/cell below, instead of each of them independently calling snapshot() -- a
+        // config reload mid-frame can no longer make one material/cell see different tuning than
+        // another within the same frame (the acceptance criterion this preserves).
+        var config = io.github.brooswitminecraft.dynamicatmosphere.DynamicAtmosphereClientConfig.snapshot();
+        if (!config.enabled()) return;
         if (cache.size() == 0 && materials.values().stream().allMatch(session -> session.cache().size() == 0)) return;
         var position = event.getCamera().getPosition();
         var look = event.getCamera().getLookVector();
         var camera = new AtmosphereVolumeGeometry.Point(position.x, position.y, position.z);
         var forward = new AtmosphereVolumeGeometry.Point(look.x(), look.y(), look.z());
+        // MINECRAFT-432: one normalized camera-facing basis for the whole frame, instead of
+        // every visible volume's geometry generation renormalizing the same look vector and
+        // rebuilding the same right/up cross products.
+        var basis = AtmosphereVolumeGeometry.Basis.of(forward);
         // LevelRenderer installs FogRenderer's biome/weather/dimension color before this stage.
         // Captured once, up front, so every material this frame (including VAPOR's own
         // fog-darkness opacity boost, see visit()) reads the exact same fog snapshot used
         // for VAPOR's RGB -- never a later/different sample.
         float[] fogColor = RenderSystem.getShaderFogColor().clone();
-        var celestial = celestialFrame(event, level, forward);
+        var celestial = celestialFrame(event, level, forward, config);
         var ordered = new AtmosphereSliceOrder();
         for (var entry : materials.entrySet()) {
-            visit(event, level, entry.getValue().cache(), camera, forward, entry.getKey(), fogColor,
+            visit(event, level, entry.getValue().cache(), camera, basis, entry.getKey(), fogColor, config,
                 slices -> ordered.add(slices, entry.getKey()));
         }
         boolean mixed = !ordered.isEmpty();
@@ -77,12 +86,12 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
         var shader = RenderSystem.getShader();
         RenderSystem.setShaderColor(1, 1, 1, 1);
         try {
-            var batch = new Batch(fogColor, celestial);
+            var batch = new Batch(fogColor, celestial, config);
             // AFTER_PARTICLES already has the event model-view rotation on RenderSystem's
             // stack. These vertices are camera-relative: do not apply that matrix twice.
             // Keep the constant-RGB vapor path unsorted when no other material is visible.
             // Otherwise merge slices, not volume centers: materials can overlap.
-            visit(event, level, cache, camera, forward, AtmosphereRenderMaterial.VAPOR, fogColor, slices -> {
+            visit(event, level, cache, camera, basis, AtmosphereRenderMaterial.VAPOR, fogColor, config, slices -> {
                 if (mixed) ordered.add(slices, AtmosphereRenderMaterial.VAPOR);
                 else for (var slice : slices) batch.draw(slice, AtmosphereRenderMaterial.VAPOR);
             });
@@ -103,12 +112,12 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
     }
 
     private static void visit(RenderLevelStageEvent event, ClientLevel level, AtmosphereClientCache cache,
-                              AtmosphereVolumeGeometry.Point camera, AtmosphereVolumeGeometry.Point forward,
+                              AtmosphereVolumeGeometry.Point camera, AtmosphereVolumeGeometry.Basis basis,
                               AtmosphereRenderMaterial material, float[] fogColor,
+                              io.github.brooswitminecraft.dynamicatmosphere.DynamicAtmosphereClientConfig.Snapshot config,
                               Consumer<List<AtmosphereVolumeGeometry.Slice>> consume) {
         int viewChunks = Minecraft.getInstance().options.getEffectiveRenderDistance();
-        var tuning = material.tuning();
-        var config = io.github.brooswitminecraft.dynamicatmosphere.DynamicAtmosphereClientConfig.snapshot();
+        var tuning = material.tuning(config);
         double maxDistanceMultiplier = config.maxDistanceMultiplier();
         double viewBlocks = Math.max(1, viewChunks) * 16.0;
         double maxDistance = viewBlocks * maxDistanceMultiplier;
@@ -131,32 +140,24 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
                     AtmosphereLodHierarchy.horizontalDistanceSquared(cell, camera.x(), camera.z()));
                 float fade = AtmosphereVolumeGeometry.fadeMultiplier(horizontalDistance, fadeStart, maxDistance);
                 if (fade <= 0) continue;
-                var slices = AtmosphereVolumeGeometry.lodSlices(cell, cell.amount(tick), camera, forward,
-                    tuning.opticalDensity());
+                // MINECRAFT-432: Vapor's fog-darkness opacity boost (extra optical density) and
+                // distance fade (a plain post-hoc alpha multiply) must combine in that exact
+                // order -- see AtmosphereRenderMaterial#vaporSliceAlpha -- every other material's
+                // fade behaviour is unchanged. Folded into an AlphaAdjust hook that lodSlices
+                // applies at slice-generation time, instead of copying the returned list a
+                // second time afterward just to rewrite every slice's alpha.
+                AtmosphereVolumeGeometry.AlphaAdjust alphaAdjust = material == AtmosphereRenderMaterial.VAPOR
+                    ? rawAlpha -> AtmosphereRenderMaterial.vaporSliceAlpha(
+                        rawAlpha, fade, fogColor, config.vaporDarknessOpacityBoost())
+                    : fade < 1 ? rawAlpha -> rawAlpha * fade : rawAlpha -> rawAlpha;
+                var slices = AtmosphereVolumeGeometry.lodSlices(cell, cell.amount(tick), camera, basis,
+                    tuning.opticalDensity(), config.slicesPerBaseCell(), alphaAdjust);
                 // Farthest-corner check, horizontal only: decides whether any part of this
                 // cell's box can extend past the cylindrical reach and needs clipping.
                 double dx = Math.max(Math.abs(cell.blockX() - camera.x()), Math.abs(cell.blockX() + cell.size() - camera.x()));
                 double dz = Math.max(Math.abs(cell.blockZ() - camera.z()), Math.abs(cell.blockZ() + cell.size() - camera.z()));
                 if (dx * dx + dz * dz > maxDistance * maxDistance) {
                     slices = AtmosphereVolumeGeometry.clipToReach(slices, maxDistance);
-                }
-                // MINECRAFT-387: Vapor's fog-darkness opacity boost (extra optical density) and
-                // distance fade (a plain post-hoc alpha multiply) must combine in that exact
-                // order -- see AtmosphereRenderMaterial#vaporSliceAlpha. Every other material's
-                // fade behaviour is unchanged.
-                if (material == AtmosphereRenderMaterial.VAPOR) {
-                    var adjusted = new ArrayList<AtmosphereVolumeGeometry.Slice>(slices.size());
-                    for (var slice : slices) {
-                        adjusted.add(new AtmosphereVolumeGeometry.Slice(slice.depth(),
-                            AtmosphereRenderMaterial.vaporSliceAlpha(slice.alpha(), fade, fogColor), slice.vertices()));
-                    }
-                    slices = adjusted;
-                } else if (fade < 1) {
-                    var faded = new ArrayList<AtmosphereVolumeGeometry.Slice>(slices.size());
-                    for (var slice : slices) {
-                        faded.add(new AtmosphereVolumeGeometry.Slice(slice.depth(), slice.alpha() * fade, slice.vertices()));
-                    }
-                    slices = faded;
                 }
                 if (!slices.isEmpty()) {
                     if (cell.level > 0) renderedCoarseCount++;
@@ -170,18 +171,29 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
     private static final class Batch {
         private final float[] fogColor;
         private final CelestialFrame celestial;
+        private final io.github.brooswitminecraft.dynamicatmosphere.DynamicAtmosphereClientConfig.Snapshot config;
+        // MINECRAFT-432: final RGB depends only on material and this frame's fog/celestial
+        // state, never on slice position -- computed once per visible material (lazily, the
+        // first time that material is drawn this frame) and reused for every slice of it,
+        // instead of recomputing per slice.
+        private final Map<AtmosphereRenderMaterial, float[]> rgbByMaterial = new EnumMap<>(AtmosphereRenderMaterial.class);
         private VertexConsumer vertices;
         private int slices;
-        Batch(float[] fogColor, CelestialFrame celestial) { this.fogColor = fogColor; this.celestial = celestial; }
+        Batch(float[] fogColor, CelestialFrame celestial,
+              io.github.brooswitminecraft.dynamicatmosphere.DynamicAtmosphereClientConfig.Snapshot config) {
+            this.fogColor = fogColor;
+            this.celestial = celestial;
+            this.config = config;
+        }
 
         void draw(AtmosphereVolumeGeometry.Slice slice, AtmosphereRenderMaterial material) {
             if (vertices == null) vertices = buffers.getBuffer(VOLUME);
-            float[] rgb = {material.channel(0, fogColor), material.channel(1, fogColor), material.channel(2, fogColor)};
             // MINECRAFT-399: blend toward the sun/moon tint colour on top of the material's own
             // base colour, shared by every material (including Vapor's fog-derived base) -- see
             // CelestialTint for the weight curve and why this is a bounded convex combination,
             // never an override.
-            rgb = celestial.apply(rgb);
+            float[] rgb = rgbByMaterial.computeIfAbsent(material, m -> celestial.apply(new float[] {
+                m.channel(0, fogColor, config), m.channel(1, fogColor, config), m.channel(2, fogColor, config)}));
             float r = rgb[0], g = rgb[1], b = rgb[2];
             // MINECRAFT-387: Vapor's fog-darkness opacity boost is already baked into
             // slice.alpha() by visit() (applied before distance fade -- see there); every
@@ -193,7 +205,7 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
                 vertex(vertices, polygon.get(i + 1), slice.alpha(), r, g, b);
             }
             renderedSliceCount++;
-            if (++slices >= io.github.brooswitminecraft.dynamicatmosphere.DynamicAtmosphereClientConfig.snapshot().slicesPerBatch()) flush();
+            if (++slices >= config.slicesPerBatch()) flush();
         }
 
         void flush() {
@@ -204,16 +216,27 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
     }
 
     /**
-     * MINECRAFT-399: per-frame sun/moon tint inputs, computed once and shared by every
-     * material/slice this frame rather than per-vertex (the blend depends only on the camera's
-     * fixed look direction and the frame's sun angle/visibility, never on slice position).
+     * MINECRAFT-399/432: per-frame sun/moon tint inputs. The weights depend only on the camera's
+     * fixed look direction and the frame's sun angle/visibility/strength, never on which material
+     * or slice is being drawn -- so they are computed exactly ONCE per frame (in
+     * {@link #celestialFrame}) rather than once per material (previously recomputed on every
+     * {@code apply()} call, i.e. every slice). {@code apply()} itself is left doing only the
+     * (cheap, material-specific) blend.
      */
-    private record CelestialFrame(CelestialTint.Vector look, CelestialTint.Vector sunDir, CelestialTint.Vector moonDir,
-                                  double sunVisibility, double moonVisibility, double maxStrength,
-                                  float[] sunColor, float[] moonColor) {
+    private record CelestialFrame(double sunWeight, double moonWeight, float[] sunColor, float[] moonColor) {
         float[] apply(float[] base) {
-            double sunWeight = CelestialTint.weight(look, sunDir, sunVisibility, maxStrength);
-            double moonWeight = CelestialTint.weight(look, moonDir, moonVisibility, maxStrength);
+            // MINECRAFT-432: this is the only safe place to "skip tint calculations when
+            // configured strength is zero" (celestialTintMaxStrength <= 0 forces both weights to
+            // 0 via CelestialTint#weight's clampedStrength factor, so blend() would be a provable
+            // no-op) -- NOT by short-circuiting celestialFrame's own sampling/smoothing above.
+            // Skipping the sampling/state update there instead would freeze
+            // sunVisibilityState/moonVisibilityState while disabled; a changed occlusion/weather
+            // during that freeze is lost, so re-enabling replays stale visibility through
+            // VISIBILITY_SMOOTHING_STEP instead of tracking what actually changed (caught in
+            // review). Skipping only the blend here, after sampling/state always ran, has no such
+            // risk: it changes nothing about what gets stored, only avoids recomputing a result
+            // already known to equal base.
+            if (sunWeight <= 0 && moonWeight <= 0) return base;
             return CelestialTint.blend(base, sunColor, sunWeight, moonColor, moonWeight);
         }
     }
@@ -281,8 +304,17 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
      * checked either way.
      */
     private static CelestialFrame celestialFrame(RenderLevelStageEvent event, ClientLevel level,
-                                                  AtmosphereVolumeGeometry.Point forward) {
-        var config = io.github.brooswitminecraft.dynamicatmosphere.DynamicAtmosphereClientConfig.snapshot();
+                                                  AtmosphereVolumeGeometry.Point forward,
+                                                  io.github.brooswitminecraft.dynamicatmosphere.DynamicAtmosphereClientConfig.Snapshot config) {
+        double maxStrength = config.celestialTintMaxStrength();
+        float[] sunColor = unpack(config.sunTintColor());
+        float[] moonColor = unpack(config.moonTintColor());
+        // MINECRAFT-432: sampling/smoothing below runs EVERY frame, strength 0 included -- see
+        // CelestialFrame#apply for where strength-0 tint math is actually (and safely) skipped,
+        // and why skipping it HERE instead would corrupt resumed visibility state (caught in
+        // review): an occlusion/weather change while strength is 0 would otherwise go unsampled
+        // and be lost, so re-enabling the tint would replay stale brightness/darkness through
+        // VISIBILITY_SMOOTHING_STEP instead of reflecting what actually changed while disabled.
         double len = Math.sqrt(forward.dot(forward));
         var look = len > 0 && Double.isFinite(len)
             ? new CelestialTint.Vector(forward.x() / len, forward.y() / len, forward.z() / len)
@@ -306,8 +338,11 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
         }
         sunVisibilityState = CelestialTint.smoothTowards(sunVisibilityState, sunRaw, VISIBILITY_SMOOTHING_STEP);
         moonVisibilityState = CelestialTint.smoothTowards(moonVisibilityState, moonRaw, VISIBILITY_SMOOTHING_STEP);
-        return new CelestialFrame(look, sunDir, moonDir, sunVisibilityState, moonVisibilityState,
-            config.celestialTintMaxStrength(), unpack(config.sunTintColor()), unpack(config.moonTintColor()));
+        // MINECRAFT-432: computed once here, per frame -- shared by every material's apply()
+        // call below instead of each one recomputing the same weight.
+        double sunWeight = CelestialTint.weight(look, sunDir, sunVisibilityState, maxStrength);
+        double moonWeight = CelestialTint.weight(look, moonDir, moonVisibilityState, maxStrength);
+        return new CelestialFrame(sunWeight, moonWeight, sunColor, moonColor);
     }
 
     /** See {@link #celestialFrame}'s javadoc for the occlusion model this implements. */

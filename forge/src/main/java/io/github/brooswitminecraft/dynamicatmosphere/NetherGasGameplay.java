@@ -1,5 +1,9 @@
 package io.github.brooswitminecraft.dynamicatmosphere;
 
+import java.util.Optional;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.effect.MobEffectInstance;
@@ -53,22 +57,46 @@ public final class NetherGasGameplay {
         onPassiveBlockSample(level, pos, chunk.getBlockState(pos));
     }
 
-    /** Called once for a processed Nether Gas cell whose exposed entities are supplied by the caller. */
-    public void processTurn(ServerLevel level, BlockPos cellOrigin, Iterable<? extends LivingEntity> entities) {
-        DynamicAtmosphereServerConfig.NetherGas config = DynamicAtmosphereServerConfig.snapshot().netherGas();
-        DynamicAtmosphereMod.materialState(level, AtmosphereMaterial.NETHER_GAS, cellOrigin).ifPresent(state -> {
-            CellEffect effect = effectFor(state.amount(), state.capacity(), config.mildFullness(), config.dangerousFullness());
+    /**
+     * ServerLevel-independent seam {@link #processTurn} delegates to: {@code targetsSupplier} is
+     * invoked exactly once when {@code state} makes an effect eligible, and never otherwise, so
+     * this proves the production entry point's entity-query boundary without needing a real
+     * ServerLevel/LivingEntity (none is available in this test suite). Generic over the target
+     * type and operations purely to stay testable -- production passes {@code LivingEntity} and
+     * its own methods directly, with no per-entity wrapper allocation.
+     */
+    static <T> void runEligible(
+        Optional<AtmosphereMaterialState> state, double mildFullness, double dangerousFullness,
+        Supplier<? extends Iterable<? extends T>> targetsSupplier,
+        Predicate<? super T> isAlive, Consumer<? super T> applyMild, Consumer<? super T> applyDangerous
+    ) {
+        state.ifPresent(s -> {
+            CellEffect effect = effectFor(s.amount(), s.capacity(), mildFullness, dangerousFullness);
             if (!effect.active()) return;
-            for (LivingEntity entity : entities) {
-                if (!entity.isAlive()) continue;
-                if (effect.mild()) {
-                    entity.addEffect(new MobEffectInstance(MobEffects.CONFUSION, EFFECT_DURATION_TICKS, MILD_AMPLIFIER));
-                }
-                if (effect.dangerous()) {
-                    entity.addEffect(new MobEffectInstance(MobEffects.POISON, EFFECT_DURATION_TICKS, DANGEROUS_AMPLIFIER));
-                }
+            for (T target : targetsSupplier.get()) {
+                if (!isAlive.test(target)) continue;
+                if (effect.mild()) applyMild.accept(target);
+                if (effect.dangerous()) applyDangerous.accept(target);
             }
         });
+    }
+
+    /**
+     * Called once for a processed Nether Gas cell. The entity supplier is only invoked when the
+     * cell's amount/capacity make an effect eligible, so inactive cells never issue the
+     * underlying living-entity spatial query.
+     */
+    public void processTurn(
+        ServerLevel level, BlockPos cellOrigin, Supplier<Iterable<? extends LivingEntity>> entitiesSupplier
+    ) {
+        DynamicAtmosphereServerConfig.NetherGas config = DynamicAtmosphereServerConfig.snapshot().netherGas();
+        runEligible(
+            DynamicAtmosphereMod.materialState(level, AtmosphereMaterial.NETHER_GAS, cellOrigin),
+            config.mildFullness(), config.dangerousFullness(),
+            entitiesSupplier,
+            LivingEntity::isAlive,
+            entity -> entity.addEffect(new MobEffectInstance(MobEffects.CONFUSION, EFFECT_DURATION_TICKS, MILD_AMPLIFIER)),
+            entity -> entity.addEffect(new MobEffectInstance(MobEffects.POISON, EFFECT_DURATION_TICKS, DANGEROUS_AMPLIFIER)));
     }
 
     private NetherGasGameplay() { }
