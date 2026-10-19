@@ -121,112 +121,123 @@ class PortalTransferSinkTest {
         assertEquals(8, box[3]);
     }
 
-    /** {@link PortalTransferSink#knownPositionsWindowed} requires a {@link java.util.NavigableMap}, matching production. */
-    private static Map<ResourceKey<Level>, java.util.NavigableMap<Long, Set<BlockPos>>> navigableRegistryOf(
-        ResourceKey<Level> dimension, Map<ChunkPos, Set<BlockPos>> byChunk
-    ) {
+    /** {@link PortalTransferSink#advanceEndCandidateScan} requires a {@link java.util.NavigableMap}, matching production. */
+    private static java.util.NavigableMap<Long, Set<BlockPos>> navigableRegistryOf(Map<ChunkPos, Set<BlockPos>> byChunk) {
         var inner = new java.util.TreeMap<Long, Set<BlockPos>>();
         byChunk.forEach((chunkPos, positions) -> inner.put(chunkPos.toLong(), positions));
-        var outer = new HashMap<ResourceKey<Level>, java.util.NavigableMap<Long, Set<BlockPos>>>();
-        outer.put(dimension, inner);
-        return outer;
+        return inner;
     }
 
     @Test
-    void knownPositionsWindowedReturnsEveryPositionInOneCallWhenItAlreadyFitsTheBudget() {
+    void advanceEndCandidateScanFindsTheFirstEligibleCandidateAndShortCircuits() {
         var a = new BlockPos(1, 64, 1);
         var b = new BlockPos(2, 64, 2);
-        var registry = navigableRegistryOf(Level.END, Map.of(
-            new ChunkPos(0, 0), Set.of(a),
-            new ChunkPos(1, 0), Set.of(b)));
-        var result = PortalTransferSink.knownPositionsWindowed(registry, Level.END, Long.MIN_VALUE, 10);
-        assertEquals(Set.of(a, b), Set.copyOf(result.positions()));
+        var registry = navigableRegistryOf(Map.of(new ChunkPos(0, 0), Set.of(a), new ChunkPos(1, 0), Set.of(b)));
+        var scan = new PortalTransferSink.EndCandidateScan();
+        var budget = new PortalTransferSink.Budget(100);
+        PortalTransferSink.advanceEndCandidateScan(registry, 10, scan, budget, pos -> true);
+        assertTrue(scan.done);
+        assertTrue(scan.found.equals(a) || scan.found.equals(b), "whichever chunk entry is visited first, its position is found");
     }
 
     @Test
-    void knownPositionsWindowedOnlyTouchesTheSelectedChunkEntriesAndCoversEverythingAcrossCalls() {
-        var a = new BlockPos(1, 64, 1);
-        var b = new BlockPos(2, 64, 2);
-        var c = new BlockPos(3, 64, 3);
-        var registry = navigableRegistryOf(Level.END, Map.of(
-            new ChunkPos(0, 0), Set.of(a),
-            new ChunkPos(1, 0), Set.of(b),
-            new ChunkPos(2, 0), Set.of(c)));
-        var first = PortalTransferSink.knownPositionsWindowed(registry, Level.END, Long.MIN_VALUE, 2);
-        assertEquals(2, first.positions().size(), "only the windowed chunk entries are touched, not all three");
-        var second = PortalTransferSink.knownPositionsWindowed(registry, Level.END, first.nextStartKey(), 2);
-        var coveredAcrossBothCalls = new java.util.HashSet<>(first.positions());
-        coveredAcrossBothCalls.addAll(second.positions());
-        assertEquals(Set.of(a, b, c), coveredAcrossBothCalls,
-            "continuing from the returned cursor eventually covers every known position");
+    void advanceEndCandidateScanBoundsExaminationOfASingleDenseChunkEntryToTheBudget() {
+        var dense = new java.util.HashSet<BlockPos>();
+        for (int i = 0; i < 10_000; i++) dense.add(new BlockPos(i, 64, 0));
+        var registry = navigableRegistryOf(Map.of(new ChunkPos(0, 0), dense));
+        var scan = new PortalTransferSink.EndCandidateScan();
+        var budget = new PortalTransferSink.Budget(50);
+        int[] callCount = {0};
+        PortalTransferSink.advanceEndCandidateScan(registry, 10, scan, budget, pos -> { callCount[0]++; return false; });
+        assertFalse(scan.done, "10,000 positions in one chunk entry cannot all be examined within a budget of 50");
+        assertEquals(50, callCount[0], "exactly the budget's worth of positions were examined, never the whole dense set");
     }
 
     @Test
-    void knownPositionsWindowedWrapsAroundSoEveryEntryIsEventuallyCoveredWithoutStarvation() {
-        var a = new BlockPos(1, 64, 1);
-        var b = new BlockPos(2, 64, 2);
-        var c = new BlockPos(3, 64, 3);
-        var registry = navigableRegistryOf(Level.END, Map.of(
-            new ChunkPos(0, 0), Set.of(a),
-            new ChunkPos(1, 0), Set.of(b),
-            new ChunkPos(2, 0), Set.of(c)));
+    void advanceEndCandidateScanResumesAcrossCallsAndExaminesEveryPositionInADenseChunkAtMostOnceUntilFound() {
+        var dense = new java.util.HashSet<BlockPos>();
+        for (int i = 0; i < 237; i++) dense.add(new BlockPos(i, 64, 0));
+        var registry = navigableRegistryOf(Map.of(new ChunkPos(0, 0), dense));
+        var scan = new PortalTransferSink.EndCandidateScan();
         var seen = new java.util.HashSet<BlockPos>();
-        long cursor = Long.MIN_VALUE;
-        for (int i = 0; i < 3; i++) {
-            var result = PortalTransferSink.knownPositionsWindowed(registry, Level.END, cursor, 1);
-            seen.addAll(result.positions());
-            cursor = result.nextStartKey();
+        int calls = 0;
+        while (!scan.done) {
+            var budget = new PortalTransferSink.Budget(40);
+            PortalTransferSink.advanceEndCandidateScan(registry, 10, scan, budget,
+                pos -> { assertTrue(seen.add(pos), "no position examined twice across the resumed scan"); return false; });
+            calls++;
+            assertTrue(calls < 100, "safety bound to catch a runaway loop on test failure");
         }
-        assertEquals(Set.of(a, b, c), seen);
+        assertEquals(dense, seen, "every position in the dense chunk examined exactly once across the resumed scan, none omitted");
+        assertTrue(calls > 1, "a budget of 40 over 237 positions must genuinely take more than one call");
+        assertEquals(null, scan.found, "nothing was ever eligible in this fixture");
     }
 
     @Test
-    void knownPositionsWindowedReturnsEmptyForAnUnknownDimensionOrEmptyRegistry() {
-        var registry = navigableRegistryOf(Level.NETHER, Map.of(new ChunkPos(0, 0), Set.of(new BlockPos(1, 64, 1))));
-        assertTrue(PortalTransferSink.knownPositionsWindowed(registry, Level.END, Long.MIN_VALUE, 10).positions().isEmpty());
-        assertTrue(PortalTransferSink.knownPositionsWindowed(Map.of(), Level.NETHER, Long.MIN_VALUE, 10).positions().isEmpty());
+    void advanceEndCandidateScanIsDoneWithNothingFoundWhenTheRegistryIsEmpty() {
+        var scan = new PortalTransferSink.EndCandidateScan();
+        var budget = new PortalTransferSink.Budget(10);
+        PortalTransferSink.advanceEndCandidateScan(navigableRegistryOf(Map.of()), 10, scan, budget, pos -> true);
+        assertTrue(scan.done);
+        assertEquals(null, scan.found);
     }
 
     @Test
-    void knownPositionsWindowedThrowsOnNonPositiveBudget() {
-        var registry = navigableRegistryOf(Level.END, Map.of(new ChunkPos(0, 0), Set.of(new BlockPos(1, 64, 1))));
-        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
-            () -> PortalTransferSink.knownPositionsWindowed(registry, Level.END, 0, 0));
+    void advanceEndCandidateScanOnlyTouchesTheBoundedNumberOfChunkEntriesWhenNothingIsEligible() {
+        var registry = navigableRegistryOf(Map.of(
+            new ChunkPos(0, 0), Set.of(new BlockPos(1, 64, 1)),
+            new ChunkPos(1, 0), Set.of(new BlockPos(2, 64, 2)),
+            new ChunkPos(2, 0), Set.of(new BlockPos(3, 64, 3))));
+        var scan = new PortalTransferSink.EndCandidateScan();
+        var budget = new PortalTransferSink.Budget(100);
+        PortalTransferSink.advanceEndCandidateScan(registry, 2, scan, budget, pos -> false);
+        assertTrue(scan.done, "done once the bounded 2-entry window is exhausted, even though a third entry exists");
+        assertEquals(null, scan.found);
     }
 
     @Test
-    void drainQueueDrainsAtMostMaxPerCallAndReportsWhetherItFinished() {
-        var queues = new HashMap<ResourceKey<Level>, Map<Long, java.util.Deque<BlockPos>>>();
-        var deque = new java.util.ArrayDeque<BlockPos>(
-            List.of(new BlockPos(1, 0, 0), new BlockPos(2, 0, 0), new BlockPos(3, 0, 0)));
-        queues.computeIfAbsent(Level.NETHER, ignored -> new HashMap<>()).put(42L, deque);
-        var drained = new java.util.ArrayList<BlockPos>();
+    void selectLiveNearestPicksTheNearestEligibleCandidate() {
+        var anchor = BlockPos.ZERO;
+        var near = new BlockPos(10, 64, 0);
+        var far = new BlockPos(100, 64, 0);
+        var pool = new java.util.HashSet<>(Set.of(near, far));
+        assertEquals(Optional.of(near), PortalTransferSink.selectLiveNearest(anchor, pool, 128, pos -> true));
+    }
 
-        boolean firstCallDone = PortalTransferSink.drainQueue(queues, Level.NETHER, 42L, 2, drained::add);
-        assertFalse(firstCallDone, "one position remains after draining 2 of 3");
-        assertEquals(2, drained.size());
-
-        boolean secondCallDone = PortalTransferSink.drainQueue(queues, Level.NETHER, 42L, 2, drained::add);
-        assertTrue(secondCallDone, "the queue is now empty");
-        assertEquals(3, drained.size());
-        assertEquals(List.of(new BlockPos(1, 0, 0), new BlockPos(2, 0, 0), new BlockPos(3, 0, 0)), drained);
+    /**
+     * MINECRAFT-435 (fourth review): a candidate added to the pool while live during an earlier
+     * advance may have been destroyed/unloaded by the time the scan completes and a winner is
+     * selected -- the nearer one must be revalidated and, if stale, discarded in favor of the
+     * next-nearest, never silently accepted.
+     */
+    @Test
+    void selectLiveNearestRevalidatesAndFallsBackWhenTheNearestCandidateHasGoneStale() {
+        var anchor = BlockPos.ZERO;
+        var nearerButNowStale = new BlockPos(10, 64, 0);
+        var fartherButStillValid = new BlockPos(100, 64, 0);
+        var pool = new java.util.HashSet<>(Set.of(nearerButNowStale, fartherButStillValid));
+        var result = PortalTransferSink.selectLiveNearest(anchor, pool, 128, pos -> !pos.equals(nearerButNowStale));
+        assertEquals(Optional.of(fartherButStillValid), result);
+        assertEquals(Set.of(fartherButStillValid), pool, "the stale candidate is discarded from the pool");
     }
 
     @Test
-    void drainQueueReportsDoneWhenThereWasNeverAQueueToBeginWith() {
-        var queues = new HashMap<ResourceKey<Level>, Map<Long, java.util.Deque<BlockPos>>>();
-        assertTrue(PortalTransferSink.drainQueue(queues, Level.NETHER, 1L, 5, pos -> {
-            throw new AssertionError("must not be called: nothing was ever queued");
-        }));
+    void selectLiveNearestReturnsEmptyWhenEveryCandidateIsStale() {
+        var anchor = BlockPos.ZERO;
+        var pool = new java.util.HashSet<>(Set.of(new BlockPos(10, 64, 0)));
+        assertTrue(PortalTransferSink.selectLiveNearest(anchor, pool, 128, pos -> false).isEmpty());
+        assertTrue(pool.isEmpty());
     }
 
     @Test
-    void drainQueueRemovesTheEmptiedQueueSoHasPendingWorkStopsReportingIt() {
-        var queues = new HashMap<ResourceKey<Level>, Map<Long, java.util.Deque<BlockPos>>>();
-        queues.computeIfAbsent(Level.NETHER, ignored -> new HashMap<>())
-            .put(7L, new java.util.ArrayDeque<>(List.of(new BlockPos(0, 0, 0))));
-        PortalTransferSink.drainQueue(queues, Level.NETHER, 7L, 5, pos -> { });
-        org.junit.jupiter.api.Assertions.assertNull(PortalTransferSink.queueFor(queues, Level.NETHER, 7L));
+    void selectLiveNearestDependsOnTheAnchorEvenOverAnIdenticalSharedPool() {
+        // MINECRAFT-435 (fourth review): two different anchors sharing the same discovered pool
+        // (e.g. the same destination chunk box) must each get their OWN nearest answer.
+        var a = new BlockPos(0, 64, 0);
+        var b = new BlockPos(100, 64, 0);
+        var pool = Set.of(a, b);
+        assertEquals(Optional.of(a), PortalTransferSink.selectLiveNearest(new BlockPos(-10, 64, 0), new java.util.HashSet<>(pool), 200, pos -> true));
+        assertEquals(Optional.of(b), PortalTransferSink.selectLiveNearest(new BlockPos(110, 64, 0), new java.util.HashSet<>(pool), 200, pos -> true));
     }
 
     @Test
@@ -253,10 +264,10 @@ class PortalTransferSinkTest {
         var scan = new PortalTransferSink.CandidateScan();
         var budget = new PortalTransferSink.Budget(100);
         var examined = new java.util.ArrayList<BlockPos>();
-        PortalTransferSink.advanceNetherCandidateScan(byChunk, 0, 0, 0, 0, new BlockPos(12, 64, 12), 128,
+        PortalTransferSink.advanceNetherCandidateScan(byChunk, 0, 0, 0, 0,
             scan, budget, pos -> { examined.add(pos); return true; });
         assertTrue(scan.done);
-        assertEquals(only, scan.best);
+        assertEquals(Set.of(only), scan.eligibleCandidates);
         assertEquals(List.of(only), examined);
     }
 
@@ -274,7 +285,7 @@ class PortalTransferSinkTest {
         var scan = new PortalTransferSink.CandidateScan();
         var budget = new PortalTransferSink.Budget(50);
         int[] callCount = {0};
-        PortalTransferSink.advanceNetherCandidateScan(byChunk, 0, 0, 0, 0, BlockPos.ZERO, 20_000,
+        PortalTransferSink.advanceNetherCandidateScan(byChunk, 0, 0, 0, 0,
             scan, budget, pos -> { callCount[0]++; return false; });
         assertFalse(scan.done, "10,000 positions in one chunk entry cannot all be examined within a budget of 50");
         assertEquals(50, callCount[0], "exactly the budget's worth of positions were examined, never the whole dense set");
@@ -291,33 +302,41 @@ class PortalTransferSinkTest {
         int calls = 0;
         while (!scan.done) {
             var budget = new PortalTransferSink.Budget(40);
-            PortalTransferSink.advanceNetherCandidateScan(byChunk, 0, 0, 0, 0, BlockPos.ZERO, 1000,
+            PortalTransferSink.advanceNetherCandidateScan(byChunk, 0, 0, 0, 0,
                 scan, budget, pos -> { assertTrue(seen.add(pos), "no position examined twice across the resumed scan"); return true; });
             calls++;
             assertTrue(calls < 100, "safety bound to catch a runaway loop on test failure");
         }
         assertEquals(dense, seen, "every position in the dense chunk examined exactly once across the resumed scan, none omitted");
+        assertEquals(dense, scan.eligibleCandidates);
         assertTrue(calls > 1, "a budget of 40 over 237 positions must genuinely take more than one call");
     }
 
+    /**
+     * Integration of {@link PortalTransferSink#advanceNetherCandidateScan} (anchor-independent
+     * discovery, possibly spread over several calls) with {@link
+     * PortalTransferSink#selectLiveNearest} (anchor-specific selection, applied once discovery is
+     * done) -- the true nearest candidate is found regardless of which call examined it.
+     */
     @Test
-    void advanceNetherCandidateScanFindsTheTrueNearestAcrossChunkEntriesRegardlessOfExaminationOrder() {
-        var closerToAnchorButExaminedLast = new BlockPos(5, 64, 0); // chunk (0, 0)
-        var fartherButExaminedFirst = new BlockPos(1000, 64, 0); // chunk (62, 0)
+    void discoveredPoolYieldsTheTrueNearestRegardlessOfWhichCallExaminedEachCandidate() {
+        var nearToAnchor = new BlockPos(5, 64, 0); // chunk (0, 0)
+        var farFromAnchor = new BlockPos(1000, 64, 0); // chunk (62, 0)
         var byChunk = new java.util.HashMap<Long, Set<BlockPos>>();
-        byChunk.put(ChunkPos.asLong(0, 0), Set.of(closerToAnchorButExaminedLast));
-        byChunk.put(ChunkPos.asLong(62, 0), Set.of(fartherButExaminedFirst));
+        byChunk.put(ChunkPos.asLong(0, 0), Set.of(farFromAnchor));
+        byChunk.put(ChunkPos.asLong(62, 0), Set.of(nearToAnchor));
         var scan = new PortalTransferSink.CandidateScan();
         int calls = 0;
         while (!scan.done) {
             var budget = new PortalTransferSink.Budget(1);
-            PortalTransferSink.advanceNetherCandidateScan(byChunk, 0, 62, 0, 0, BlockPos.ZERO, 2000,
-                scan, budget, pos -> true);
+            PortalTransferSink.advanceNetherCandidateScan(byChunk, 0, 62, 0, 0, scan, budget, pos -> true);
             calls++;
             assertTrue(calls < 100, "safety bound to catch a runaway loop on test failure");
         }
-        assertEquals(closerToAnchorButExaminedLast, scan.best,
-            "the globally nearest candidate is kept even though a farther one was examined in an earlier call");
+        var anchor = new BlockPos(10, 64, 0);
+        assertEquals(Optional.of(nearToAnchor),
+            PortalTransferSink.selectLiveNearest(anchor, scan.eligibleCandidates, 2000, pos -> true),
+            "the globally nearest candidate is found even though a farther one was examined in an earlier call");
     }
 
     @Test
