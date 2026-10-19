@@ -12,12 +12,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * MINECRAFT-439 review fix: covers the production bounded-villager entry point through
- * {@link VoidGasGameplay#readyFirstEligible} and {@link VoidGasGameplay#boundedMatchesForTesting}
- * -- the ServerLevel-independent seams {@code readyOneVillager} delegates to -- there is no
- * in-repo harness for a real ServerLevel/Villager (see
+ * {@link VoidGasGameplay#readyOneVillagerVia} -- the exact shared orchestration
+ * {@code readyOneVillager} calls in production -- with
+ * {@link VoidGasGameplay#boundedMatchesForTesting} wired in as the injected bounded-query
+ * implementation. There is no in-repo harness for a real ServerLevel/Villager (see
  * {@code ForgeAtmospherePrototypeFreezeGateTest}), so this proves the real
- * bounded-query/first-candidate-wins/charge-once logic one layer below the ServerLevel-taking
- * query, which is a thin, untested pass-through.
+ * bounded-query/first-candidate-wins/charge-once logic through the one necessarily-injected
+ * seam (how to fetch candidates from the world), not a disconnected parallel implementation.
  */
 class VoidGasGameplayTest {
     private static final class FakeCandidate {
@@ -66,32 +67,48 @@ class VoidGasGameplayTest {
     }
 
     /**
-     * Review fix: production bakes eligibility into the native bounded query itself, exactly so
-     * MAX_VILLAGER_CANDIDATES bounds eligible matches rather than arbitrary in-bounds candidates
-     * -- otherwise a run of ineligible candidates ahead of an eligible one could exhaust the
-     * limit and the eligible villager would never be seen at all. This proves that chain: more
-     * than MAX_VILLAGER_CANDIDATES ineligible candidates precede one eligible candidate, and the
-     * eligible one is still found, charged once, and rewarded.
+     * Review fix: exercises {@link VoidGasGameplay#readyOneVillagerVia} directly -- the exact
+     * same orchestration {@code readyOneVillager} calls in production -- with
+     * {@link VoidGasGameplay#boundedMatchesForTesting} wired as the injected bounded-query
+     * implementation. The limit it bounds to is never chosen by this test: it comes from
+     * {@code readyOneVillagerVia} passing {@link VoidGasGameplay#VILLAGER_SELECTION_LIMIT}
+     * itself, so a regression there (or in the real eligibility predicate production wires in)
+     * would surface here, not just in a disconnected mirror. More than
+     * {@code VILLAGER_SELECTION_LIMIT} worth of ineligible candidates precede one eligible
+     * candidate; the eligible one must still be found, charged once, and rewarded.
      */
     @Test
-    void anEligibleCandidateBeyondTheLimitsWorthOfIneligibleOnesIsStillFound() {
+    void anEligibleCandidateBeyondTheSelectionLimitsWorthOfIneligibleOnesIsStillFound() {
         var candidates = new ArrayList<FakeCandidate>();
-        for (int i = 0; i < VoidGasGameplay.MAX_VILLAGER_CANDIDATES * 2; i++) {
+        for (int i = 0; i < 200; i++) {
             candidates.add(new FakeCandidate(false));
         }
         var eligible = new FakeCandidate(true);
         candidates.add(eligible);
-
-        List<FakeCandidate> bounded = VoidGasGameplay.boundedMatchesForTesting(
-            candidates, c -> c.eligible, VoidGasGameplay.MAX_VILLAGER_CANDIDATES);
-        assertEquals(List.of(eligible), bounded,
-            "the limit must bound eligible matches, not candidates visited, or the eligible one is lost");
+        assertTrue(200 > VoidGasGameplay.VILLAGER_SELECTION_LIMIT,
+            "the regression only means something if more ineligible candidates precede the eligible one than the limit");
 
         var consumeCalls = new ArrayList<Integer>();
-        boolean readied = ready(5, cost -> { consumeCalls.add(cost); return true; }, bounded);
+        boolean readied = VoidGasGameplay.<FakeCandidate>readyOneVillagerVia(5,
+            cost -> { consumeCalls.add(cost); return true; },
+            c -> c.eligible,
+            c -> c.breadReceived++,
+            (eligible2, limit) -> VoidGasGameplay.boundedMatchesForTesting(candidates, eligible2, limit));
+
         assertTrue(readied);
-        assertEquals(List.of(5), consumeCalls);
+        assertEquals(List.of(5), consumeCalls, "exactly one charge");
         assertEquals(1, eligible.breadReceived);
+    }
+
+    @Test
+    void aRefusedConsumptionThroughTheSharedOrchestrationGrantsNoReward() {
+        var eligible = new FakeCandidate(true);
+        boolean readied = VoidGasGameplay.<FakeCandidate>readyOneVillagerVia(5,
+            cost -> false, c -> c.eligible, c -> c.breadReceived++,
+            (eligible2, limit) -> VoidGasGameplay.boundedMatchesForTesting(List.of(eligible), eligible2, limit));
+
+        assertFalse(readied);
+        assertEquals(0, eligible.breadReceived, "a failed consumption must not grant bread");
     }
 
     @Test
