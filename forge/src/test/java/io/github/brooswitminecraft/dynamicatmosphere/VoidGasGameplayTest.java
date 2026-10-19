@@ -12,11 +12,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * MINECRAFT-439 review fix: covers the production bounded-villager entry point through
- * {@link VoidGasGameplay#readyFirstEligible}, the ServerLevel-independent seam
- * {@code readyOneVillager} delegates to -- there is no in-repo harness for a real
- * ServerLevel/Villager (see {@code ForgeAtmospherePrototypeFreezeGateTest}), so this proves the
- * real first-candidate-wins/charge-once logic one layer below the ServerLevel-taking query,
- * which is a thin, untested pass-through.
+ * {@link VoidGasGameplay#readyFirstEligible} and {@link VoidGasGameplay#boundedMatchesForTesting}
+ * -- the ServerLevel-independent seams {@code readyOneVillager} delegates to -- there is no
+ * in-repo harness for a real ServerLevel/Villager (see
+ * {@code ForgeAtmospherePrototypeFreezeGateTest}), so this proves the real
+ * bounded-query/first-candidate-wins/charge-once logic one layer below the ServerLevel-taking
+ * query, which is a thin, untested pass-through.
  */
 class VoidGasGameplayTest {
     private static final class FakeCandidate {
@@ -29,8 +30,7 @@ class VoidGasGameplayTest {
     }
 
     private static boolean ready(int cost, IntPredicate consume, List<FakeCandidate> candidates) {
-        return VoidGasGameplay.readyFirstEligible(cost, consume, candidates,
-            c -> c.eligible, c -> c.breadReceived++);
+        return VoidGasGameplay.readyFirstEligible(cost, consume, candidates, c -> c.breadReceived++);
     }
 
     @Test
@@ -42,33 +42,16 @@ class VoidGasGameplayTest {
     }
 
     @Test
-    void ineligibleCandidatesAreSkippedAndNeverConsumedOrRewarded() {
-        var ineligible1 = new FakeCandidate(false);
-        var ineligible2 = new FakeCandidate(false);
-        var consumeCalls = new int[1];
-        boolean readied = ready(5, cost -> { consumeCalls[0]++; return true; },
-            List.of(ineligible1, ineligible2));
-
-        assertFalse(readied, "a bounded query that turned up only ineligible candidates must not ready anyone");
-        assertEquals(0, consumeCalls[0], "an ineligible candidate must never reach the material charge");
-        assertEquals(0, ineligible1.breadReceived);
-        assertEquals(0, ineligible2.breadReceived);
-    }
-
-    @Test
-    void onlyTheFirstEligibleCandidateIsEverTriedEvenWithMultipleEligibleOnes() {
-        var ineligibleFirst = new FakeCandidate(false);
-        var firstEligible = new FakeCandidate(true);
-        var secondEligible = new FakeCandidate(true);
+    void onlyTheFirstCandidateIsEverTriedEvenWithMultipleEligibleOnes() {
+        var first = new FakeCandidate(true);
+        var second = new FakeCandidate(true);
         var consumeCalls = new ArrayList<Integer>();
-        boolean readied = ready(5, cost -> { consumeCalls.add(cost); return true; },
-            List.of(ineligibleFirst, firstEligible, secondEligible));
+        boolean readied = ready(5, cost -> { consumeCalls.add(cost); return true; }, List.of(first, second));
 
         assertTrue(readied);
-        assertEquals(List.of(5), consumeCalls, "exactly one charge, for the first eligible candidate only");
-        assertEquals(0, ineligibleFirst.breadReceived, "an ineligible candidate ahead of the eligible one is skipped");
-        assertEquals(1, firstEligible.breadReceived, "the first eligible candidate receives bread exactly once");
-        assertEquals(0, secondEligible.breadReceived, "a second eligible candidate must never be reached");
+        assertEquals(List.of(5), consumeCalls, "exactly one charge, for the first candidate only");
+        assertEquals(1, first.breadReceived, "the first candidate receives bread exactly once");
+        assertEquals(0, second.breadReceived, "a second candidate must never be reached");
     }
 
     @Test
@@ -79,7 +62,46 @@ class VoidGasGameplayTest {
 
         assertFalse(readied);
         assertEquals(0, first.breadReceived, "a failed consumption must not grant bread");
-        assertEquals(0, second.breadReceived, "a refused first eligible candidate must not fall through to the next one");
+        assertEquals(0, second.breadReceived, "a refused first candidate must not fall through to the next one");
+    }
+
+    /**
+     * Review fix: production bakes eligibility into the native bounded query itself, exactly so
+     * MAX_VILLAGER_CANDIDATES bounds eligible matches rather than arbitrary in-bounds candidates
+     * -- otherwise a run of ineligible candidates ahead of an eligible one could exhaust the
+     * limit and the eligible villager would never be seen at all. This proves that chain: more
+     * than MAX_VILLAGER_CANDIDATES ineligible candidates precede one eligible candidate, and the
+     * eligible one is still found, charged once, and rewarded.
+     */
+    @Test
+    void anEligibleCandidateBeyondTheLimitsWorthOfIneligibleOnesIsStillFound() {
+        var candidates = new ArrayList<FakeCandidate>();
+        for (int i = 0; i < VoidGasGameplay.MAX_VILLAGER_CANDIDATES * 2; i++) {
+            candidates.add(new FakeCandidate(false));
+        }
+        var eligible = new FakeCandidate(true);
+        candidates.add(eligible);
+
+        List<FakeCandidate> bounded = VoidGasGameplay.boundedMatchesForTesting(
+            candidates, c -> c.eligible, VoidGasGameplay.MAX_VILLAGER_CANDIDATES);
+        assertEquals(List.of(eligible), bounded,
+            "the limit must bound eligible matches, not candidates visited, or the eligible one is lost");
+
+        var consumeCalls = new ArrayList<Integer>();
+        boolean readied = ready(5, cost -> { consumeCalls.add(cost); return true; }, bounded);
+        assertTrue(readied);
+        assertEquals(List.of(5), consumeCalls);
+        assertEquals(1, eligible.breadReceived);
+    }
+
+    @Test
+    void theLimitStopsCollectingOnceItHasEnoughMatches() {
+        var first = new FakeCandidate(true);
+        var second = new FakeCandidate(true);
+        var neverReached = new FakeCandidate(true);
+        List<FakeCandidate> bounded = VoidGasGameplay.boundedMatchesForTesting(
+            List.of(first, second, neverReached), c -> c.eligible, 2);
+        assertEquals(List.of(first, second), bounded);
     }
 
     @Test
