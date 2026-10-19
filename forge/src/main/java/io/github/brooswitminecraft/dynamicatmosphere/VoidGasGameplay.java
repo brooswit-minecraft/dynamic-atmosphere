@@ -2,6 +2,7 @@ package io.github.brooswitminecraft.dynamicatmosphere;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.IntPredicate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.MobCategory;
@@ -107,6 +108,28 @@ public final class VoidGasGameplay {
         });
     }
 
+    /** The one operation the villager-ready effect needs, seamed so {@link #readyFirstEligible}
+     * is testable without a real ServerLevel/Villager. */
+    interface VillagerCandidate {
+        void receiveBread();
+    }
+
+    /**
+     * ServerLevel-independent seam {@link #readyOneVillager} delegates to: only the first
+     * candidate is ever tried, {@code consume} is invoked at most once (with {@code cost}), and
+     * a refused consumption grants no bread and tries no further candidate -- matching the
+     * original loop, whose per-iteration cap was unreachable dead code since every body path
+     * already returned on iteration 1.
+     */
+    static boolean readyFirstEligible(int cost, IntPredicate consume, Iterable<? extends VillagerCandidate> candidates) {
+        for (VillagerCandidate candidate : candidates) {
+            if (!consume.test(cost)) return false;
+            candidate.receiveBread();
+            return true;
+        }
+        return false;
+    }
+
     private static void readyOneVillager(ServerLevel level, BlockPos cellOrigin, int cost, int breedingBread) {
         AABB bounds = cellBounds(cellOrigin, AtmosphereMaterial.VOID_GAS.cellSize());
         // Only the first successful candidate is ever used; bound the underlying scan itself
@@ -115,11 +138,11 @@ public final class VoidGasGameplay {
         level.getEntities(EntityTypeTest.forClass(Villager.class), bounds,
             candidate -> bounds.contains(candidate.position()) && eligibleVillager(candidate, breedingBread),
             villagers, MAX_VILLAGER_CANDIDATES);
-        for (Villager villager : villagers) {
-            if (!DynamicAtmosphereMod.consumeMaterial(level, AtmosphereMaterial.VOID_GAS, cellOrigin, cost)) return;
-            villager.getInventory().addItem(new ItemStack(Items.BREAD, breedingBread));
-            return;
-        }
+        readyFirstEligible(cost,
+            candidateCost -> DynamicAtmosphereMod.consumeMaterial(level, AtmosphereMaterial.VOID_GAS, cellOrigin, candidateCost),
+            villagers.stream()
+                .<VillagerCandidate>map(villager -> () -> villager.getInventory().addItem(new ItemStack(Items.BREAD, breedingBread)))
+                .toList());
     }
 
     static boolean eligibleVillager(Villager villager) {

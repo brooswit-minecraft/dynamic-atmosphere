@@ -1,5 +1,7 @@
 package io.github.brooswitminecraft.dynamicatmosphere;
 
+import java.util.ArrayList;
+import java.util.Optional;
 import java.util.function.Supplier;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -54,6 +56,56 @@ public final class NetherGasGameplay {
         onPassiveBlockSample(level, pos, chunk.getBlockState(pos));
     }
 
+    /** The handful of LivingEntity operations the cell effect actually needs, seamed so the
+     * eligibility/effect-application logic below is testable without a real ServerLevel/entity. */
+    interface EffectTarget {
+        boolean isAlive();
+
+        void applyMild();
+
+        void applyDangerous();
+    }
+
+    static void apply(CellEffect effect, EffectTarget target) {
+        if (!target.isAlive()) return;
+        if (effect.mild()) target.applyMild();
+        if (effect.dangerous()) target.applyDangerous();
+    }
+
+    /**
+     * ServerLevel-independent seam {@link #processTurn} delegates to: {@code targetsSupplier} is
+     * invoked exactly once when {@code state} makes an effect eligible, and never otherwise, so
+     * this proves the production entry point's entity-query boundary without needing a real
+     * ServerLevel/LivingEntity (none is available in this test suite).
+     */
+    static void runEligible(
+        Optional<AtmosphereMaterialState> state, double mildFullness, double dangerousFullness,
+        Supplier<Iterable<? extends EffectTarget>> targetsSupplier
+    ) {
+        state.ifPresent(s -> {
+            CellEffect effect = effectFor(s.amount(), s.capacity(), mildFullness, dangerousFullness);
+            if (!effect.active()) return;
+            for (EffectTarget target : targetsSupplier.get()) apply(effect, target);
+        });
+    }
+
+    private static EffectTarget asTarget(LivingEntity entity) {
+        return new EffectTarget() {
+            @Override
+            public boolean isAlive() { return entity.isAlive(); }
+
+            @Override
+            public void applyMild() {
+                entity.addEffect(new MobEffectInstance(MobEffects.CONFUSION, EFFECT_DURATION_TICKS, MILD_AMPLIFIER));
+            }
+
+            @Override
+            public void applyDangerous() {
+                entity.addEffect(new MobEffectInstance(MobEffects.POISON, EFFECT_DURATION_TICKS, DANGEROUS_AMPLIFIER));
+            }
+        };
+    }
+
     /**
      * Called once for a processed Nether Gas cell. The entity supplier is only invoked when the
      * cell's amount/capacity make an effect eligible, so inactive cells never issue the
@@ -63,19 +115,14 @@ public final class NetherGasGameplay {
         ServerLevel level, BlockPos cellOrigin, Supplier<Iterable<? extends LivingEntity>> entitiesSupplier
     ) {
         DynamicAtmosphereServerConfig.NetherGas config = DynamicAtmosphereServerConfig.snapshot().netherGas();
-        DynamicAtmosphereMod.materialState(level, AtmosphereMaterial.NETHER_GAS, cellOrigin).ifPresent(state -> {
-            CellEffect effect = effectFor(state.amount(), state.capacity(), config.mildFullness(), config.dangerousFullness());
-            if (!effect.active()) return;
-            for (LivingEntity entity : entitiesSupplier.get()) {
-                if (!entity.isAlive()) continue;
-                if (effect.mild()) {
-                    entity.addEffect(new MobEffectInstance(MobEffects.CONFUSION, EFFECT_DURATION_TICKS, MILD_AMPLIFIER));
-                }
-                if (effect.dangerous()) {
-                    entity.addEffect(new MobEffectInstance(MobEffects.POISON, EFFECT_DURATION_TICKS, DANGEROUS_AMPLIFIER));
-                }
-            }
-        });
+        runEligible(
+            DynamicAtmosphereMod.materialState(level, AtmosphereMaterial.NETHER_GAS, cellOrigin),
+            config.mildFullness(), config.dangerousFullness(),
+            () -> {
+                var targets = new ArrayList<EffectTarget>();
+                for (LivingEntity entity : entitiesSupplier.get()) targets.add(asTarget(entity));
+                return targets;
+            });
     }
 
     private NetherGasGameplay() { }

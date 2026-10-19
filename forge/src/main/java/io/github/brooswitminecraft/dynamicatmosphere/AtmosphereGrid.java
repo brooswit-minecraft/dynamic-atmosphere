@@ -18,7 +18,17 @@ import java.util.function.Consumer;
 import java.util.function.LongUnaryOperator;
 import java.util.function.ToIntFunction;
 
-/** A bounded-work, server-owned atmospheric material grid. */
+/**
+ * A bounded-work, server-owned atmospheric material grid.
+ *
+ * <p><b>Not reentrant:</b> {@code spread}/{@code redistributeOverflow} reuse per-grid scratch
+ * buffers across calls rather than allocating fresh ones. None of {@code capacityAt},
+ * {@code canTransfer}, {@code beforeSpread}, {@code afterSpread}, or {@code shouldSimulate} may
+ * call back into {@code spread}/{@code redistributeOverflow} on this same grid instance while
+ * one of those calls is already in progress -- doing so would corrupt the in-flight scratch
+ * state (observably, by throwing {@link java.util.ConcurrentModificationException}). Production
+ * wiring currently satisfies this: no Forge capacity/transfer callback recurses into spread.
+ */
 public final class AtmosphereGrid<D> {
     public static final int CELL_SIZE = AtmosphereGridLayout.CELL_SIZE;
     public static final int MAX_AMOUNT = 1_000;
