@@ -1887,14 +1887,30 @@ final class ForgeAtmospherePrototype {
         if (players.isEmpty()) return;
 
         var capacities = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer>();
+        // MINECRAFT-436: reusable immutable per-chunk cell snapshots, shared across every
+        // overlapping player view THIS sync tick, instead of each player independently re-reading
+        // the grid and recomputing capacity for the same chunk's cells. See the class doc on
+        // #atmosphereCellsForChunk for why this is scoped to one tick rather than cached across
+        // ticks (a cross-tick cache needs a capacity-change signal this change deliberately does
+        // not add, to avoid touching the terrain-capacity cache/mixin files MINECRAFT-434 owns).
+        var chunkCellCache = new HashMap<ChunkKey, List<AtmosphereSyncPlanner.Cell>>();
+        var smokeChunkCellCache = new HashMap<ChunkKey, List<SmokeSyncPlanner.Cell>>();
+        var materialChunkCellCaches = new EnumMap<AtmosphereMaterial, Map<ChunkKey, List<SmokeSyncPlanner.Cell>>>(
+            AtmosphereMaterial.class);
+        for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
+            materialChunkCellCaches.put(material, new HashMap<>());
+        }
+
         var channels = new ArrayList<PlayerSyncChannel>();
-        channels.add((player, budget) -> syncPlayer(player, budget, capacities));
-        channels.add((player, budget) -> syncSmokePlayer(player, budget));
+        channels.add((player, budget) -> syncPlayer(player, budget, capacities, chunkCellCache));
+        channels.add((player, budget) -> syncSmokePlayer(player, budget, smokeChunkCellCache));
         for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
             SmokeSyncPlanner<UUID, ResourceKey<Level>> planner = materialSyncPlanners.get(material);
             PacedSyncQueue<UUID, SmokeSyncPlanner.Update<ResourceKey<Level>>> queue = materialSyncQueues.get(material);
             Set<UUID> pending = pendingMaterialFullSnapshot.get(material);
-            channels.add((player, budget) -> syncMaterialPlayer(player, material, planner, queue, pending, budget));
+            Map<ChunkKey, List<SmokeSyncPlanner.Cell>> materialChunkCellCache = materialChunkCellCaches.get(material);
+            channels.add((player, budget) -> syncMaterialPlayer(
+                player, material, planner, queue, pending, materialChunkCellCache, budget));
         }
 
         int channelCount = channels.size();
@@ -1951,7 +1967,56 @@ final class ForgeAtmospherePrototype {
     private static final int DEMO_SYNC_BUDGET = 1 << 20;
 
     private void syncPlayer(ServerPlayer player) {
-        syncPlayer(player, DEMO_SYNC_BUDGET, new HashMap<>());
+        syncPlayer(player, DEMO_SYNC_BUDGET, new HashMap<>(), new HashMap<>());
+    }
+
+    /**
+     * Builds one chunk's immutable list of visible cells (capacity already resolved), the shared
+     * unit {@link #syncPlayer} caches per tick across every overlapping player's view. {@code
+     * capacities} memoizes {@link #capacityAt} by cell key for the lifetime of one sync tick,
+     * same as before this change -- this only adds sharing the resulting {@code Cell} list itself
+     * (and the grid reads that built it) across players, not a new source of staleness.
+     */
+    private List<AtmosphereSyncPlanner.Cell> atmosphereCellsForChunk(ServerLevel level, ChunkState state,
+            Map<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer> capacities) {
+        var cells = new ArrayList<AtmosphereSyncPlanner.Cell>(state.cells.size());
+        for (var key : state.cells.keySet()) {
+            var cell = grid.get(key);
+            if (cell == null) continue;
+            int capacity = capacities.computeIfAbsent(key, k -> capacityAt(level, k));
+            if (capacity >= 0) {
+                cells.add(new AtmosphereSyncPlanner.Cell(key.x(), key.y(), key.z(), cell.amount(), capacity));
+            }
+        }
+        return List.copyOf(cells);
+    }
+
+    /** See {@link #atmosphereCellsForChunk}'s doc; the smoke-grid equivalent, shared across the smoke channel. */
+    private List<SmokeSyncPlanner.Cell> smokeCellsForChunk(ServerLevel level, ChunkState state) {
+        var cells = new ArrayList<SmokeSyncPlanner.Cell>(state.smokeCells.size());
+        for (var key : state.smokeCells.keySet()) {
+            var cell = smokeGrid.get(key);
+            if (cell == null) continue;
+            int capacity = smokeCapacityAt(level, key);
+            if (capacity >= 0) {
+                cells.add(new SmokeSyncPlanner.Cell(key.x(), key.y(), key.z(), cell.amount(), capacity));
+            }
+        }
+        return List.copyOf(cells);
+    }
+
+    /** See {@link #atmosphereCellsForChunk}'s doc; the per-material equivalent, shared across each material channel. */
+    private List<SmokeSyncPlanner.Cell> materialCellsForChunk(ServerLevel level, AtmosphereMaterial material, ChunkState state) {
+        var cells = new ArrayList<SmokeSyncPlanner.Cell>();
+        for (var key : state.materialCells.get(material).keySet()) {
+            var cell = materialGrids.get(material).get(key);
+            if (cell == null) continue;
+            int capacity = materialCapacityAt(level, material, key);
+            if (capacity >= 0) {
+                cells.add(new SmokeSyncPlanner.Cell(key.x(), key.y(), key.z(), cell.amount(), capacity));
+            }
+        }
+        return List.copyOf(cells);
     }
 
     /**
@@ -1972,7 +2037,8 @@ final class ForgeAtmospherePrototype {
      * rate ("bound or coalesce pending deltas").
      */
     private int syncPlayer(ServerPlayer player, int budget,
-        Map<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer> capacities) {
+        Map<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer> capacities,
+        Map<ChunkKey, List<AtmosphereSyncPlanner.Cell>> chunkCellCache) {
         UUID id = player.getUUID();
         ResourceKey<Level> dimension = player.serverLevel().dimension();
         var trackingView = player.getChunkTrackingView();
@@ -1981,31 +2047,24 @@ final class ForgeAtmospherePrototype {
         boolean genuineChange = !idle && syncPlanner.wouldForceReset(id, dimension, viewRadius);
         if (idle || genuineChange) {
             if (idle && pendingFullSnapshot.remove(id)) syncPlanner.reset(id);
-            var nearby = new ArrayList<AtmosphereGrid.Cell<ResourceKey<Level>>>();
             var authoritativeChunks = new ArrayList<AtmosphereSyncPlanner.Chunk>();
+            var visible = new ArrayList<AtmosphereSyncPlanner.Cell>();
             // Use Minecraft's subscription, including changes to client/server view distance.
             // ensureImported only reads already loaded chunks and retains its per-tick budget.
+            // MINECRAFT-436: one chunk's cell list (with capacity already resolved) is built at
+            // most once per sync tick and reused for every player whose view includes it this
+            // tick (see #atmosphereCellsForChunk), instead of every overlapping player
+            // independently re-reading the grid and recomputing capacity for the same cells.
             trackingView.forEach(chunk -> {
                 ChunkState state = ensureImported(player.serverLevel(), chunk.x, chunk.z);
                 if (state == null || !state.readable) {
                     return;
                 }
                 authoritativeChunks.add(new AtmosphereSyncPlanner.Chunk(chunk.x, chunk.z));
-                for (var key : state.cells.keySet()) {
-                    var cell = grid.get(key);
-                    if (cell != null) {
-                        nearby.add(cell);
-                    }
-                }
+                ChunkKey key = new ChunkKey(dimension, chunk.x, chunk.z);
+                visible.addAll(chunkCellCache.computeIfAbsent(key,
+                    ignored -> atmosphereCellsForChunk(player.serverLevel(), state, capacities)));
             });
-            var visible = new ArrayList<AtmosphereSyncPlanner.Cell>();
-            for (var cell : nearby) {
-                int capacity = capacities.computeIfAbsent(cell.key(), key -> capacityAt(player.serverLevel(), key));
-                if (capacity >= 0) {
-                    visible.add(new AtmosphereSyncPlanner.Cell(
-                        cell.key().x(), cell.key().y(), cell.key().z(), cell.amount(), capacity));
-                }
-            }
             syncQueue.enqueue(id, syncPlanner.plan(id, dimension, viewRadius, authoritativeChunks, visible));
         }
 
@@ -2026,8 +2085,9 @@ final class ForgeAtmospherePrototype {
         return consumed;
     }
 
-    /** See {@link #syncPlayer(ServerPlayer, int, Map)}'s doc for the idle/genuine-change/pending-due gate. */
-    private int syncSmokePlayer(ServerPlayer player, int budget) {
+    /** See {@link #syncPlayer(ServerPlayer, int, Map, Map)}'s doc for the idle/genuine-change/pending-due gate. */
+    private int syncSmokePlayer(ServerPlayer player, int budget,
+            Map<ChunkKey, List<SmokeSyncPlanner.Cell>> smokeChunkCellCache) {
         UUID id = player.getUUID();
         ResourceKey<Level> dimension = player.serverLevel().dimension();
         var trackingView = player.getChunkTrackingView();
@@ -2038,19 +2098,14 @@ final class ForgeAtmospherePrototype {
             if (idle && pendingSmokeFullSnapshot.remove(id)) smokeSyncPlanner.reset(id);
             var scope = new ArrayList<SmokeSyncPlanner.Chunk>();
             var visible = new ArrayList<SmokeSyncPlanner.Cell>();
+            // MINECRAFT-436: shared per-tick chunk cell cache; see #atmosphereCellsForChunk's doc.
             trackingView.forEach(chunk -> {
                 ChunkState state = ensureImported(player.serverLevel(), chunk.x, chunk.z);
                 if (state == null || !state.smokeReadable) return;
                 scope.add(new SmokeSyncPlanner.Chunk(chunk.x, chunk.z));
-                for (var key : state.smokeCells.keySet()) {
-                    var cell = smokeGrid.get(key);
-                    if (cell == null) continue;
-                    int capacity = smokeCapacityAt(player.serverLevel(), key);
-                    if (capacity >= 0) {
-                        visible.add(new SmokeSyncPlanner.Cell(
-                            key.x(), key.y(), key.z(), cell.amount(), capacity));
-                    }
-                }
+                ChunkKey key = new ChunkKey(dimension, chunk.x, chunk.z);
+                visible.addAll(smokeChunkCellCache.computeIfAbsent(key,
+                    ignored -> smokeCellsForChunk(player.serverLevel(), state)));
             });
             smokeSyncQueue.enqueue(id, smokeSyncPlanner.plan(id, dimension, viewRadius, scope, visible));
         }
@@ -2071,13 +2126,14 @@ final class ForgeAtmospherePrototype {
         return consumed;
     }
 
-    /** See {@link #syncPlayer(ServerPlayer, int, Map)}'s doc for the idle/genuine-change/pending-due gate. */
+    /** See {@link #syncPlayer(ServerPlayer, int, Map, Map)}'s doc for the idle/genuine-change/pending-due gate. */
     private int syncMaterialPlayer(
         ServerPlayer player,
         AtmosphereMaterial material,
         SmokeSyncPlanner<UUID, ResourceKey<Level>> planner,
         PacedSyncQueue<UUID, SmokeSyncPlanner.Update<ResourceKey<Level>>> queue,
         Set<UUID> pendingFullSnapshotForMaterial,
+        Map<ChunkKey, List<SmokeSyncPlanner.Cell>> materialChunkCellCache,
         int budget
     ) {
         UUID id = player.getUUID();
@@ -2090,19 +2146,14 @@ final class ForgeAtmospherePrototype {
             if (idle && pendingFullSnapshotForMaterial.remove(id)) planner.reset(id);
             var scope = new ArrayList<SmokeSyncPlanner.Chunk>();
             var visible = new ArrayList<SmokeSyncPlanner.Cell>();
+            // MINECRAFT-436: shared per-tick chunk cell cache; see #atmosphereCellsForChunk's doc.
             trackingView.forEach(chunk -> {
                 ChunkState state = ensureImported(player.serverLevel(), chunk.x, chunk.z);
                 if (state == null || !state.materialReadable.contains(material)) return;
                 scope.add(new SmokeSyncPlanner.Chunk(chunk.x, chunk.z));
-                for (var key : state.materialCells.get(material).keySet()) {
-                    var cell = materialGrids.get(material).get(key);
-                    if (cell == null) continue;
-                    int capacity = materialCapacityAt(player.serverLevel(), material, key);
-                    if (capacity >= 0) {
-                        visible.add(new SmokeSyncPlanner.Cell(
-                            key.x(), key.y(), key.z(), cell.amount(), capacity));
-                    }
-                }
+                ChunkKey key = new ChunkKey(dimension, chunk.x, chunk.z);
+                visible.addAll(materialChunkCellCache.computeIfAbsent(key,
+                    ignored -> materialCellsForChunk(player.serverLevel(), material, state)));
             });
             queue.enqueue(id, planner.plan(id, dimension, viewRadius, scope, visible));
         }
