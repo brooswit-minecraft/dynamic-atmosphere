@@ -2238,10 +2238,15 @@ final class ForgeAtmospherePrototype {
         }
     }
 
+    /**
+     * MINECRAFT-437: collects every dirty material across all materials' grids first, grouped by
+     * chunk, so a chunk with several materials dirty in the same flush gets exactly one batched
+     * {@link ForgeMaterialStorage#writeBatch} publish instead of one {@code write} per material.
+     */
     private void flushMaterialDirtyChunks() {
+        Map<ChunkKey, Map<AtmosphereMaterial, List<MaterialChunkData.Cell>>> perChunkUpdates = new LinkedHashMap<>();
         for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
             AtmosphereGrid<ResourceKey<Level>> materialGrid = materialGrids.get(material);
-            Set<ChunkKey> dirtyChunks = new LinkedHashSet<>();
             for (var key : materialGrid.drainDirtyKeys()) {
                 ChunkKey chunkKey = new ChunkKey(key.dimension(), material.chunkCoordinate(key.x()),
                     material.chunkCoordinate(key.z()));
@@ -2257,19 +2262,21 @@ final class ForgeAtmospherePrototype {
                     persistedCells.put(key,
                         new MaterialChunkData.Cell(key.x(), key.y(), key.z(), cell.amount()));
                 }
-                dirtyChunks.add(chunkKey);
+                perChunkUpdates.computeIfAbsent(chunkKey, unused -> new EnumMap<>(AtmosphereMaterial.class))
+                    .put(material, List.copyOf(persistedCells.values()));
             }
-            for (ChunkKey key : dirtyChunks) {
-                ChunkState state = chunks.get(key);
-                try {
-                    ForgeMaterialStorage.write(state.chunk, material,
-                        List.copyOf(state.materialCells.get(material).values()));
-                } catch (IllegalStateException exception) {
-                    state.materialReadable.remove(material);
-                    state.materialCells.get(material).keySet().forEach(materialGrid::remove);
-                    LOGGER.warn("Preserving unreadable {} data for chunk {} in {}: {}", material.id(),
-                        state.chunk.getPos(), key.dimension().location(), exception.getMessage());
-                }
+        }
+        for (var entry : perChunkUpdates.entrySet()) {
+            ChunkKey key = entry.getKey();
+            ChunkState state = chunks.get(key);
+            Map<AtmosphereMaterial, IllegalStateException> failures =
+                ForgeMaterialStorage.writeBatch(state.chunk, entry.getValue());
+            for (var failure : failures.entrySet()) {
+                AtmosphereMaterial material = failure.getKey();
+                state.materialReadable.remove(material);
+                state.materialCells.get(material).keySet().forEach(materialGrids.get(material)::remove);
+                LOGGER.warn("Preserving unreadable {} data for chunk {} in {}: {}", material.id(),
+                    state.chunk.getPos(), key.dimension().location(), failure.getValue().getMessage());
             }
         }
     }

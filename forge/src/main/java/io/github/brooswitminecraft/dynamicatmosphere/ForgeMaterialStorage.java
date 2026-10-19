@@ -87,6 +87,34 @@ public final class ForgeMaterialStorage {
         chunk.setUnsaved(true);
     }
 
+    /**
+     * MINECRAFT-437: publishes every dirty material for one chunk as a single coherent snapshot,
+     * reading the previous snapshot once, merging all of {@code updates} through
+     * {@link MaterialChunkData#mergeBatch} with exactly one {@link EnumMap} copy, and — only if
+     * something actually changed — issuing one {@code setData}/{@code setUnsaved} for the chunk,
+     * instead of one per dirty material.
+     *
+     * @return one entry per material whose previous stored data was already retained as
+     *     unreadable/corrupt; that material's update in {@code updates} was skipped (not applied),
+     *     and the caller should mark it unreadable and stop simulating it, exactly as the
+     *     single-material {@link #write} path's thrown {@link IllegalStateException} would have
+     *     required — without that failure disturbing any other material in the same batch.
+     */
+    public static Map<AtmosphereMaterial, IllegalStateException> writeBatch(
+            LevelChunk chunk, Map<AtmosphereMaterial, List<MaterialChunkData.Cell>> updates) {
+        if (updates.isEmpty()) return Map.of();
+        Snapshot previous = chunk.getExistingDataOrNull(DATA.get());
+        Map<AtmosphereMaterial, MaterialChunkData.StoredMaterial> previousMaterials =
+            previous == null ? Map.of() : previous.materials();
+        MaterialChunkData.BatchMerge merge = MaterialChunkData.mergeBatch(previousMaterials, updates,
+            chunk.getPos().x, chunk.getPos().z, chunk.getMinBuildHeight(), chunk.getMaxBuildHeight());
+        if (merge.changed()) {
+            chunk.setData(DATA.get(), new Snapshot(merge.materials()));
+            chunk.setUnsaved(true);
+        }
+        return merge.failures();
+    }
+
     private static void requireReadable(AtmosphereMaterial material, MaterialChunkData.StoredMaterial stored) {
         if (stored != null && stored.unreadable() != null) {
             throw new IllegalStateException("Unsupported/corrupt " + material.id()
