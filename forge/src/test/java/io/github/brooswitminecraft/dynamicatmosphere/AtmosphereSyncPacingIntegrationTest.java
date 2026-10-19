@@ -13,15 +13,22 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * MINECRAFT-436 review (first round): deterministic planner-to-paced-queue-to-client coverage,
- * driving the REAL {@link AtmosphereSyncPlanner}, {@link PacedSyncQueue}, and (where the scenario
- * calls for client-visible state) the real {@link AtmosphereClientCache} -- rather than only the
- * synthetic batch types {@code PacedSyncQueueTest} uses to isolate the queue's own mechanics.
- * {@link #syncOnce} mirrors {@code ForgeAtmospherePrototype.syncPlayer}'s idle/genuine-change
- * planning gate exactly (see that method's doc), so these tests exercise the production
- * composition, not just each piece in isolation.
+ * MINECRAFT-436 review (first round, updated third round): deterministic planner-to-paced-queue-
+ * to-client coverage, driving the REAL {@link AtmosphereSyncPlanner}, {@link PacedSyncQueue}, and
+ * (where the scenario calls for client-visible state) the real {@link AtmosphereClientCache} --
+ * rather than only the synthetic batch types {@code PacedSyncQueueTest} uses to isolate the
+ * queue's own mechanics. {@link #syncOnce} mirrors {@code ForgeAtmospherePrototype.syncPlayer}'s
+ * idle/genuine-change planning gate exactly (see that method's doc), now using {@link
+ * AtmosphereSyncPlanner#planChunks}/{@link AtmosphereSyncPlanner#wouldForceResetChunked} -- the
+ * chunk-revision-aware API production switched to in the third review round -- so these tests
+ * exercise the actual current production composition, not a superseded one. Chunk-level
+ * incrementality itself (skipping unchanged chunks) is covered separately and more directly by
+ * {@code AtmosphereSyncPlannerChunkedTest}; these tests model everything as a single pseudo-chunk
+ * since they are about pacing/budget/queue behavior, not chunk-level granularity.
  */
 class AtmosphereSyncPacingIntegrationTest {
+
+    private static final AtmosphereSyncPlanner.Chunk PSEUDO_CHUNK = new AtmosphereSyncPlanner.Chunk(0, 0);
 
     private static int weight(AtmosphereSyncPlanner.Update<String> update) {
         return update.authoritativeChunks().size() + update.cells().size();
@@ -61,22 +68,27 @@ class AtmosphereSyncPacingIntegrationTest {
     /**
      * Mirrors {@code ForgeAtmospherePrototype.syncPlayer}'s gate exactly: a fresh plan is only
      * requested when the queue is idle, or -- regardless of queue state -- a genuine
-     * dimension/view-distance change is detected via {@link AtmosphereSyncPlanner#wouldForceReset}.
-     * The periodic trigger ({@code periodicDue}) is only ever honored while idle.
+     * dimension/view-distance change is detected via {@link AtmosphereSyncPlanner#wouldForceResetChunked}.
+     * The periodic trigger ({@code periodicDue}) is only ever honored while idle. {@code revision}
+     * stands in for the real (amountRevision, terrainGeneration) pair collapsed to one chunk; it
+     * is only ever consulted when a plan is actually requested (idle or genuine change), exactly
+     * like production.
      */
     private static List<AtmosphereSyncPlanner.Update<String>> syncOnce(
         AtmosphereSyncPlanner<String, String> planner,
         PacedSyncQueue<String, AtmosphereSyncPlanner.Update<String>> queue,
         AtmosphereClientCache client,
-        String player, String dimension, List<AtmosphereSyncPlanner.Chunk> chunks,
+        String player, String dimension, long revision,
         List<AtmosphereSyncPlanner.Cell> cells, boolean periodicDue, int budget
     ) {
         boolean idle = !queue.hasPending(player);
         boolean genuineChange = !idle
-            && planner.wouldForceReset(player, dimension, AtmosphereSyncPlanner.UNKNOWN_VIEW_RADIUS);
+            && planner.wouldForceResetChunked(player, dimension, AtmosphereSyncPlanner.UNKNOWN_VIEW_RADIUS);
         if (idle || genuineChange) {
             if (idle && periodicDue) planner.reset(player);
-            queue.enqueue(player, planner.plan(player, dimension, chunks, cells));
+            var chunkCells = List.of(new AtmosphereSyncPlanner.ChunkCells(PSEUDO_CHUNK, revision, 0L, cells));
+            queue.enqueue(player,
+                planner.planChunks(player, dimension, AtmosphereSyncPlanner.UNKNOWN_VIEW_RADIUS, chunkCells));
         }
         List<AtmosphereSyncPlanner.Update<String>> delivered = queue.drain(player, budget);
         if (client != null) {
@@ -96,7 +108,6 @@ class AtmosphereSyncPacingIntegrationTest {
         var queue = newQueue();
         var client = new AtmosphereClientCache();
         client.changeDimension("overworld");
-        List<AtmosphereSyncPlanner.Chunk> chunks = List.of();
         List<AtmosphereSyncPlanner.Cell> cells = IntStream.range(0, 11)
             .mapToObj(i -> new AtmosphereSyncPlanner.Cell(i, 0, 0, 500, 1000)).toList();
         int budget = 3;
@@ -107,7 +118,7 @@ class AtmosphereSyncPacingIntegrationTest {
         // staggered production cadence, which fires at most once per slotsPerInterval ticks),
         // proving even this cannot restart an already-in-flight, not-yet-complete snapshot.
         for (int tick = 0; tick < 50 && !sawSnapshotEnd; tick++) {
-            for (var update : syncOnce(planner, queue, client, "p", "overworld", chunks, cells, true, budget)) {
+            for (var update : syncOnce(planner, queue, client, "p", "overworld", tick, cells, true, budget)) {
                 if (update.reset()) {
                     assertFalse(sawUnfinishedReset,
                         "a new reset must never arrive before the previous reset's snapshotEnd -- that would "
@@ -131,12 +142,11 @@ class AtmosphereSyncPacingIntegrationTest {
         var queue = newQueue();
         var client = new AtmosphereClientCache();
         client.changeDimension("overworld");
-        List<AtmosphereSyncPlanner.Chunk> chunks = List.of();
         List<AtmosphereSyncPlanner.Cell> initialCells = IntStream.range(0, 10)
             .mapToObj(i -> new AtmosphereSyncPlanner.Cell(i, 0, 0, 500, 1000)).toList();
         int budget = 2;
 
-        syncOnce(planner, queue, client, "p", "overworld", chunks, initialCells, true, budget);
+        syncOnce(planner, queue, client, "p", "overworld", 0, initialCells, true, budget);
         assertTrue(queue.hasPending("p"), "budget 2 over 10 cells must not complete in a single tick");
 
         // A cell's authoritative value changes WHILE the snapshot is still draining. Since the
@@ -146,13 +156,14 @@ class AtmosphereSyncPacingIntegrationTest {
         changedCells.set(3, new AtmosphereSyncPlanner.Cell(3, 0, 0, 999, 1000));
 
         while (queue.hasPending("p")) {
-            syncOnce(planner, queue, client, "p", "overworld", chunks, changedCells, false, budget);
+            syncOnce(planner, queue, client, "p", "overworld", 0, changedCells, false, budget);
         }
         assertEquals(10, client.size(), "the in-flight snapshot must still fully complete, undisturbed");
 
-        // Once idle, the very next sync call re-plans against the live (changed) cells and must
-        // correctly deliver the change that arrived mid-snapshot -- no staleness, nothing lost.
-        syncOnce(planner, queue, client, "p", "overworld", chunks, changedCells, false, budget);
+        // Once idle, the very next sync call re-plans against the live (changed) cells -- a
+        // genuinely new revision, since the chunk's data has changed -- and must correctly
+        // deliver the change that arrived mid-snapshot: no staleness, nothing lost.
+        syncOnce(planner, queue, client, "p", "overworld", 1, changedCells, false, budget);
 
         var committed = client.exportUpdates().stream()
             .collect(java.util.stream.Collectors.toMap(
@@ -166,18 +177,18 @@ class AtmosphereSyncPacingIntegrationTest {
     void genuineDimensionChangeSupersedesAnUnfinishedSnapshotImmediatelyEvenMidDrain() {
         var planner = new AtmosphereSyncPlanner<String, String>(1_000);
         var queue = newQueue();
-        List<AtmosphereSyncPlanner.Chunk> chunks = List.of();
         List<AtmosphereSyncPlanner.Cell> overworldCells = IntStream.range(0, 10)
             .mapToObj(i -> new AtmosphereSyncPlanner.Cell(i, 0, 0, 500, 1000)).toList();
         int budget = 2;
 
-        syncOnce(planner, queue, null, "p", "overworld", chunks, overworldCells, true, budget);
+        syncOnce(planner, queue, null, "p", "overworld", 0, overworldCells, true, budget);
         assertTrue(queue.hasPending("p"), "budget 2 over 10 cells must not complete in a single tick");
 
         // A genuine dimension change arrives mid-drain: must supersede immediately in THIS same
-        // call, not deferred until the stale overworld snapshot finishes draining.
+        // call, not deferred until the stale overworld snapshot finishes draining. Dimension
+        // changes bypass revision comparison entirely, so the revision value here is irrelevant.
         List<AtmosphereSyncPlanner.Cell> netherCells = List.of(new AtmosphereSyncPlanner.Cell(0, 0, 0, 250, 1000));
-        var delivered = syncOnce(planner, queue, null, "p", "nether", chunks, netherCells, false, budget);
+        var delivered = syncOnce(planner, queue, null, "p", "nether", 0, netherCells, false, budget);
 
         assertTrue(delivered.stream().anyMatch(AtmosphereSyncPlanner.Update::reset),
             "a genuine dimension change must start a fresh reset in the very tick it is detected, "
@@ -199,31 +210,33 @@ class AtmosphereSyncPacingIntegrationTest {
         var queue = newQueue();
         var client = new AtmosphereClientCache();
         client.changeDimension("overworld");
-        List<AtmosphereSyncPlanner.Chunk> chunks = List.of();
         int cellCount = 20;
         int budget = 1; // deliberately starved: far slower than the arrival rate below.
 
         List<AtmosphereSyncPlanner.Cell> cells = IntStream.range(0, cellCount)
             .mapToObj(i -> new AtmosphereSyncPlanner.Cell(i, 0, 0, 1, 1000)).toList();
         while (true) {
-            syncOnce(planner, queue, client, "p", "overworld", chunks, cells, false, budget);
+            syncOnce(planner, queue, client, "p", "overworld", 0, cells, false, budget);
             if (!queue.hasPending("p")) break;
         }
         assertEquals(cellCount, client.size());
 
         int maxWeightObserved = 0;
         var random = new Random(42);
-        for (int tick = 0; tick < 500; tick++) {
-            // Every tick, every cell's amount changes -- far faster than budget=1 can drain.
+        for (int tick = 1; tick <= 500; tick++) {
+            // Every tick, every cell's amount changes -- far faster than budget=1 can drain. The
+            // ever-increasing revision models this chunk genuinely changing every single tick.
             cells = IntStream.range(0, cellCount)
                 .mapToObj(i -> new AtmosphereSyncPlanner.Cell(i, 0, 0, 1 + random.nextInt(900), 1000)).toList();
-            syncOnce(planner, queue, client, "p", "overworld", chunks, cells, false, budget);
+            syncOnce(planner, queue, client, "p", "overworld", tick, cells, false, budget);
             maxWeightObserved = Math.max(maxWeightObserved, queue.pendingWeight("p"));
         }
 
         assertTrue(maxWeightObserved <= cellCount,
-            "pending weight must stay bounded by the current scope size (at most " + cellCount + " ops) and "
-                + "never grow with elapsed ticks or arrival rate (observed max " + maxWeightObserved
-                + "), since a fresh plan is only ever queued once the previous generation has fully drained");
+            "pending weight must stay bounded by the current scope size (at most " + cellCount + " ops -- "
+                + "every measured tick here is an ordinary changed-chunk delta, which carries no chunk "
+                + "entries, only cells) and never grow with elapsed ticks or arrival rate (observed max "
+                + maxWeightObserved + "), since a fresh plan is only ever queued once the previous "
+                + "generation has fully drained");
     }
 }

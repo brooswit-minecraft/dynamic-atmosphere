@@ -38,8 +38,24 @@ final class AtmosphereSyncPlanner<P, D> {
     private record CellCoordinate(int x, int y, int z) {
     }
 
+    /**
+     * MINECRAFT-436 review: one chunk's input to {@link #planChunks}, carrying the SAME
+     * (amountRevision, terrainGeneration) pair a caller's own cross-tick cell cache already
+     * computed (see {@code ForgeAtmospherePrototype.cachedChunkCells}) -- so the planner can
+     * decide, per chunk, whether anything in it needs to be looked at at all, instead of
+     * {@link #plan} re-indexing and re-diffing every visible cell in the player's entire view on
+     * every call regardless of how much (if any) of it actually changed.
+     */
+    record ChunkCells(Chunk chunk, long amountRevision, long terrainGeneration, List<Cell> cells) { }
+
+    private record ChunkEntry(long amountRevision, long terrainGeneration, Map<CellCoordinate, Cell> cells) { }
+
+    private record ChunkedPlayerView<D>(D dimension, int viewRadius, Map<Chunk, ChunkEntry> chunkEntries) { }
+
     private final int batchSize;
     private final Map<P, PlayerView<D>> views = new HashMap<>();
+    /** See {@link #planChunks}'s doc; independent state, used only by the chunk-revision-aware API. */
+    private final Map<P, ChunkedPlayerView<D>> chunkedViews = new HashMap<>();
 
     AtmosphereSyncPlanner(int batchSize) {
         if (batchSize <= 0) {
@@ -64,6 +80,103 @@ final class AtmosphereSyncPlanner<P, D> {
     boolean wouldForceReset(P player, D dimension, int viewRadius) {
         PlayerView<D> previous = views.get(player);
         return previous == null || !previous.dimension().equals(dimension) || previous.viewRadius() != viewRadius;
+    }
+
+    /** See {@link #wouldForceReset}'s doc; the same peek against {@link #planChunks}'s independent state. */
+    boolean wouldForceResetChunked(P player, D dimension, int viewRadius) {
+        ChunkedPlayerView<D> previous = chunkedViews.get(player);
+        return previous == null || !previous.dimension().equals(dimension) || previous.viewRadius() != viewRadius;
+    }
+
+    /**
+     * MINECRAFT-436 review: the original intended implementation required ordinary sync to
+     * "process changes plus subscription-entry/exit information rather than rebuilding every
+     * visible material map" per player per tick. This is the chunk-revision-aware planner engine
+     * that does that: a chunk whose (amountRevision, terrainGeneration) is unchanged since the
+     * last call, and which is still subscribed, is skipped entirely -- its cells are never
+     * indexed, diffed, or even looked at -- rather than {@link #plan}'s flat model, which
+     * re-indexes and re-diffs the player's ENTIRE visible cell set on every call regardless of
+     * how much (if any) of it actually changed. When nothing is entered/changed/exited at all
+     * (the common stationary-player, nothing-nearby-changed steady state), this returns {@code
+     * List.of()} after only an O(subscribed chunk count) scan -- no cell-level work whatsoever.
+     *
+     * <p>Independent state from {@link #plan} ({@link #chunkedViews}, not {@link #views}): the
+     * two APIs are never mixed for the same player in production (this one is), but both remain
+     * fully functional and separately tested so {@link #plan}'s own existing, heavily-covered
+     * flat-diff behavior (used directly by {@code AtmosphereSyncPlannerTest}) is untouched by this
+     * addition.
+     *
+     * <p>Preserves every existing observable semantic of {@link #plan}: a departed chunk's cells
+     * are zeroed (tombstoned), a departed cell within a still-subscribed changed chunk is
+     * tombstoned, a capacity-only change (same amount, different capacity) is still emitted
+     * because it reaches here only as part of a changed chunk's full cell-by-cell diff, batching
+     * via {@link #addBatches} is unchanged, and dimension/view-distance changes still force a full
+     * reset snapshot of every currently visible cell.
+     */
+    List<Update<D>> planChunks(P player, D dimension, int viewRadius, List<ChunkCells> chunks) {
+        ChunkedPlayerView<D> previous = chunkedViews.get(player);
+        boolean dimensionChanged = previous == null || !previous.dimension().equals(dimension);
+        boolean viewChanged = previous != null && !dimensionChanged && previous.viewRadius() != viewRadius;
+        var updates = new ArrayList<Update<D>>();
+
+        if (dimensionChanged || viewChanged) {
+            List<Chunk> chunkScope = List.copyOf(new LinkedHashSet<>(chunks.stream().map(ChunkCells::chunk).toList()));
+            List<Cell> allCells = chunks.stream().flatMap(c -> c.cells().stream()).toList();
+            Map<Chunk, ChunkEntry> entries = new LinkedHashMap<>();
+            for (ChunkCells input : chunks) {
+                entries.put(input.chunk(),
+                    new ChunkEntry(input.amountRevision(), input.terrainGeneration(), index(input.cells())));
+            }
+            if (dimensionChanged && previous != null) {
+                updates.add(new Update<>(previous.dimension(), true, true, List.of(), List.of()));
+            }
+            chunkedViews.put(player, new ChunkedPlayerView<>(dimension, viewRadius, entries));
+            addBatches(updates, dimension, true, chunkScope, allCells);
+            return updates;
+        }
+
+        Map<Chunk, ChunkEntry> previousEntries = previous.chunkEntries();
+        Map<Chunk, ChunkEntry> nextEntries = new LinkedHashMap<>(previousEntries);
+        Set<Chunk> currentChunkSet = new LinkedHashSet<>(chunks.stream().map(ChunkCells::chunk).toList());
+        List<Cell> delta = new ArrayList<>();
+        boolean anyChange = false;
+
+        for (var entry : previousEntries.entrySet()) {
+            if (!currentChunkSet.contains(entry.getKey())) {
+                for (CellCoordinate coordinate : entry.getValue().cells().keySet()) {
+                    delta.add(new Cell(coordinate.x(), coordinate.y(), coordinate.z(), 0, 0));
+                }
+                nextEntries.remove(entry.getKey());
+                anyChange = true;
+            }
+        }
+
+        for (ChunkCells input : chunks) {
+            ChunkEntry oldEntry = previousEntries.get(input.chunk());
+            boolean changed = oldEntry == null
+                || oldEntry.amountRevision() != input.amountRevision()
+                || oldEntry.terrainGeneration() != input.terrainGeneration();
+            if (!changed) continue;
+            anyChange = true;
+            Map<CellCoordinate, Cell> oldCells = oldEntry == null ? Map.of() : oldEntry.cells();
+            Map<CellCoordinate, Cell> newCells = index(input.cells());
+            for (CellCoordinate coordinate : oldCells.keySet()) {
+                if (!newCells.containsKey(coordinate)) {
+                    delta.add(new Cell(coordinate.x(), coordinate.y(), coordinate.z(), 0, 0));
+                }
+            }
+            for (Cell cell : input.cells()) {
+                Cell old = oldCells.get(new CellCoordinate(cell.x(), cell.y(), cell.z()));
+                if (!cell.equals(old)) delta.add(cell);
+            }
+            nextEntries.put(input.chunk(),
+                new ChunkEntry(input.amountRevision(), input.terrainGeneration(), newCells));
+        }
+
+        chunkedViews.put(player, new ChunkedPlayerView<>(dimension, viewRadius, nextEntries));
+        if (!anyChange) return List.of();
+        addBatches(updates, dimension, false, List.of(), delta);
+        return updates;
     }
 
     /**
@@ -117,20 +230,24 @@ final class AtmosphereSyncPlanner<P, D> {
 
     void disconnect(P player) {
         views.remove(player);
+        chunkedViews.remove(player);
     }
 
     void reset(P player) {
         views.remove(player);
+        chunkedViews.remove(player);
     }
 
     void retainPlayers(Iterable<P> connectedPlayers) {
         Map<P, Boolean> connected = new HashMap<>();
         connectedPlayers.forEach(player -> connected.put(player, Boolean.TRUE));
         views.keySet().removeIf(player -> !connected.containsKey(player));
+        chunkedViews.keySet().removeIf(player -> !connected.containsKey(player));
     }
 
     void clear() {
         views.clear();
+        chunkedViews.clear();
     }
 
     private Map<CellCoordinate, Cell> index(List<Cell> cells) {

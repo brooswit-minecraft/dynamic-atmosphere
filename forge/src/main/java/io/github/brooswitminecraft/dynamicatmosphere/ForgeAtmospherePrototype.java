@@ -449,17 +449,7 @@ final class ForgeAtmospherePrototype {
                     for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
                         state.materialCells.get(material).keySet().forEach(materialGrids.get(material)::remove);
                     }
-                    // MINECRAFT-436: an unloaded chunk's entry would otherwise sit in these
-                    // cross-tick caches forever (a slow, unbounded leak over a long server
-                    // session as players explore); evict it alongside the chunk state itself.
-                    amountRevision.remove(key);
-                    chunkCellCache.remove(key);
-                    smokeAmountRevision.remove(key);
-                    smokeChunkCellCache.remove(key);
-                    for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
-                        materialAmountRevision.get(material).remove(key);
-                        materialChunkCellCaches.get(material).remove(key);
-                    }
+                    evictChunkCellCaches(key);
                 }
             };
             if (level.getServer().isSameThread()) {
@@ -2101,7 +2091,7 @@ final class ForgeAtmospherePrototype {
     /**
      * MINECRAFT-436 review: a fresh plan is requested either when nothing from an earlier
      * generation is still queued, or -- regardless of queue state -- the moment a genuine
-     * dimension or view-distance change is detected ({@link AtmosphereSyncPlanner#wouldForceReset},
+     * dimension or view-distance change is detected ({@link AtmosphereSyncPlanner#wouldForceResetChunked},
      * a cheap peek needing only the dimension/viewRadius already in hand, no chunk/cell gather),
      * so a real change still supersedes immediately even mid-drain ("superseding immediately on
      * genuine dimension/view changes"). The periodic trigger is different: it is only ever
@@ -2122,29 +2112,32 @@ final class ForgeAtmospherePrototype {
         var trackingView = player.getChunkTrackingView();
         int viewRadius = viewRadiusOf(trackingView);
         boolean idle = !syncQueue.hasPending(id);
-        boolean genuineChange = !idle && syncPlanner.wouldForceReset(id, dimension, viewRadius);
+        boolean genuineChange = !idle && syncPlanner.wouldForceResetChunked(id, dimension, viewRadius);
         if (idle || genuineChange) {
             if (idle && pendingFullSnapshot.remove(id)) syncPlanner.reset(id);
-            var authoritativeChunks = new ArrayList<AtmosphereSyncPlanner.Chunk>();
-            var visible = new ArrayList<AtmosphereSyncPlanner.Cell>();
+            var chunkCells = new ArrayList<AtmosphereSyncPlanner.ChunkCells>();
             // Use Minecraft's subscription, including changes to client/server view distance.
             // ensureImported only reads already loaded chunks and retains its per-tick budget.
             // MINECRAFT-436: one chunk's cell list (with capacity already resolved) is cached
             // across ticks (see #cachedChunkCells) and reused for every player whose view
             // includes it, instead of every overlapping player independently re-reading the grid
-            // and recomputing capacity for the same cells on every tick.
+            // and recomputing capacity for the same cells on every tick. The per-chunk revision
+            // and terrain generation are also fed into planChunks itself, so the planner can skip
+            // an unchanged chunk entirely instead of re-diffing the player's whole visible map.
             trackingView.forEach(chunk -> {
                 ChunkState state = ensureImported(player.serverLevel(), chunk.x, chunk.z);
                 if (state == null || !state.readable) {
                     return;
                 }
-                authoritativeChunks.add(new AtmosphereSyncPlanner.Chunk(chunk.x, chunk.z));
                 ChunkKey key = new ChunkKey(dimension, chunk.x, chunk.z);
-                visible.addAll(cachedChunkCells(chunkCellCache, amountRevision, key,
-                    ForgeTerrainFacts.generation(state.chunk),
-                    () -> atmosphereCellsForChunk(player.serverLevel(), state, capacities)));
+                long revision = amountRevision.getOrDefault(key, 0L);
+                long terrainGeneration = ForgeTerrainFacts.generation(state.chunk);
+                List<AtmosphereSyncPlanner.Cell> cells = cachedChunkCells(chunkCellCache, amountRevision, key,
+                    terrainGeneration, () -> atmosphereCellsForChunk(player.serverLevel(), state, capacities));
+                chunkCells.add(new AtmosphereSyncPlanner.ChunkCells(
+                    new AtmosphereSyncPlanner.Chunk(chunk.x, chunk.z), revision, terrainGeneration, cells));
             });
-            syncQueue.enqueue(id, syncPlanner.plan(id, dimension, viewRadius, authoritativeChunks, visible));
+            syncQueue.enqueue(id, syncPlanner.planChunks(id, dimension, viewRadius, chunkCells));
         }
 
         int consumed = 0;
@@ -2171,22 +2164,23 @@ final class ForgeAtmospherePrototype {
         var trackingView = player.getChunkTrackingView();
         int viewRadius = viewRadiusOf(trackingView);
         boolean idle = !smokeSyncQueue.hasPending(id);
-        boolean genuineChange = !idle && smokeSyncPlanner.wouldForceReset(id, dimension, viewRadius);
+        boolean genuineChange = !idle && smokeSyncPlanner.wouldForceResetChunked(id, dimension, viewRadius);
         if (idle || genuineChange) {
             if (idle && pendingSmokeFullSnapshot.remove(id)) smokeSyncPlanner.reset(id);
-            var scope = new ArrayList<SmokeSyncPlanner.Chunk>();
-            var visible = new ArrayList<SmokeSyncPlanner.Cell>();
+            var chunkCells = new ArrayList<SmokeSyncPlanner.ChunkCells>();
             // MINECRAFT-436: cross-tick shared chunk cell cache; see #cachedChunkCells's doc.
             trackingView.forEach(chunk -> {
                 ChunkState state = ensureImported(player.serverLevel(), chunk.x, chunk.z);
                 if (state == null || !state.smokeReadable) return;
-                scope.add(new SmokeSyncPlanner.Chunk(chunk.x, chunk.z));
                 ChunkKey key = new ChunkKey(dimension, chunk.x, chunk.z);
-                visible.addAll(cachedChunkCells(smokeChunkCellCache, smokeAmountRevision, key,
-                    ForgeTerrainFacts.generation(state.chunk),
-                    () -> smokeCellsForChunk(player.serverLevel(), state)));
+                long revision = smokeAmountRevision.getOrDefault(key, 0L);
+                long terrainGeneration = ForgeTerrainFacts.generation(state.chunk);
+                List<SmokeSyncPlanner.Cell> cells = cachedChunkCells(smokeChunkCellCache, smokeAmountRevision, key,
+                    terrainGeneration, () -> smokeCellsForChunk(player.serverLevel(), state));
+                chunkCells.add(new SmokeSyncPlanner.ChunkCells(
+                    new SmokeSyncPlanner.Chunk(chunk.x, chunk.z), revision, terrainGeneration, cells));
             });
-            smokeSyncQueue.enqueue(id, smokeSyncPlanner.plan(id, dimension, viewRadius, scope, visible));
+            smokeSyncQueue.enqueue(id, smokeSyncPlanner.planChunks(id, dimension, viewRadius, chunkCells));
         }
 
         int consumed = 0;
@@ -2219,11 +2213,10 @@ final class ForgeAtmospherePrototype {
         var trackingView = player.getChunkTrackingView();
         int viewRadius = viewRadiusOf(trackingView);
         boolean idle = !queue.hasPending(id);
-        boolean genuineChange = !idle && planner.wouldForceReset(id, dimension, viewRadius);
+        boolean genuineChange = !idle && planner.wouldForceResetChunked(id, dimension, viewRadius);
         if (idle || genuineChange) {
             if (idle && pendingFullSnapshotForMaterial.remove(id)) planner.reset(id);
-            var scope = new ArrayList<SmokeSyncPlanner.Chunk>();
-            var visible = new ArrayList<SmokeSyncPlanner.Cell>();
+            var chunkCells = new ArrayList<SmokeSyncPlanner.ChunkCells>();
             Map<ChunkKey, CachedChunkCells<SmokeSyncPlanner.Cell>> materialChunkCellCache =
                 materialChunkCellCaches.get(material);
             Map<ChunkKey, Long> materialRevision = materialAmountRevision.get(material);
@@ -2231,13 +2224,15 @@ final class ForgeAtmospherePrototype {
             trackingView.forEach(chunk -> {
                 ChunkState state = ensureImported(player.serverLevel(), chunk.x, chunk.z);
                 if (state == null || !state.materialReadable.contains(material)) return;
-                scope.add(new SmokeSyncPlanner.Chunk(chunk.x, chunk.z));
                 ChunkKey key = new ChunkKey(dimension, chunk.x, chunk.z);
-                visible.addAll(cachedChunkCells(materialChunkCellCache, materialRevision, key,
-                    ForgeTerrainFacts.generation(state.chunk),
-                    () -> materialCellsForChunk(player.serverLevel(), material, state)));
+                long revision = materialRevision.getOrDefault(key, 0L);
+                long terrainGeneration = ForgeTerrainFacts.generation(state.chunk);
+                List<SmokeSyncPlanner.Cell> cells = cachedChunkCells(materialChunkCellCache, materialRevision, key,
+                    terrainGeneration, () -> materialCellsForChunk(player.serverLevel(), material, state));
+                chunkCells.add(new SmokeSyncPlanner.ChunkCells(
+                    new SmokeSyncPlanner.Chunk(chunk.x, chunk.z), revision, terrainGeneration, cells));
             });
-            queue.enqueue(id, planner.plan(id, dimension, viewRadius, scope, visible));
+            queue.enqueue(id, planner.planChunks(id, dimension, viewRadius, chunkCells));
         }
 
         int consumed = 0;
@@ -2521,6 +2516,19 @@ final class ForgeAtmospherePrototype {
             for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
                 previous.materialCells.get(material).keySet().forEach(materialGrids.get(material)::remove);
             }
+            // MINECRAFT-436 review: a replacement LevelChunk at the same key is a new
+            // incarnation with its own fresh ForgeTerrainFacts attachment (generation restarts),
+            // and its persisted cells are restored directly into the new ChunkState.cells -- so
+            // the very next flushDirtyChunks sees persisted == live and never bumps
+            // amountRevision for this key. Equal (amountRevision, terrainGeneration) across two
+            // different incarnations could otherwise reuse a stale cached cell list, including
+            // for a periodic full snapshot. Evict unconditionally on replacement so the next
+            // access always rebuilds against the new incarnation, never relying on revision/
+            // generation coincidentally differing. (A later unload of the now-replaced OLD
+            // ChunkState never reaches this path at all -- chunks.get(key) is already the NEW
+            // state by then and fails state.chunk == chunk -- so this is the only place that can
+            // catch a replacement; it is not optional/best-effort.)
+            evictChunkCellCaches(key);
         }
         ChunkState state = new ChunkState(chunk);
         chunks.put(key, state);
@@ -2669,6 +2677,25 @@ final class ForgeAtmospherePrototype {
 
     private static ChunkKey chunkKey(ServerLevel level, LevelChunk chunk) {
         return new ChunkKey(level.dimension(), chunk.getPos().x, chunk.getPos().z);
+    }
+
+    /**
+     * MINECRAFT-436 review: drops {@code key}'s entry from every channel's cross-tick cell cache
+     * and revision map. Called both on a normal chunk unload and on {@code ensureImported}
+     * replacing a different {@code LevelChunk} incarnation at the same key -- the latter can
+     * otherwise leave a stale cached cell list reachable under a coincidentally-matching
+     * (amountRevision, terrainGeneration) pair from the old incarnation (see {@code
+     * ensureImported}'s doc at its replacement branch).
+     */
+    private void evictChunkCellCaches(ChunkKey key) {
+        amountRevision.remove(key);
+        chunkCellCache.remove(key);
+        smokeAmountRevision.remove(key);
+        smokeChunkCellCache.remove(key);
+        for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
+            materialAmountRevision.get(material).remove(key);
+            materialChunkCellCaches.get(material).remove(key);
+        }
     }
 
     private record ChunkKey(ResourceKey<Level> dimension, int x, int z) {

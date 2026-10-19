@@ -101,4 +101,40 @@ class ForgeAtmospherePrototypeCachedChunkCellsTest {
             "a chunk never found dirty (no revisions entry) must still cache-hit on repeated calls, "
                 + "defaulting consistently to the same implied revision rather than rebuilding every time");
     }
+
+    /**
+     * MINECRAFT-436 review: models the exact bug a chunk-replacement incarnation can produce --
+     * a stale cached entry remains reachable under a (revision, generation) pair that
+     * coincidentally matches the NEW incarnation's own starting values, even though the
+     * underlying data is for a completely different chunk instance with different cells. This is
+     * exactly why {@code ensureImported}'s replacement branch unconditionally evicts the cache
+     * entry (via {@code evictChunkCellCaches}) instead of trusting revision/generation alone to
+     * detect the swap: removal forces a rebuild regardless of what the (possibly coincidentally
+     * matching) revision and generation values are.
+     */
+    @Test
+    void evictingAnEntryForcesARebuildEvenWithIdenticalRevisionAndGenerationAsBefore() {
+        Map<String, ForgeAtmospherePrototype.CachedChunkCells<String>> cache = new HashMap<>();
+        Map<String, Long> revisions = new HashMap<>();
+        var builds = new AtomicInteger();
+
+        // Old chunk incarnation: revision 0 (never found dirty), generation 1 (fresh attachment).
+        var oldChunkCells = ForgeAtmospherePrototype.cachedChunkCells(
+            cache, revisions, "chunk-0-0", 1L, () -> build(builds, "old-incarnation-cell"));
+
+        // A replacement LevelChunk at the SAME coordinate is imported. Its own fresh
+        // TerrainFactsCache also starts at generation 1, and its persisted cells are restored
+        // directly into the new ChunkState, so the very next flushDirtyChunks sees persisted ==
+        // live and never bumps the revision either: both signals coincidentally match the old
+        // incarnation's. Without eviction, the stale "old-incarnation-cell" would be reused here.
+        cache.remove("chunk-0-0"); // what evictChunkCellCaches does on replacement
+        var newChunkCells = ForgeAtmospherePrototype.cachedChunkCells(
+            cache, revisions, "chunk-0-0", 1L, () -> build(builds, "new-incarnation-cell"));
+
+        assertEquals(2, builds.get(), "eviction must force a rebuild even though revision (0) and "
+            + "generation (1) are identical to what the old incarnation's entry was stamped with");
+        assertEquals(List.of("old-incarnation-cell"), oldChunkCells);
+        assertEquals(List.of("new-incarnation-cell"), newChunkCells,
+            "the new incarnation's actual data must be served, not the evicted stale entry");
+    }
 }
