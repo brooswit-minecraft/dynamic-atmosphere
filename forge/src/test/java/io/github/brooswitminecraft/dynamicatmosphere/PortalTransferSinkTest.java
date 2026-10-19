@@ -541,6 +541,82 @@ class PortalTransferSinkTest {
         assertTrue(abandoned.isEmpty());
     }
 
+    /**
+     * MINECRAFT-435 (eighth review, kickback): {@code transferNetherPortal}'s early-return guards
+     * (source destroyed, gas emptied, dimension no longer eligible, destination level unloaded)
+     * must each release an already-paused selection and its shared pool reference, or both leak
+     * indefinitely once the source is popped from its queue. {@code transferNetherPortal} itself
+     * needs a real {@code ServerLevel}/{@code LevelChunk} (no GameTest harness or mocking
+     * framework exists in this repo for that, consistent with the established testing boundary),
+     * so this exercises the exact cleanup call (abandonNetherSelection) those guards now all make,
+     * via the test-only seam.
+     */
+    @Test
+    void abandonNetherSelectionReleasesAPausedSelectionAndItsSharedPoolReference() {
+        var sink = PortalTransferSink.createForTest(new FakeGrid());
+        var dimension = Level.NETHER;
+        var pos = new BlockPos(0, 64, 0);
+        sink.seedPausedNetherSelectionForTest(dimension, pos, Level.OVERWORLD);
+        assertTrue(sink.hasNetherSelectionForTest(dimension, pos));
+        assertEquals(1, sink.netherPoolReferenceCountForTest(Level.OVERWORLD));
+
+        sink.abandonNetherSelectionForTest(dimension, pos);
+
+        assertFalse(sink.hasNetherSelectionForTest(dimension, pos),
+            "a paused selection must be released, not leaked, once its source is handled by an early exit");
+        assertEquals(0, sink.netherPoolReferenceCountForTest(Level.OVERWORLD),
+            "the shared discovery pool's reference count must be released too, or the pool itself leaks");
+    }
+
+    /**
+     * MINECRAFT-435 (eighth review, kickback): two sources whose selections share one discovery
+     * pool (the normal case this ticket's reference counting exists for) must each independently
+     * abandon their own selection without tearing down the pool out from under the other still-
+     * active one -- only once EVERY referencing selection has been abandoned should the pool
+     * itself be released.
+     */
+    @Test
+    void abandoningOneOfTwoSourcesSharingAPoolKeepsItAliveForTheOther() {
+        var sink = PortalTransferSink.createForTest(new FakeGrid());
+        var posA = new BlockPos(0, 64, 0);
+        var posB = new BlockPos(1, 64, 0);
+        sink.seedPausedNetherSelectionForTest(Level.NETHER, posA, Level.OVERWORLD);
+        sink.seedPausedNetherSelectionForTest(Level.NETHER, posB, Level.OVERWORLD);
+        assertEquals(2, sink.netherPoolReferenceCountForTest(Level.OVERWORLD));
+
+        sink.abandonNetherSelectionForTest(Level.NETHER, posA);
+        assertEquals(1, sink.netherPoolReferenceCountForTest(Level.OVERWORLD), "still referenced by posB's own selection");
+        assertFalse(sink.hasNetherSelectionForTest(Level.NETHER, posA));
+        assertTrue(sink.hasNetherSelectionForTest(Level.NETHER, posB));
+
+        sink.abandonNetherSelectionForTest(Level.NETHER, posB);
+        assertEquals(0, sink.netherPoolReferenceCountForTest(Level.OVERWORLD));
+    }
+
+    /**
+     * MINECRAFT-435 (eighth review, kickback): {@code clearPendingWork}'s O(1) cleanup only
+     * inspects the queue's current front -- this confirms that when the front source actually
+     * owns a paused selection, invalidating the chunk still correctly releases it (not just that
+     * walking the remainder is avoided, which {@link #abandonFrontOnlyTouchesOnlyTheFrontElementNeverWalksTheWholeRemainder}
+     * already covers).
+     */
+    @Test
+    void clearPendingWorkReleasesAPausedSelectionOwnedByTheQueuesFrontSource() {
+        var sink = PortalTransferSink.createForTest(new FakeGrid());
+        var dimension = Level.NETHER;
+        long chunkKey = 1L;
+        var front = new BlockPos(0, 64, 0);
+        var rest = new BlockPos(1, 64, 0);
+        sink.seedPendingNetherQueueForTest(dimension, chunkKey, List.of(front, rest).iterator());
+        sink.seedPausedNetherSelectionForTest(dimension, front, Level.OVERWORLD);
+
+        sink.clearPendingWork(dimension, chunkKey);
+
+        assertFalse(sink.hasNetherSelectionForTest(dimension, front));
+        assertEquals(0, sink.netherPoolReferenceCountForTest(Level.OVERWORLD));
+    }
+
+
     @Test
     void ensureQueueNeverStompsAnAlreadyInProgressQueue() {
         var queues = new HashMap<ResourceKey<Level>, Map<Long, PortalTransferSink.SourceQueue>>();

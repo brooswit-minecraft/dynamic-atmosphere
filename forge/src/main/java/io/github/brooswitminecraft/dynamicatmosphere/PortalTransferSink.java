@@ -212,8 +212,12 @@ public final class PortalTransferSink {
         long chunkKey = chunk.getPos().toLong();
         int throughput = DynamicAtmosphereServerConfig.snapshot().portalTransferSink().throughputPerPortalBlock();
         if (throughput <= 0) {
-            clearQueue(pendingNetherTransfers, level.dimension(), chunkKey);
-            clearQueue(pendingEndTransfers, level.dimension(), chunkKey);
+            // MINECRAFT-435 (eighth review, kickback): routed through clearPendingWork (not a raw
+            // clearQueue) so a paused selection on the Nether queue's front source is abandoned
+            // (releasing its DiscoveredPool reference) before the queue itself is dropped --
+            // otherwise disabling throughput mid-pass would detach that selection/pool forever,
+            // the same leak the review flagged for the other early-exit paths below.
+            clearPendingWork(level.dimension(), chunkKey);
             return true;
         }
         var tuning = DynamicAtmosphereServerConfig.snapshot().portalTransferSink();
@@ -287,6 +291,44 @@ public final class PortalTransferSink {
         if (discovered != null && --discovered.referenceCount <= 0) {
             netherDiscoveredPools.remove(boxKey);
         }
+    }
+
+    /**
+     * MINECRAFT-435 (eighth review, kickback): test-only seam -- {@code transferNetherPortal}'s
+     * early-return guards and {@code abandonNetherSelection}/{@code releasePoolReference} depend
+     * on real {@code ServerLevel}/{@code LevelChunk} state this repo's test suite has no harness
+     * for (no GameTest, no mocking framework), so this lets a test directly seed the exact
+     * in-progress state those guards must release (a paused selection with its shared pool's
+     * reference count incremented) and then inspect/release it, without a real level.
+     */
+    void seedPausedNetherSelectionForTest(ResourceKey<Level> dimension, BlockPos pos, ResourceKey<Level> destinationDimension) {
+        var boxKey = new NetherBoxKey(destinationDimension, 0, 0, 0, 0);
+        netherDiscoveredPools.computeIfAbsent(boxKey, ignored -> new DiscoveredPool(Set.of())).referenceCount++;
+        var selection = new NetherSelectionScan();
+        selection.remaining = Collections.emptyIterator();
+        selection.boxKey = boxKey;
+        netherSelectionScans.put(new NetherSourceKey(dimension, pos), selection);
+    }
+
+    /** Test-only seam; see {@link #seedPausedNetherSelectionForTest}. */
+    boolean hasNetherSelectionForTest(ResourceKey<Level> dimension, BlockPos pos) {
+        return netherSelectionScans.containsKey(new NetherSourceKey(dimension, pos));
+    }
+
+    /** Test-only seam; see {@link #seedPausedNetherSelectionForTest}. */
+    int netherPoolReferenceCountForTest(ResourceKey<Level> destinationDimension) {
+        DiscoveredPool discovered = netherDiscoveredPools.get(new NetherBoxKey(destinationDimension, 0, 0, 0, 0));
+        return discovered == null ? 0 : discovered.referenceCount;
+    }
+
+    /** Test-only seam; see {@link #seedPausedNetherSelectionForTest}. Exercises the exact cleanup call every early-return guard in {@code transferNetherPortal} now makes. */
+    void abandonNetherSelectionForTest(ResourceKey<Level> dimension, BlockPos pos) {
+        abandonNetherSelection(dimension, pos);
+    }
+
+    /** Test-only seam: seeds this chunk's pending Nether queue directly, so {@link #clearPendingWork} can be exercised without a real level. */
+    void seedPendingNetherQueueForTest(ResourceKey<Level> dimension, long chunkKey, Iterator<BlockPos> positions) {
+        pendingNetherTransfers.computeIfAbsent(dimension, ignored -> new HashMap<>()).put(chunkKey, new SourceQueue(positions));
     }
 
     /**
@@ -813,8 +855,21 @@ public final class PortalTransferSink {
     private boolean transferNetherPortal(
         MinecraftServer server, ServerLevel level, BlockPos pos, int throughput, Budget candidateBudget
     ) {
-        if (!level.getBlockState(pos).is(Blocks.NETHER_PORTAL)) return true;
+        // MINECRAFT-435 (eighth review, kickback): every "handled, nothing more to do" early
+        // return below must first abandon any NetherSelectionScan already retained for this exact
+        // source from an earlier, budget-paused call -- the source's own state (destroyed, gas
+        // emptied, dimension no longer eligible, destination level unloaded) can change between
+        // when a selection was paused and when a later call reaches one of these checks. Left
+        // behind, that selection (and its DiscoveredPool reference) would be detached forever: the
+        // new abandonFrontOnly-based clearPendingWork only ever inspects the CURRENT queue front,
+        // not a source that already got popped via one of these early returns. abandonNetherSelection
+        // is a cheap no-op when nothing is actually retained, which is the common case.
+        if (!level.getBlockState(pos).is(Blocks.NETHER_PORTAL)) {
+            abandonNetherSelection(level.dimension(), pos);
+            return true;
+        }
         if (ports.state(level, AtmosphereMaterial.NETHER_GAS, pos).map(AtmosphereMaterialState::amount).orElse(0) <= 0) {
+            abandonNetherSelection(level.dimension(), pos);
             return true;
         }
         ResourceKey<Level> destinationDimension;
@@ -826,10 +881,14 @@ public final class PortalTransferSink {
             destinationDimension = Level.NETHER;
             anchor = overworldToNether(pos);
         } else {
+            abandonNetherSelection(level.dimension(), pos);
             return true;
         }
         ServerLevel destinationLevel = server.getLevel(destinationDimension);
-        if (destinationLevel == null) return true;
+        if (destinationLevel == null) {
+            abandonNetherSelection(level.dimension(), pos);
+            return true;
+        }
         Predicate<BlockPos> isEligible = candidate ->
             !eligibleCandidates(destinationLevel, List.of(candidate), state -> state.is(Blocks.NETHER_PORTAL)).isEmpty();
 
