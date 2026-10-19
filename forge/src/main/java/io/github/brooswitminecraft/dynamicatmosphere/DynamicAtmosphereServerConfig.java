@@ -26,6 +26,7 @@ public final class DynamicAtmosphereServerConfig {
     private static final IntOption CHUNK_IMPORTS;
     private static final IntOption PRODUCER_CHUNKS;
     private static final IntOption SMOKE_PRODUCER_CHUNKS;
+    private static final IntOption MAX_SCAN_SECTIONS_PER_CALL;
     private static final IntOption MAX_SYNC_OPERATIONS_PER_TICK;
 
     private static final DoubleOption VAPOR_PRODUCER_CHANCE;
@@ -119,6 +120,8 @@ public final class DynamicAtmosphereServerConfig {
     private static final DoubleOption THE_END_GLOBAL_DISSIPATION_MULTIPLIER;
 
     private static final IntOption PORTAL_TRANSFER_THROUGHPUT;
+    private static final IntOption PORTAL_TRANSFER_MAX_SOURCES_PER_CALL;
+    private static final IntOption PORTAL_TRANSFER_MAX_CANDIDATE_OPERATIONS_PER_CALL;
 
     private static final IntOption ENDER_MOB;
     private static final IntOption ENDER_PORTAL;
@@ -184,6 +187,11 @@ public final class DynamicAtmosphereServerConfig {
         CHUNK_IMPORTS = integer(builder, "maxChunkImportsPerTick", 8, 1, 1024);
         PRODUCER_CHUNKS = integer(builder, "maxProducerChunksPerTick", 32, 1, 4096);
         SMOKE_PRODUCER_CHUNKS = integer(builder, "maxSmokeProducerChunksPerTick", 4, 1, 4096);
+        builder.comment("MINECRAFT-435: per-call budget (not per-tick) on how many palette-gated-in",
+            "chunk sections a single resumable section/block scan (fire/glowstone/portal) actually",
+            "walks block-by-block before deferring the rest to a later call on the same chunk. A",
+            "section the palette gate rejects is free and does not count against this budget.");
+        MAX_SCAN_SECTIONS_PER_CALL = integer(builder, "maxScanSectionsPerCall", 4, 1, 4096);
         builder.comment("Per-player, per-sync-channel cap on chunk/cell operations released from the",
             "paced send queue each sync tick (MINECRAFT-436): bounds how much of one full snapshot",
             "goes out per tick instead of all at once, while a single oversized batch still always",
@@ -363,6 +371,16 @@ public final class DynamicAtmosphereServerConfig {
         // linked destination, never destroying it. Bounded per portal block per producer
         // pass, same shape as Obsidian Powder's portalBlockEmission.
         PORTAL_TRANSFER_THROUGHPUT = integer(builder, "throughputPerPortalBlock", 64, 0, 1_000_000);
+        builder.comment("MINECRAFT-435: per-call budget on how many source portal positions found in",
+            "one visited chunk are actually transferred before the rest are deferred to the chunk's",
+            "next full scan pass -- a fair rotating window, not always the same subset.");
+        PORTAL_TRANSFER_MAX_SOURCES_PER_CALL = integer(builder, "maxSourcesPerCall", 32, 1, 1_000_000);
+        builder.comment("MINECRAFT-435: per-call budget on how many destination-registry candidate",
+            "positions are actually live-checked/nearest-compared while resolving one source's",
+            "destination -- a single densely-populated destination chunk entry can otherwise force",
+            "unbounded work in one call. The Nether leg resumes a partial resolution across calls",
+            "(never picking a non-nearest candidate); the End leg simply retries the source later.");
+        PORTAL_TRANSFER_MAX_CANDIDATE_OPERATIONS_PER_CALL = integer(builder, "maxCandidateOperationsPerCall", 256, 1, 1_000_000);
         builder.pop();
 
         builder.push("obsidianPowder");
@@ -532,7 +550,7 @@ public final class DynamicAtmosphereServerConfig {
         return new Snapshot(
             new RuntimeTuning(SYNC_INTERVAL.get(), FULL_SNAPSHOT_INTERVAL.get(), SIMULATION_INTERVAL.get(),
                 PRODUCER_INTERVAL.get(), CHUNK_IMPORTS.get(), PRODUCER_CHUNKS.get(), SMOKE_PRODUCER_CHUNKS.get(),
-                SIMULATION_SKIP_CHANCE.get(), MAX_SYNC_OPERATIONS_PER_TICK.get()),
+                MAX_SCAN_SECTIONS_PER_CALL.get(), SIMULATION_SKIP_CHANCE.get(), MAX_SYNC_OPERATIONS_PER_TICK.get()),
             new Vapor(VAPOR_PRODUCER_CHANCE.get(),
                 HIGH_TERRAIN.get(), RAIN_CLOUD.get(), SNOW_ICE.get(), DARK_GROUND.get(),
                 SNOW_LAYER.get(), ICE_REMOVAL.get(), CONDENSATION_CHANCE.get(),
@@ -585,7 +603,8 @@ public final class DynamicAtmosphereServerConfig {
             new NetherGas(NETHER_GAS_NETHERRACK.get(), NETHER_GAS_MILD_FULLNESS.get(), NETHER_GAS_DANGEROUS_FULLNESS.get()),
             new Dimensions(new DimensionAtmosphereConfig(
                 THE_END_HONOR_PREFERRED_ALTITUDE.get(), THE_END_GLOBAL_DISSIPATION_MULTIPLIER.get())),
-            new PortalTransferSinkTuning(PORTAL_TRANSFER_THROUGHPUT.get())
+            new PortalTransferSinkTuning(PORTAL_TRANSFER_THROUGHPUT.get(), PORTAL_TRANSFER_MAX_SOURCES_PER_CALL.get(),
+                PORTAL_TRANSFER_MAX_CANDIDATE_OPERATIONS_PER_CALL.get())
         );
     }
 
@@ -652,8 +671,8 @@ public final class DynamicAtmosphereServerConfig {
     public record RuntimeTuning(int syncIntervalTicks, int fullSnapshotIntervalTicks,
                                 int simulationIntervalTicks, int producerIntervalTicks,
                                 int maxChunkImportsPerTick, int maxProducerChunksPerTick,
-                                int maxSmokeProducerChunksPerTick, double simulationSkipChance,
-                                int maxSyncOperationsPerPlayerPerTick) { }
+                                int maxSmokeProducerChunksPerTick, int maxScanSectionsPerCall,
+                                double simulationSkipChance, int maxSyncOperationsPerPlayerPerTick) { }
     public record Vapor(double producerChance,
                         int highTerrainEmission, int rainCloudEmission, int snowIceEmission,
                         int maxDarkGroundEmission, int snowRemovalPerLayer, int iceRemovalEmission,
@@ -733,7 +752,8 @@ public final class DynamicAtmosphereServerConfig {
         }
     }
     public record Dimensions(DimensionAtmosphereConfig theEnd) { }
-    public record PortalTransferSinkTuning(int throughputPerPortalBlock) { }
+    public record PortalTransferSinkTuning(
+        int throughputPerPortalBlock, int maxSourcesPerCall, int maxCandidateOperationsPerCall) { }
 
     private DynamicAtmosphereServerConfig() { }
 }

@@ -45,6 +45,15 @@ final class AtmosphereProducerSchedule<K> {
         return List.copyOf(result);
     }
 
+    /**
+     * MINECRAFT-435: puts a key that still has bounded work remaining back at the end of the
+     * pending queue, so other already-queued chunks get their turn first (fair round-robin
+     * continuation) while this one is guaranteed to come back around rather than being dropped.
+     */
+    void requeue(K key) {
+        pending.addLast(key);
+    }
+
     int pending() {
         return pending.size();
     }

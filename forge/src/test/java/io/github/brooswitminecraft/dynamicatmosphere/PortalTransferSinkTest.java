@@ -1,10 +1,16 @@
 package io.github.brooswitminecraft.dynamicatmosphere;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.Level;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -57,13 +63,6 @@ class PortalTransferSinkTest {
     }
 
     @Test
-    void anyReturnsEmptyOnlyWhenNoCandidateHasEverBeenObserved() {
-        assertTrue(PortalTransferSink.any(List.of()).isEmpty());
-        var observed = new BlockPos(100, 50, 0);
-        assertEquals(Optional.of(observed), PortalTransferSink.any(List.of(observed)));
-    }
-
-    @Test
     void planDeclinesOnEmptySourceNonPositiveThroughputOrUnresolvedDestination() {
         assertFalse(PortalTransferSink.plan(0, 64, true).active());
         assertFalse(PortalTransferSink.plan(100, 0, true).active());
@@ -113,12 +112,668 @@ class PortalTransferSinkTest {
     }
 
     @Test
-    void anyNeverPicksAnUnloadedEndCandidateOverALoadedValidExit() {
-        var unloaded = new BlockPos(100, 50, 0);
-        var loadedAndValid = new BlockPos(200, 50, 0);
-        var eligible = PortalTransferSink.filterStale(
-            List.of(unloaded, loadedAndValid), pos -> pos.equals(loadedAndValid));
-        assertEquals(Optional.of(loadedAndValid), PortalTransferSink.any(eligible));
+    void chunkBoxAroundCoversEveryChunkThatCouldContainABlockWithinRadius() {
+        // Anchor at the origin of chunk (0,0); a radius of 128 blocks reaches 8 chunks either way.
+        var box = PortalTransferSink.chunkBoxAround(new BlockPos(5, 64, 5), 128);
+        assertEquals(-8, box[0]);
+        assertEquals(8, box[1]);
+        assertEquals(-8, box[2]);
+        assertEquals(8, box[3]);
+    }
+
+    /** {@link PortalTransferSink#advanceEndCandidateScan} requires a {@link java.util.NavigableMap}, matching production. */
+    private static java.util.NavigableMap<Long, Set<BlockPos>> navigableRegistryOf(Map<ChunkPos, Set<BlockPos>> byChunk) {
+        var inner = new java.util.TreeMap<Long, Set<BlockPos>>();
+        byChunk.forEach((chunkPos, positions) -> inner.put(chunkPos.toLong(), positions));
+        return inner;
+    }
+
+    @Test
+    void advanceEndCandidateScanFindsTheFirstEligibleCandidateAndShortCircuits() {
+        var a = new BlockPos(1, 64, 1);
+        var b = new BlockPos(2, 64, 2);
+        var registry = navigableRegistryOf(Map.of(new ChunkPos(0, 0), Set.of(a), new ChunkPos(1, 0), Set.of(b)));
+        var scan = new PortalTransferSink.EndCandidateScan();
+        var budget = new PortalTransferSink.Budget(100);
+        PortalTransferSink.advanceEndCandidateScan(registry, 10, scan, budget, pos -> true);
+        assertTrue(scan.done);
+        assertTrue(scan.found.equals(a) || scan.found.equals(b), "whichever chunk entry is visited first, its position is found");
+    }
+
+    @Test
+    void advanceEndCandidateScanBoundsExaminationOfASingleDenseChunkEntryToTheBudget() {
+        var dense = new java.util.HashSet<BlockPos>();
+        for (int i = 0; i < 10_000; i++) dense.add(new BlockPos(i, 64, 0));
+        var registry = navigableRegistryOf(Map.of(new ChunkPos(0, 0), dense));
+        var scan = new PortalTransferSink.EndCandidateScan();
+        var budget = new PortalTransferSink.Budget(50);
+        int[] callCount = {0};
+        PortalTransferSink.advanceEndCandidateScan(registry, 10, scan, budget, pos -> { callCount[0]++; return false; });
+        assertFalse(scan.done, "10,000 positions in one chunk entry cannot all be examined within a budget of 50");
+        assertEquals(50, callCount[0], "exactly the budget's worth of positions were examined, never the whole dense set");
+    }
+
+    @Test
+    void advanceEndCandidateScanResumesAcrossCallsAndExaminesEveryPositionInADenseChunkAtMostOnceUntilFound() {
+        var dense = new java.util.HashSet<BlockPos>();
+        for (int i = 0; i < 237; i++) dense.add(new BlockPos(i, 64, 0));
+        var registry = navigableRegistryOf(Map.of(new ChunkPos(0, 0), dense));
+        var scan = new PortalTransferSink.EndCandidateScan();
+        var seen = new java.util.HashSet<BlockPos>();
+        int calls = 0;
+        while (!scan.done) {
+            var budget = new PortalTransferSink.Budget(40);
+            PortalTransferSink.advanceEndCandidateScan(registry, 10, scan, budget,
+                pos -> { assertTrue(seen.add(pos), "no position examined twice across the resumed scan"); return false; });
+            calls++;
+            assertTrue(calls < 100, "safety bound to catch a runaway loop on test failure");
+        }
+        assertEquals(dense, seen, "every position in the dense chunk examined exactly once across the resumed scan, none omitted");
+        assertTrue(calls > 1, "a budget of 40 over 237 positions must genuinely take more than one call");
+        assertEquals(null, scan.found, "nothing was ever eligible in this fixture");
+    }
+
+    @Test
+    void advanceEndCandidateScanIsDoneWithNothingFoundWhenTheRegistryIsEmpty() {
+        var scan = new PortalTransferSink.EndCandidateScan();
+        var budget = new PortalTransferSink.Budget(10);
+        PortalTransferSink.advanceEndCandidateScan(navigableRegistryOf(Map.of()), 10, scan, budget, pos -> true);
+        assertTrue(scan.done);
+        assertEquals(null, scan.found);
+    }
+
+    /**
+     * MINECRAFT-435 (fifth review): the per-call chunk-entry limit is a YIELD point, never a
+     * verdict -- a third, unexamined entry must leave the scan not-done, not conclude "nothing
+     * exists" just because one call's window ran out.
+     */
+    @Test
+    void advanceEndCandidateScanYieldsNotDoneWhenMoreEntriesExistBeyondThePerCallWindow() {
+        var registry = navigableRegistryOf(Map.of(
+            new ChunkPos(0, 0), Set.of(new BlockPos(1, 64, 1)),
+            new ChunkPos(1, 0), Set.of(new BlockPos(2, 64, 2)),
+            new ChunkPos(2, 0), Set.of(new BlockPos(3, 64, 3))));
+        var scan = new PortalTransferSink.EndCandidateScan();
+        var budget = new PortalTransferSink.Budget(100);
+        PortalTransferSink.advanceEndCandidateScan(registry, 2, scan, budget, pos -> false);
+        assertFalse(scan.done, "a third entry still exists unexamined -- the 2-entry window is only a per-call yield");
+        assertEquals(null, scan.found);
+    }
+
+    /**
+     * MINECRAFT-435 (fifth review): "test a valid destination beyond the first window" -- the
+     * eligible position sits in the third chunk entry, outside a 2-entry-per-call window; the
+     * SAME source/scan attempt must still find it on a later call, not conclude "nothing exists"
+     * after the first call's window.
+     */
+    @Test
+    void advanceEndCandidateScanFindsAValidDestinationBeyondTheFirstWindowAcrossCalls() {
+        var beyondFirstWindow = new BlockPos(3, 64, 3);
+        var registry = navigableRegistryOf(Map.of(
+            new ChunkPos(0, 0), Set.of(new BlockPos(1, 64, 1)),
+            new ChunkPos(1, 0), Set.of(new BlockPos(2, 64, 2)),
+            new ChunkPos(2, 0), Set.of(beyondFirstWindow)));
+        var scan = new PortalTransferSink.EndCandidateScan();
+        var firstCallBudget = new PortalTransferSink.Budget(100);
+        PortalTransferSink.advanceEndCandidateScan(registry, 2, scan, firstCallBudget, pos -> pos.equals(beyondFirstWindow));
+        assertFalse(scan.done, "the eligible position is in the third entry, beyond the first call's 2-entry window");
+        var secondCallBudget = new PortalTransferSink.Budget(100);
+        PortalTransferSink.advanceEndCandidateScan(registry, 2, scan, secondCallBudget, pos -> pos.equals(beyondFirstWindow));
+        assertTrue(scan.done);
+        assertEquals(beyondFirstWindow, scan.found, "the same (resumed) scan attempt finds it, not abandoned as a false negative");
+    }
+
+    @Test
+    void advanceEndCandidateScanCompletesWithNothingFoundOnlyAfterWrappingAroundEveryEntry() {
+        var registry = navigableRegistryOf(Map.of(
+            new ChunkPos(0, 0), Set.of(new BlockPos(1, 64, 1)),
+            new ChunkPos(1, 0), Set.of(new BlockPos(2, 64, 2)),
+            new ChunkPos(2, 0), Set.of(new BlockPos(3, 64, 3))));
+        var scan = new PortalTransferSink.EndCandidateScan();
+        int calls = 0;
+        while (!scan.done) {
+            var budget = new PortalTransferSink.Budget(100);
+            PortalTransferSink.advanceEndCandidateScan(registry, 2, scan, budget, pos -> false);
+            calls++;
+            assertTrue(calls < 100, "safety bound to catch a runaway loop on test failure");
+        }
+        assertEquals(null, scan.found);
+        assertTrue(calls > 1, "a 2-entry-per-call window over 3 entries must genuinely take more than one call");
+    }
+
+    /**
+     * MINECRAFT-435 (sixth review): wraparound detection must stay robust to the registry's own
+     * starting entry being removed entirely between calls (e.g. that chunk's only portal
+     * destroyed and rescanned as empty) -- a wraparound keyed on remembering that one specific
+     * starting key would never fire again once it's gone, starving the scan forever. Tracking
+     * every visited key and completing once an already-visited key repeats must still terminate
+     * and still examine every remaining entry.
+     */
+    @Test
+    void advanceEndCandidateScanTerminatesEvenWhenItsStartingEntryIsRemovedMidScan() {
+        var registry = navigableRegistryOf(Map.of(
+            new ChunkPos(0, 0), Set.of(new BlockPos(1, 64, 1)),
+            new ChunkPos(1, 0), Set.of(new BlockPos(2, 64, 2)),
+            new ChunkPos(2, 0), Set.of(new BlockPos(3, 64, 3))));
+        var scan = new PortalTransferSink.EndCandidateScan();
+        var budget = new PortalTransferSink.Budget(100);
+        // First call visits exactly one entry (maxChunkEntriesPerCall = 1): the registry's first
+        // key, via ceilingKey(Long.MIN_VALUE).
+        PortalTransferSink.advanceEndCandidateScan(registry, 1, scan, budget, pos -> false);
+        assertFalse(scan.done, "only one of three entries examined so far");
+        long startingKey = new ChunkPos(0, 0).toLong();
+        registry.remove(startingKey);
+        int calls = 1;
+        while (!scan.done) {
+            PortalTransferSink.advanceEndCandidateScan(registry, 1, scan, new PortalTransferSink.Budget(100), pos -> false);
+            calls++;
+            assertTrue(calls < 100, "safety bound to catch a runaway loop on test failure -- "
+                + "must not starve forever just because the starting entry vanished");
+        }
+        assertEquals(null, scan.found, "nothing eligible in this fixture");
+    }
+
+    /**
+     * MINECRAFT-435 (eighth review, kickback): completion must never be inferred from comparing
+     * a historical visited-key COUNT against the registry's CURRENT size -- that can
+     * coincidentally match well before every still-remaining key has actually been examined.
+     * Exact counterexample from the review: {A,B,C}; visit ineligible A; A is removed (registry
+     * now {B,C}, size 2); visit ineligible B (visitedChunkKeys now {A,B}, ALSO size 2) -- a
+     * size-based check would wrongly call the pass complete right there, never examining C, even
+     * though C holds the one eligible destination.
+     */
+    @Test
+    void advanceEndCandidateScanStillExaminesARemainingEligibleEntryAfterAnEarlierEntryIsRemoved() {
+        var a = new ChunkPos(0, 0);
+        var b = new ChunkPos(1, 0);
+        var c = new ChunkPos(2, 0);
+        var eligible = new BlockPos(3, 64, 3);
+        var registry = navigableRegistryOf(Map.of(
+            a, Set.of(new BlockPos(1, 64, 1)),
+            b, Set.of(new BlockPos(2, 64, 2)),
+            c, Set.of(eligible)));
+        var scan = new PortalTransferSink.EndCandidateScan();
+        java.util.function.Predicate<BlockPos> isEligible = pos -> pos.equals(eligible);
+
+        // Call 1: visits A (ineligible), one entry per call.
+        PortalTransferSink.advanceEndCandidateScan(registry, 1, scan, new PortalTransferSink.Budget(100), isEligible);
+        assertFalse(scan.done);
+        assertEquals(null, scan.found);
+
+        // A's only portal is destroyed and its chunk rescanned as empty between calls.
+        registry.remove(a.toLong());
+
+        // Call 2: visits B (ineligible). visitedChunkKeys == {A, B} (size 2), coincidentally
+        // matching the now-shrunk registry {B, C}'s size (also 2) -- the exact false-positive
+        // shape the review flagged.
+        PortalTransferSink.advanceEndCandidateScan(registry, 1, scan, new PortalTransferSink.Budget(100), isEligible);
+        assertFalse(scan.done, "C has not been examined yet -- the pass must not be reported complete");
+        assertEquals(null, scan.found);
+
+        // Call 3: C must still be reached and found eligible, not silently skipped.
+        PortalTransferSink.advanceEndCandidateScan(registry, 1, scan, new PortalTransferSink.Budget(100), isEligible);
+        assertTrue(scan.done);
+        assertEquals(eligible, scan.found, "C must be examined and found -- never omitted just because a historical "
+            + "visited-key count happened to match the shrunk registry's current size");
+    }
+
+    @Test
+    void advanceNetherSelectionPicksTheNearestEligibleCandidate() {
+        var anchor = BlockPos.ZERO;
+        var near = new BlockPos(10, 64, 0);
+        var far = new BlockPos(100, 64, 0);
+        var selection = new PortalTransferSink.NetherSelectionScan();
+        selection.remaining = Set.of(near, far).iterator();
+        var budget = new PortalTransferSink.Budget(100);
+        PortalTransferSink.advanceNetherSelection(anchor, 128, selection, budget, pos -> true);
+        assertTrue(selection.done);
+        assertEquals(near, selection.best);
+    }
+
+    /**
+     * MINECRAFT-435 (fourth review): a candidate examined while live during an earlier advance may
+     * have been destroyed/unloaded by the time a later, nearer candidate turns out ineligible --
+     * eligibility is revalidated inline (only when a candidate could improve on the current best),
+     * so the farther-but-valid candidate is correctly kept instead of a nearer-but-stale one.
+     */
+    @Test
+    void advanceNetherSelectionFallsBackToTheNextNearestWhenTheNearestCandidateIsIneligible() {
+        var anchor = BlockPos.ZERO;
+        var nearerButIneligible = new BlockPos(10, 64, 0);
+        var fartherButEligible = new BlockPos(100, 64, 0);
+        var selection = new PortalTransferSink.NetherSelectionScan();
+        selection.remaining = List.of(nearerButIneligible, fartherButEligible).iterator();
+        var budget = new PortalTransferSink.Budget(100);
+        PortalTransferSink.advanceNetherSelection(anchor, 128, selection, budget, pos -> !pos.equals(nearerButIneligible));
+        assertTrue(selection.done);
+        assertEquals(fartherButEligible, selection.best);
+    }
+
+    @Test
+    void advanceNetherSelectionIsDoneWithNoWinnerWhenEveryCandidateIsIneligible() {
+        var selection = new PortalTransferSink.NetherSelectionScan();
+        selection.remaining = List.of(new BlockPos(10, 64, 0)).iterator();
+        var budget = new PortalTransferSink.Budget(100);
+        PortalTransferSink.advanceNetherSelection(BlockPos.ZERO, 128, selection, budget, pos -> false);
+        assertTrue(selection.done);
+        assertEquals(null, selection.best);
+    }
+
+    @Test
+    void advanceNetherSelectionDependsOnTheAnchorEvenOverAnIdenticalPool() {
+        // MINECRAFT-435 (fourth review): two different anchors over the same discovered pool
+        // (e.g. the same destination chunk box) must each get their OWN nearest answer.
+        var a = new BlockPos(0, 64, 0);
+        var b = new BlockPos(100, 64, 0);
+        var selectionNearA = new PortalTransferSink.NetherSelectionScan();
+        selectionNearA.remaining = List.of(a, b).iterator();
+        PortalTransferSink.advanceNetherSelection(new BlockPos(-10, 64, 0), 200, selectionNearA, new PortalTransferSink.Budget(100), pos -> true);
+        assertEquals(a, selectionNearA.best);
+
+        var selectionNearB = new PortalTransferSink.NetherSelectionScan();
+        selectionNearB.remaining = List.of(a, b).iterator();
+        PortalTransferSink.advanceNetherSelection(new BlockPos(110, 64, 0), 200, selectionNearB, new PortalTransferSink.Budget(100), pos -> true);
+        assertEquals(b, selectionNearB.best);
+    }
+
+    /**
+     * MINECRAFT-435 (fifth review): selection must itself be budget-bounded and resumable -- a
+     * dense pool cannot be fully examined (nor its eligibility rechecked) in a single call.
+     */
+    @Test
+    void advanceNetherSelectionBoundsExaminationToTheBudgetAndResumesAcrossCalls() {
+        var dense = new java.util.ArrayList<BlockPos>();
+        for (int i = 0; i < 237; i++) dense.add(new BlockPos(i, 64, 0));
+        var selection = new PortalTransferSink.NetherSelectionScan();
+        selection.remaining = dense.iterator();
+        int[] eligibilityChecks = {0};
+        int calls = 0;
+        while (!selection.done) {
+            var budget = new PortalTransferSink.Budget(40);
+            PortalTransferSink.advanceNetherSelection(new BlockPos(1000, 64, 0), 2000, selection, budget,
+                pos -> { eligibilityChecks[0]++; return true; });
+            calls++;
+            assertTrue(calls < 100, "safety bound to catch a runaway loop on test failure");
+        }
+        assertTrue(calls > 1, "a budget of 40 over 237 positions must genuinely take more than one call");
+        // Monotonic nearest-so-far tracking means eligibility is only rechecked when a candidate
+        // could improve on the current best, not once per candidate unconditionally -- bounded by
+        // the pool size, never quadratic in it.
+        assertTrue(eligibilityChecks[0] <= dense.size(), "eligibility checks must not exceed the pool size (no O(n^2) re-scanning)");
+        assertEquals(new BlockPos(236, 64, 0), selection.best, "nearest to anchor (1000,64,0) among x in 0..236 is the largest x");
+    }
+
+    /**
+     * MINECRAFT-435 (sixth review): a selection's retained winner may have been chosen several
+     * calls ago and never revisited since -- {@link PortalTransferSink#finalizeNetherSelection}
+     * must give it one final live recheck, and if it has gone stale in the meantime, restart over
+     * the pool to find the next-nearest genuinely live candidate rather than transferring to a
+     * destination that is no longer there (or silently finding none at all).
+     */
+    @Test
+    void finalizeNetherSelectionRestartsAndFindsTheNextNearestWhenTheWinnerWentStale() {
+        var anchor = BlockPos.ZERO;
+        var winner = new BlockPos(10, 64, 0);
+        var nextNearest = new BlockPos(50, 64, 0);
+        var pool = List.of(winner, nextNearest);
+        var selection = new PortalTransferSink.NetherSelectionScan();
+        selection.remaining = pool.iterator();
+        PortalTransferSink.advanceNetherSelection(anchor, 128, selection, new PortalTransferSink.Budget(100), pos -> true);
+        assertTrue(selection.done);
+        assertEquals(winner, selection.best, "winner is initially selected as nearest");
+
+        // Simulate the winner going stale between selection completing and final use: now
+        // ineligible, everything else still eligible.
+        boolean finalized = PortalTransferSink.finalizeNetherSelection(anchor, 128, selection, pool,
+            new PortalTransferSink.Budget(100), pos -> !pos.equals(winner));
+        assertTrue(finalized);
+        assertEquals(nextNearest, selection.best, "restart must find the next-nearest candidate still genuinely live");
+    }
+
+    /**
+     * MINECRAFT-435 (sixth review): if every candidate (including the prior winner) has gone
+     * stale by the time of final revalidation, finalization must conclude with no winner at all,
+     * never a stale one.
+     */
+    @Test
+    void finalizeNetherSelectionEndsWithNoWinnerWhenEverythingHasGoneStale() {
+        var anchor = BlockPos.ZERO;
+        var winner = new BlockPos(10, 64, 0);
+        var pool = List.of(winner);
+        var selection = new PortalTransferSink.NetherSelectionScan();
+        selection.remaining = pool.iterator();
+        PortalTransferSink.advanceNetherSelection(anchor, 128, selection, new PortalTransferSink.Budget(100), pos -> true);
+        assertEquals(winner, selection.best);
+
+        boolean finalized = PortalTransferSink.finalizeNetherSelection(anchor, 128, selection, pool,
+            new PortalTransferSink.Budget(100), pos -> false);
+        assertTrue(finalized);
+        assertEquals(null, selection.best, "no genuinely live candidate remains");
+    }
+
+    /**
+     * MINECRAFT-435 (sixth review): a restart triggered by a stale winner must itself stay
+     * budget-bounded and resumable across calls for a dense pool, never re-scanning it unbounded
+     * in one call just because this is "only" a revalidation restart.
+     */
+    @Test
+    void finalizeNetherSelectionRestartIsBudgetBoundedAndResumesAcrossCalls() {
+        var anchor = new BlockPos(1000, 64, 0);
+        var dense = new java.util.ArrayList<BlockPos>();
+        for (int i = 0; i < 237; i++) dense.add(new BlockPos(i, 64, 0));
+        var stale = new BlockPos(236, 64, 0);
+        java.util.function.Predicate<BlockPos> isEligible = pos -> !pos.equals(stale);
+
+        var selection = new PortalTransferSink.NetherSelectionScan();
+        selection.remaining = dense.iterator();
+        PortalTransferSink.advanceNetherSelection(anchor, 2000, selection, new PortalTransferSink.Budget(1000), pos -> true);
+        assertEquals(stale, selection.best);
+
+        // Winner (236) goes stale; every other candidate is genuinely eligible, so restarting
+        // must eventually land on the next-nearest (235), but only after however many bounded
+        // calls a dense pool of 237 positions actually requires -- mirroring how
+        // transferNetherPortal actually drives this: resume an in-progress restart directly via
+        // advanceNetherSelection (selection.done == false), only calling finalizeNetherSelection
+        // again once that resumed restart itself completes.
+        boolean finalized = PortalTransferSink.finalizeNetherSelection(anchor, 2000, selection, dense,
+            new PortalTransferSink.Budget(40), isEligible);
+        assertFalse(finalized, "a budget of 40 over 237 positions cannot finish the restart in one call");
+        assertFalse(selection.done);
+        int calls = 1;
+        while (!finalized) {
+            if (!selection.done) {
+                PortalTransferSink.advanceNetherSelection(anchor, 2000, selection, new PortalTransferSink.Budget(40), isEligible);
+            } else {
+                finalized = PortalTransferSink.finalizeNetherSelection(anchor, 2000, selection, dense,
+                    new PortalTransferSink.Budget(40), isEligible);
+            }
+            calls++;
+            assertTrue(calls < 100, "safety bound to catch a runaway loop on test failure");
+        }
+        assertTrue(calls > 1, "the restart must genuinely take more than one call for a dense pool");
+        assertEquals(new BlockPos(235, 64, 0), selection.best, "next-nearest to anchor once 236 is excluded as stale");
+    }
+
+    /**
+     * MINECRAFT-435 (sixth review, kickback): the final revalidation check itself must spend the
+     * shared candidate budget -- a budget of exactly 1 must be able to do EITHER the budgeted
+     * selection pass's own last check OR the final revalidation check, never both uncharged in the
+     * same call. With a pool already selected (best decided and selection.done == true before
+     * this call) and a budget of exactly 1, a single finalizeNetherSelection call must spend
+     * exactly one eligibility check and, if the budget is then gone, retain the still-unconfirmed
+     * best rather than checking it for free.
+     */
+    @Test
+    void finalizeNetherSelectionChargesTheBudgetForTheFinalRevalidationCheckItself() {
+        var anchor = BlockPos.ZERO;
+        var winner = new BlockPos(10, 64, 0);
+        var pool = List.of(winner);
+        var selection = new PortalTransferSink.NetherSelectionScan();
+        selection.remaining = pool.iterator();
+        PortalTransferSink.advanceNetherSelection(anchor, 128, selection, new PortalTransferSink.Budget(100), pos -> true);
+        assertTrue(selection.done);
+        assertEquals(winner, selection.best);
+
+        int[] eligibilityChecks = {0};
+        var budget = new PortalTransferSink.Budget(1);
+        boolean finalized = PortalTransferSink.finalizeNetherSelection(anchor, 128, selection, pool, budget,
+            pos -> { eligibilityChecks[0]++; return true; });
+        assertTrue(finalized, "winner is still live, so the single charged check must be enough to confirm it");
+        assertEquals(1, eligibilityChecks[0], "exactly one eligibility check, charged against the budget");
+        assertEquals(winner, selection.best);
+    }
+
+    /**
+     * MINECRAFT-435 (sixth review, kickback): mirrors the above with a budget that is already
+     * exhausted before finalization even runs -- the final check must not be performed for free;
+     * the still-unconfirmed winner must be retained so the caller retries with a fresh budget.
+     */
+    @Test
+    void finalizeNetherSelectionRetainsTheUnconfirmedWinnerWhenNoBudgetRemainsForTheFinalCheck() {
+        var anchor = BlockPos.ZERO;
+        var winner = new BlockPos(10, 64, 0);
+        var pool = List.of(winner);
+        var selection = new PortalTransferSink.NetherSelectionScan();
+        selection.remaining = pool.iterator();
+        PortalTransferSink.advanceNetherSelection(anchor, 128, selection, new PortalTransferSink.Budget(100), pos -> true);
+        assertTrue(selection.done);
+
+        int[] eligibilityChecks = {0};
+        var exhaustedBudget = new PortalTransferSink.Budget(0);
+        boolean finalized = PortalTransferSink.finalizeNetherSelection(anchor, 128, selection, pool, exhaustedBudget,
+            pos -> { eligibilityChecks[0]++; return true; });
+        assertFalse(finalized, "no budget left -- the caller must retry this exact source later");
+        assertEquals(0, eligibilityChecks[0], "the final check must never run uncharged when the budget is already empty");
+        assertEquals(winner, selection.best, "the still-unconfirmed winner is retained, not discarded");
+    }
+
+    /**
+     * MINECRAFT-435 (sixth review, kickback): {@link PortalTransferSink#abandonFrontOnly} (the
+     * pure core of {@link PortalTransferSink#clearPendingWork}'s Nether-side cleanup) must never
+     * walk a chunk's whole pending queue -- {@link PortalTransferSink#drainNetherTransfers} always
+     * resolves sources head-first, so only the front element can ever have in-progress selection
+     * state; every other still-queued source was never started and has nothing to release. Walking
+     * through the whole queue to confirm that (as an earlier revision did) is itself unbounded
+     * O(n) over however many sources are queued -- a counting iterator proves only the front is
+     * ever advanced.
+     */
+    @Test
+    void abandonFrontOnlyTouchesOnlyTheFrontElementNeverWalksTheWholeRemainder() {
+        var dense = new java.util.ArrayList<BlockPos>();
+        for (int i = 0; i < 10_000; i++) dense.add(new BlockPos(i, 64, 0));
+        int[] iteratorAdvances = {0};
+        java.util.Iterator<BlockPos> countingIterator = new java.util.Iterator<>() {
+            final java.util.Iterator<BlockPos> delegate = dense.iterator();
+            @Override public boolean hasNext() { return delegate.hasNext(); }
+            @Override public BlockPos next() { iteratorAdvances[0]++; return delegate.next(); }
+        };
+        var queue = new PortalTransferSink.SourceQueue(countingIterator);
+        var abandoned = new java.util.ArrayList<BlockPos>();
+
+        PortalTransferSink.abandonFrontOnly(queue, abandoned::add);
+
+        assertEquals(1, iteratorAdvances[0], "only the front element may be examined -- the dense remainder must never be walked");
+        assertEquals(List.of(dense.get(0)), abandoned);
+    }
+
+    @Test
+    void abandonFrontOnlyDoesNothingForAnEmptyOrNullQueue() {
+        var abandoned = new java.util.ArrayList<BlockPos>();
+        PortalTransferSink.abandonFrontOnly(null, abandoned::add);
+        PortalTransferSink.abandonFrontOnly(new PortalTransferSink.SourceQueue(java.util.Collections.emptyIterator()), abandoned::add);
+        assertTrue(abandoned.isEmpty());
+    }
+
+    /**
+     * MINECRAFT-435 (eighth review, kickback): {@code transferNetherPortal}'s early-return guards
+     * (source destroyed, gas emptied, dimension no longer eligible, destination level unloaded)
+     * must each release an already-paused selection and its shared pool reference, or both leak
+     * indefinitely once the source is popped from its queue. {@code transferNetherPortal} itself
+     * needs a real {@code ServerLevel}/{@code LevelChunk} (no GameTest harness or mocking
+     * framework exists in this repo for that, consistent with the established testing boundary),
+     * so this exercises the exact cleanup call (abandonNetherSelection) those guards now all make,
+     * via the test-only seam.
+     */
+    @Test
+    void abandonNetherSelectionReleasesAPausedSelectionAndItsSharedPoolReference() {
+        var sink = PortalTransferSink.createForTest(new FakeGrid());
+        var dimension = Level.NETHER;
+        var pos = new BlockPos(0, 64, 0);
+        sink.seedPausedNetherSelectionForTest(dimension, pos, Level.OVERWORLD);
+        assertTrue(sink.hasNetherSelectionForTest(dimension, pos));
+        assertEquals(1, sink.netherPoolReferenceCountForTest(Level.OVERWORLD));
+
+        sink.abandonNetherSelectionForTest(dimension, pos);
+
+        assertFalse(sink.hasNetherSelectionForTest(dimension, pos),
+            "a paused selection must be released, not leaked, once its source is handled by an early exit");
+        assertEquals(0, sink.netherPoolReferenceCountForTest(Level.OVERWORLD),
+            "the shared discovery pool's reference count must be released too, or the pool itself leaks");
+    }
+
+    /**
+     * MINECRAFT-435 (eighth review, kickback): two sources whose selections share one discovery
+     * pool (the normal case this ticket's reference counting exists for) must each independently
+     * abandon their own selection without tearing down the pool out from under the other still-
+     * active one -- only once EVERY referencing selection has been abandoned should the pool
+     * itself be released.
+     */
+    @Test
+    void abandoningOneOfTwoSourcesSharingAPoolKeepsItAliveForTheOther() {
+        var sink = PortalTransferSink.createForTest(new FakeGrid());
+        var posA = new BlockPos(0, 64, 0);
+        var posB = new BlockPos(1, 64, 0);
+        sink.seedPausedNetherSelectionForTest(Level.NETHER, posA, Level.OVERWORLD);
+        sink.seedPausedNetherSelectionForTest(Level.NETHER, posB, Level.OVERWORLD);
+        assertEquals(2, sink.netherPoolReferenceCountForTest(Level.OVERWORLD));
+
+        sink.abandonNetherSelectionForTest(Level.NETHER, posA);
+        assertEquals(1, sink.netherPoolReferenceCountForTest(Level.OVERWORLD), "still referenced by posB's own selection");
+        assertFalse(sink.hasNetherSelectionForTest(Level.NETHER, posA));
+        assertTrue(sink.hasNetherSelectionForTest(Level.NETHER, posB));
+
+        sink.abandonNetherSelectionForTest(Level.NETHER, posB);
+        assertEquals(0, sink.netherPoolReferenceCountForTest(Level.OVERWORLD));
+    }
+
+    /**
+     * MINECRAFT-435 (eighth review, kickback): {@code clearPendingWork}'s O(1) cleanup only
+     * inspects the queue's current front -- this confirms that when the front source actually
+     * owns a paused selection, invalidating the chunk still correctly releases it (not just that
+     * walking the remainder is avoided, which {@link #abandonFrontOnlyTouchesOnlyTheFrontElementNeverWalksTheWholeRemainder}
+     * already covers).
+     */
+    @Test
+    void clearPendingWorkReleasesAPausedSelectionOwnedByTheQueuesFrontSource() {
+        var sink = PortalTransferSink.createForTest(new FakeGrid());
+        var dimension = Level.NETHER;
+        long chunkKey = 1L;
+        var front = new BlockPos(0, 64, 0);
+        var rest = new BlockPos(1, 64, 0);
+        sink.seedPendingNetherQueueForTest(dimension, chunkKey, List.of(front, rest).iterator());
+        sink.seedPausedNetherSelectionForTest(dimension, front, Level.OVERWORLD);
+
+        sink.clearPendingWork(dimension, chunkKey);
+
+        assertFalse(sink.hasNetherSelectionForTest(dimension, front));
+        assertEquals(0, sink.netherPoolReferenceCountForTest(Level.OVERWORLD));
+    }
+
+
+    @Test
+    void ensureQueueNeverStompsAnAlreadyInProgressQueue() {
+        var queues = new HashMap<ResourceKey<Level>, Map<Long, PortalTransferSink.SourceQueue>>();
+        var inProgress = new PortalTransferSink.SourceQueue(List.of(new BlockPos(9, 0, 0)).iterator());
+        queues.computeIfAbsent(Level.NETHER, ignored -> new HashMap<>()).put(1L, inProgress);
+        PortalTransferSink.ensureQueue(queues, Level.NETHER, 1L, Set.of(new BlockPos(1, 0, 0), new BlockPos(2, 0, 0)));
+        assertEquals(inProgress, PortalTransferSink.queueFor(queues, Level.NETHER, 1L),
+            "a fresh discovery must never replace a pass still being drained");
+    }
+
+    @Test
+    void ensureQueueDoesNothingForAnEmptyDiscovery() {
+        var queues = new HashMap<ResourceKey<Level>, Map<Long, PortalTransferSink.SourceQueue>>();
+        PortalTransferSink.ensureQueue(queues, Level.NETHER, 1L, Set.of());
+        org.junit.jupiter.api.Assertions.assertNull(PortalTransferSink.queueFor(queues, Level.NETHER, 1L));
+    }
+
+    @Test
+    void sourceQueuePeekPollDrainsExactlyOnceEachInOrder() {
+        var queue = new PortalTransferSink.SourceQueue(
+            List.of(new BlockPos(1, 0, 0), new BlockPos(2, 0, 0)).iterator());
+        assertTrue(!queue.isEmpty());
+        assertEquals(new BlockPos(1, 0, 0), queue.peek(), "peek must not consume");
+        assertEquals(new BlockPos(1, 0, 0), queue.peek(), "repeated peek must return the same element");
+        queue.poll();
+        assertEquals(new BlockPos(2, 0, 0), queue.peek());
+        queue.poll();
+        assertTrue(queue.isEmpty());
+    }
+
+    @Test
+    void advanceNetherCandidateScanFinishesInOneCallForASparseBox() {
+        var only = new BlockPos(10, 64, 10); // chunk (0, 0)
+        Map<Long, Set<BlockPos>> byChunk = Map.of(ChunkPos.asLong(0, 0), Set.of(only));
+        var scan = new PortalTransferSink.CandidateScan();
+        var budget = new PortalTransferSink.Budget(100);
+        var examined = new java.util.ArrayList<BlockPos>();
+        PortalTransferSink.advanceNetherCandidateScan(byChunk, 0, 0, 0, 0,
+            scan, budget, pos -> { examined.add(pos); return true; });
+        assertTrue(scan.done);
+        assertEquals(Set.of(only), scan.eligibleCandidates);
+        assertEquals(List.of(only), examined);
+    }
+
+    /**
+     * MINECRAFT-435 (third review): "Add a counting dense-single-registry-chunk fixture" -- a
+     * single chunk entry with far more candidates than the per-call budget must still cost
+     * exactly the budget, not the whole dense set, proving one densely-populated destination
+     * chunk can never force unbounded work in a single call.
+     */
+    @Test
+    void advanceNetherCandidateScanBoundsExaminationOfASingleDenseChunkEntryToTheBudget() {
+        var dense = new java.util.HashSet<BlockPos>();
+        for (int i = 0; i < 10_000; i++) dense.add(new BlockPos(i, 64, 0));
+        Map<Long, Set<BlockPos>> byChunk = Map.of(ChunkPos.asLong(0, 0), dense);
+        var scan = new PortalTransferSink.CandidateScan();
+        var budget = new PortalTransferSink.Budget(50);
+        int[] callCount = {0};
+        PortalTransferSink.advanceNetherCandidateScan(byChunk, 0, 0, 0, 0,
+            scan, budget, pos -> { callCount[0]++; return false; });
+        assertFalse(scan.done, "10,000 positions in one chunk entry cannot all be examined within a budget of 50");
+        assertEquals(50, callCount[0], "exactly the budget's worth of positions were examined, never the whole dense set");
+        assertFalse(budget.hasRemaining());
+    }
+
+    @Test
+    void advanceNetherCandidateScanResumesAcrossCallsAndExaminesEveryPositionInADenseChunkExactlyOnce() {
+        var dense = new java.util.HashSet<BlockPos>();
+        for (int i = 0; i < 237; i++) dense.add(new BlockPos(i, 64, 0));
+        Map<Long, Set<BlockPos>> byChunk = Map.of(ChunkPos.asLong(0, 0), dense);
+        var scan = new PortalTransferSink.CandidateScan();
+        var seen = new java.util.HashSet<BlockPos>();
+        int calls = 0;
+        while (!scan.done) {
+            var budget = new PortalTransferSink.Budget(40);
+            PortalTransferSink.advanceNetherCandidateScan(byChunk, 0, 0, 0, 0,
+                scan, budget, pos -> { assertTrue(seen.add(pos), "no position examined twice across the resumed scan"); return true; });
+            calls++;
+            assertTrue(calls < 100, "safety bound to catch a runaway loop on test failure");
+        }
+        assertEquals(dense, seen, "every position in the dense chunk examined exactly once across the resumed scan, none omitted");
+        assertEquals(dense, scan.eligibleCandidates);
+        assertTrue(calls > 1, "a budget of 40 over 237 positions must genuinely take more than one call");
+    }
+
+    /**
+     * Integration of {@link PortalTransferSink#advanceNetherCandidateScan} (anchor-independent
+     * discovery, possibly spread over several calls) with {@link
+     * PortalTransferSink#advanceNetherSelection} (anchor-specific selection, applied once
+     * discovery is done) -- the true nearest candidate is found regardless of which call examined
+     * it during discovery.
+     */
+    @Test
+    void discoveredPoolYieldsTheTrueNearestRegardlessOfWhichCallExaminedEachCandidate() {
+        var nearToAnchor = new BlockPos(5, 64, 0); // chunk (0, 0)
+        var farFromAnchor = new BlockPos(1000, 64, 0); // chunk (62, 0)
+        var byChunk = new java.util.HashMap<Long, Set<BlockPos>>();
+        byChunk.put(ChunkPos.asLong(0, 0), Set.of(farFromAnchor));
+        byChunk.put(ChunkPos.asLong(62, 0), Set.of(nearToAnchor));
+        var scan = new PortalTransferSink.CandidateScan();
+        int calls = 0;
+        while (!scan.done) {
+            var budget = new PortalTransferSink.Budget(1);
+            PortalTransferSink.advanceNetherCandidateScan(byChunk, 0, 62, 0, 0, scan, budget, pos -> true);
+            calls++;
+            assertTrue(calls < 100, "safety bound to catch a runaway loop on test failure");
+        }
+        var anchor = new BlockPos(10, 64, 0);
+        var selection = new PortalTransferSink.NetherSelectionScan();
+        selection.remaining = scan.eligibleCandidates.iterator();
+        PortalTransferSink.advanceNetherSelection(anchor, 2000, selection, new PortalTransferSink.Budget(100), pos -> true);
+        assertTrue(selection.done);
+        assertEquals(nearToAnchor, selection.best,
+            "the globally nearest candidate is found even though a farther one was examined in an earlier discovery call");
     }
 
     @Test

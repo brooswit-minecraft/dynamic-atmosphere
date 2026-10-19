@@ -43,4 +43,29 @@ class AtmosphereProducerScheduleTest {
         assertEquals(1, schedule.pending());
         assertEquals(List.of("later"), schedule.poll(1, ignored -> true));
     }
+
+    @Test
+    void requeuePutsAnUnfinishedKeyBehindAlreadyPendingWorkForFairRoundRobinContinuation() {
+        var schedule = new AtmosphereProducerSchedule<String>();
+        schedule.beginCycle(List.of("a", "b"));
+        assertEquals(List.of("a"), schedule.poll(1, ignored -> true));
+        // "a" needed another pass -- it goes to the BACK, behind "b", which is still pending.
+        schedule.requeue("a");
+        assertEquals(2, schedule.pending());
+        assertEquals(List.of("b"), schedule.poll(1, ignored -> true));
+        assertEquals(List.of("a"), schedule.poll(1, ignored -> true));
+        assertEquals(0, schedule.pending());
+    }
+
+    @Test
+    void requeuedKeyKeepsTheCurrentCycleFromBeingReplaced() {
+        var schedule = new AtmosphereProducerSchedule<String>();
+        schedule.beginCycle(List.of("a"));
+        schedule.poll(1, ignored -> true);
+        schedule.requeue("a");
+        // Still backlogged: a new cycle must not silently replace the unfinished one.
+        assertFalse(schedule.beginCycle(List.of("replacement")));
+        assertEquals(List.of("a"), schedule.poll(1, ignored -> true));
+        assertTrue(schedule.beginCycle(List.of("replacement")));
+    }
 }

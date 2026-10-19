@@ -1,7 +1,6 @@
 package io.github.brooswitminecraft.dynamicatmosphere;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.SectionPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -11,12 +10,20 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 
+import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.function.Predicate;
 
 /**
@@ -68,62 +75,505 @@ import java.util.function.Predicate;
  * never destroys material either -- it is retried on a later producer pass instead. A portal links
  * two independently simulated regions; nothing here forces either one to stay active just because
  * the other is (design brief section 50's "ONE THING TO WATCH").</p>
+ *
+ * <p><b>MINECRAFT-435 bounded, finite passes:</b> {@link #onLoadedChunkProducerCheck} only
+ * begins a new pass over a chunk's just-discovered source positions when the previous pass has
+ * fully drained ({@link #hasPendingWork}); a pass in progress is continued via {@link
+ * #drainPending} instead, without touching the discovery side at all. Each call drains at most
+ * {@code portalTransferSink.maxSourcesPerCall} positions per leg; the caller is told whether the
+ * whole pass finished (both legs' queues empty) so it knows whether to revisit this chunk before
+ * considering its own visit complete -- a finite pass is always serviced exactly once, never
+ * abandoned partway and never looped over in a single call.</p>
  */
 public final class PortalTransferSink {
     static final int NETHER_PORTAL_COORDINATE_SCALE = 8;
     static final int NETHER_LINK_SEARCH_RADIUS = 128;
 
-    private final Map<ResourceKey<Level>, Map<Long, Set<BlockPos>>> knownNetherPortals = new HashMap<>();
-    private final Map<ResourceKey<Level>, Map<Long, Set<BlockPos>>> knownEndPortals = new HashMap<>();
+    private final Map<ResourceKey<Level>, NavigableMap<Long, Set<BlockPos>>> knownNetherPortals = new HashMap<>();
+    private final Map<ResourceKey<Level>, NavigableMap<Long, Set<BlockPos>>> knownEndPortals = new HashMap<>();
+    /**
+     * MINECRAFT-435: a finite, persisted-per-chunk queue of source positions still owed a
+     * transfer attempt from the current pass -- populated once (from a freshly completed
+     * discovery) and drained to empty before a new pass may begin for that chunk.
+     */
+    private final Map<ResourceKey<Level>, Map<Long, SourceQueue>> pendingNetherTransfers = new HashMap<>();
+    private final Map<ResourceKey<Level>, Map<Long, SourceQueue>> pendingEndTransfers = new HashMap<>();
+    /**
+     * MINECRAFT-435: opportunistic cache of the last resolved End destination, checked first
+     * (O(1)) so a repeatedly-valid destination never pays for {@link #resolveEndDestination}'s
+     * bounded registry probe at all; see that method.
+     */
+    private BlockPos cachedEndDestination;
+    /**
+     * MINECRAFT-435: in-progress, resumable "is there any eligible End destination" search --
+     * global, not keyed by source or box, since the End leg only ever needs ANY known destination
+     * (never "the nearest"), so there is exactly one such search in flight at a time regardless of
+     * how many End sources are waiting on it. See {@link #advanceEndCandidateScan}.
+     */
+    private EndCandidateScan pendingEndScan;
+    /**
+     * MINECRAFT-435: where the NEXT fresh {@link EndCandidateScan} should start -- persisted
+     * independently of any one scan attempt, and advanced to wherever that attempt left off once
+     * it completes (whether it found a destination or not), so repeated scan attempts rotate
+     * forward through the registry over time instead of always re-examining the same prefix (which
+     * would starve a dense entry's suffix, or anything beyond the first {@code maxSourcesPerCall}
+     * chunk entries, forever).
+     */
+    private long endRegistryCursor = Long.MIN_VALUE;
+    /**
+     * MINECRAFT-435: in-progress, resumable "which positions in this destination box are
+     * currently eligible" DISCOVERY -- keyed by {@link NetherBoxKey}, which includes the
+     * destination dimension, since the same box coordinates can independently arise for both an
+     * Overworld source (destination the Nether) and a Nether source (destination the Overworld),
+     * and this map is shared across every chunk and every dimension's sources, not scoped to one
+     * call or one chunk. Persisted across calls (not just within one), so a box whose candidate
+     * set is too dense to fully examine within one call's {@link
+     * DynamicAtmosphereServerConfig.PortalTransferSinkTuning#maxCandidateOperationsPerCall} budget
+     * resumes exactly where it left off next call. Once a box's discovery finishes, its entry here
+     * is removed and the result moves into {@link #netherDiscoveredPools} (see that field for why
+     * discovery is kept anchor-independent and separate from selection).
+     */
+    private final Map<NetherBoxKey, CandidateScan> netherCandidateScans = new HashMap<>();
+    /**
+     * MINECRAFT-435: a box's completed discovery result (every currently-eligible position found),
+     * kept alive for as long as any in-progress {@link NetherSelectionScan} still references it
+     * (via {@link DiscoveredPool#referenceCount}) -- several sources, even across different chunks
+     * or ticks, that resolve to the same box share this ONE discovery result (the "pass-local
+     * reuse" this ticket requires, now extended across however many calls selection for any of
+     * them takes) without ever reusing each other's (anchor-specific) nearest ANSWER; see {@link
+     * #netherSelectionScans}. Removed once its reference count drops to zero, so the NEXT source
+     * that needs this box triggers a fresh discovery reflecting the registry as it is by then.
+     */
+    private final Map<NetherBoxKey, DiscoveredPool> netherDiscoveredPools = new HashMap<>();
 
-    public void onLoadedChunkProducerCheck(ServerLevel level, LevelChunk chunk) {
-        MinecraftServer server = level.getServer();
-        ChunkPos chunkPos = chunk.getPos();
-        var netherPortalsHere = new HashSet<BlockPos>();
-        var endPortalsHere = new HashSet<BlockPos>();
-        var sections = chunk.getSections();
-        for (int index = 0; index < sections.length; index++) {
-            var section = sections[index];
-            boolean hasNetherPortal = section.maybeHas(state -> state.is(Blocks.NETHER_PORTAL));
-            boolean hasEndPortal = section.maybeHas(state -> state.is(Blocks.END_PORTAL));
-            if (!hasNetherPortal && !hasEndPortal) continue;
-            int baseY = SectionPos.sectionToBlockCoord(chunk.getSectionYFromSectionIndex(index));
-            for (int y = 0; y < 16; y++) for (int z = 0; z < 16; z++) for (int x = 0; x < 16; x++) {
-                var state = section.getBlockState(x, y, z);
-                var pos = new BlockPos(chunkPos.getMinBlockX() + x, baseY + y, chunkPos.getMinBlockZ() + z);
-                if (hasNetherPortal && state.is(Blocks.NETHER_PORTAL)) netherPortalsHere.add(pos);
-                if (hasEndPortal && state.is(Blocks.END_PORTAL)) endPortalsHere.add(pos);
-            }
+    /** MINECRAFT-435: see {@link #netherDiscoveredPools}. */
+    private static final class DiscoveredPool {
+        private final Set<BlockPos> positions;
+        private int referenceCount;
+
+        private DiscoveredPool(Set<BlockPos> positions) {
+            this.positions = positions;
         }
-        recordObserved(knownNetherPortals, level.dimension(), chunkPos.toLong(), netherPortalsHere);
-        recordObserved(knownEndPortals, level.dimension(), chunkPos.toLong(), endPortalsHere);
+    }
 
+    /**
+     * MINECRAFT-435: in-progress, resumable, budget-bounded, per-SOURCE nearest-candidate
+     * SELECTION over an already-discovered (anchor-independent) pool -- keyed by {@link
+     * NetherSourceKey} (the source's own dimension and position), since nearest selection is
+     * inherently anchor-specific and must never be shared between two different sources even when
+     * they reference the same {@link #netherDiscoveredPools} entry. See {@link
+     * #advanceNetherSelection}.
+     */
+    private final Map<NetherSourceKey, NetherSelectionScan> netherSelectionScans = new HashMap<>();
+
+    /** MINECRAFT-435: see {@link #netherCandidateScans}/{@link #netherDiscoveredPools}. Pure value key. */
+    private record NetherBoxKey(ResourceKey<Level> destinationDimension, int minChunkX, int maxChunkX, int minChunkZ, int maxChunkZ) { }
+
+    /** MINECRAFT-435: see {@link #netherSelectionScans}. Pure value key. */
+    private record NetherSourceKey(ResourceKey<Level> sourceDimension, BlockPos pos) { }
+
+    /**
+     * MINECRAFT-435: {@code netherPortalsHere}/{@code endPortalsHere} are the positions {@link
+     * PortalChunkScanner} already found for this chunk visit -- scanning itself no longer happens
+     * here, since {@link ObsidianPowderGameplay} needs the identical Nether portal positions on
+     * the same cadence and the two scans were otherwise redundant. The caller must not call this
+     * while {@link #hasPendingWork} still reports a pass in progress for this chunk (it would
+     * silently be ignored below); call {@link #drainPending} instead in that case.
+     *
+     * @return {@code true} once every position discovered this pass has been serviced exactly
+     *     once (both legs); {@code false} if bounded work remains and the caller must revisit
+     *     this chunk (via {@link #drainPending}, not another discovery) before its own visit is done.
+     */
+    public boolean onLoadedChunkProducerCheck(
+        ServerLevel level, LevelChunk chunk, Set<BlockPos> netherPortalsHere, Set<BlockPos> endPortalsHere
+    ) {
+        long chunkKey = chunk.getPos().toLong();
+        recordObserved(knownNetherPortals, level.dimension(), chunkKey, netherPortalsHere);
+        recordObserved(knownEndPortals, level.dimension(), chunkKey, endPortalsHere);
+        ensureQueue(pendingNetherTransfers, level.dimension(), chunkKey, netherPortalsHere);
+        ensureQueue(pendingEndTransfers, level.dimension(), chunkKey, endPortalsHere);
+        return drainPending(level, chunk);
+    }
+
+    /** Whether a chunk still has an in-progress, not-yet-fully-drained pass from a prior discovery. */
+    public boolean hasPendingWork(ResourceKey<Level> dimension, long chunkKey) {
+        return queueFor(pendingNetherTransfers, dimension, chunkKey) != null
+            || queueFor(pendingEndTransfers, dimension, chunkKey) != null;
+    }
+
+    /**
+     * Continues draining whatever is already queued for this chunk, without touching discovery
+     * at all -- safe to call repeatedly across ticks while {@link #hasPendingWork} is {@code true}.
+     *
+     * @return {@code true} once both legs' queues are empty.
+     */
+    public boolean drainPending(ServerLevel level, LevelChunk chunk) {
+        MinecraftServer server = level.getServer();
+        long chunkKey = chunk.getPos().toLong();
         int throughput = DynamicAtmosphereServerConfig.snapshot().portalTransferSink().throughputPerPortalBlock();
-        if (throughput <= 0) return;
-        for (BlockPos pos : netherPortalsHere) transferNetherPortal(server, level, pos, throughput);
-        for (BlockPos pos : endPortalsHere) transferEndPortal(server, level, pos, throughput);
+        if (throughput <= 0) {
+            // MINECRAFT-435 (eighth review, kickback): routed through clearPendingWork (not a raw
+            // clearQueue) so a paused selection on the Nether queue's front source is abandoned
+            // (releasing its DiscoveredPool reference) before the queue itself is dropped --
+            // otherwise disabling throughput mid-pass would detach that selection/pool forever,
+            // the same leak the review flagged for the other early-exit paths below.
+            clearPendingWork(level.dimension(), chunkKey);
+            return true;
+        }
+        var tuning = DynamicAtmosphereServerConfig.snapshot().portalTransferSink();
+        int maxPerCall = tuning.maxSourcesPerCall();
+        // MINECRAFT-435: separate, per-leg candidate-operation budgets, shared across every
+        // source this call processes for that leg -- bounds the total registry-position
+        // live-checks/nearest-comparisons this call can do, regardless of how many sources are
+        // batched or how densely populated any single destination chunk entry is.
+        boolean netherDone = drainNetherTransfers(server, level, level.dimension(), chunkKey, throughput,
+            maxPerCall, new Budget(tuning.maxCandidateOperationsPerCall()));
+        boolean endDone = drainEndTransfers(server, level, level.dimension(), chunkKey, throughput,
+            maxPerCall, new Budget(tuning.maxCandidateOperationsPerCall()));
+        return netherDone && endDone;
+    }
+
+    /**
+     * Drops any in-progress pass for this chunk -- see the unload/replacement invalidation this
+     * ticket requires. Also abandons any in-progress Nether SELECTION scan for this chunk's
+     * still-pending sources (releasing its {@link DiscoveredPool} reference so a box solely
+     * depended on by this chunk's sources does not leak forever); discovery itself ({@link
+     * #netherCandidateScans}/{@link #netherDiscoveredPools}) is keyed by the DESTINATION box, not
+     * this source chunk, so it is correctly left untouched -- it may still be relevant to other
+     * sources, even in other chunks.
+     *
+     * <p>MINECRAFT-435 (sixth review, kickback): {@link #drainNetherTransfers} always peek/polls
+     * head-first and never starts a source's {@link NetherSelectionScan} until it is at the front
+     * -- so only the queue's FRONT element can possibly have in-progress selection state to
+     * release; every other still-queued source was never touched. Checking just the front is
+     * therefore sufficient, and the whole queue is then dropped in O(1) via {@link #clearQueue}
+     * rather than walked one-by-one through its iterator -- walking an arbitrarily large,
+     * never-yet-started remainder here would itself be exactly the kind of unbounded per-call work
+     * this ticket exists to eliminate.
+     */
+    public void clearPendingWork(ResourceKey<Level> dimension, long chunkKey) {
+        abandonFrontOnly(queueFor(pendingNetherTransfers, dimension, chunkKey), pos -> abandonNetherSelection(dimension, pos));
+        clearQueue(pendingNetherTransfers, dimension, chunkKey);
+        clearQueue(pendingEndTransfers, dimension, chunkKey);
+    }
+
+    /**
+     * MINECRAFT-435 (sixth review, kickback): releases only {@code queue}'s FRONT element via
+     * {@code abandonFront} -- never walks the rest -- since a head-first-draining queue (see
+     * {@link #drainNetherTransfers}) can only ever have in-progress selection state on whichever
+     * source is currently at the front; every other still-queued source was never started and has
+     * nothing to release. Pure and injectable so this O(1)-not-O(n) behavior is directly testable
+     * with a counting-iterator fixture, without a real level/instance.
+     */
+    static void abandonFrontOnly(SourceQueue queue, java.util.function.Consumer<BlockPos> abandonFront) {
+        if (queue != null && !queue.isEmpty()) {
+            abandonFront.accept(queue.peek());
+        }
+    }
+
+    /** Drops every in-progress pass, for a full world/session reset. */
+    public void clearAllPendingWork() {
+        pendingNetherTransfers.clear();
+        pendingEndTransfers.clear();
+        netherCandidateScans.clear();
+        netherDiscoveredPools.clear();
+        netherSelectionScans.clear();
+        pendingEndScan = null;
+    }
+
+    private void abandonNetherSelection(ResourceKey<Level> dimension, BlockPos pos) {
+        NetherSelectionScan selection = netherSelectionScans.remove(new NetherSourceKey(dimension, pos));
+        if (selection != null) releasePoolReference(selection.boxKey);
+    }
+
+    private void releasePoolReference(NetherBoxKey boxKey) {
+        DiscoveredPool discovered = netherDiscoveredPools.get(boxKey);
+        if (discovered != null && --discovered.referenceCount <= 0) {
+            netherDiscoveredPools.remove(boxKey);
+        }
+    }
+
+    /**
+     * MINECRAFT-435 (eighth review, kickback): test-only seam -- {@code transferNetherPortal}'s
+     * early-return guards and {@code abandonNetherSelection}/{@code releasePoolReference} depend
+     * on real {@code ServerLevel}/{@code LevelChunk} state this repo's test suite has no harness
+     * for (no GameTest, no mocking framework), so this lets a test directly seed the exact
+     * in-progress state those guards must release (a paused selection with its shared pool's
+     * reference count incremented) and then inspect/release it, without a real level.
+     */
+    void seedPausedNetherSelectionForTest(ResourceKey<Level> dimension, BlockPos pos, ResourceKey<Level> destinationDimension) {
+        var boxKey = new NetherBoxKey(destinationDimension, 0, 0, 0, 0);
+        netherDiscoveredPools.computeIfAbsent(boxKey, ignored -> new DiscoveredPool(Set.of())).referenceCount++;
+        var selection = new NetherSelectionScan();
+        selection.remaining = Collections.emptyIterator();
+        selection.boxKey = boxKey;
+        netherSelectionScans.put(new NetherSourceKey(dimension, pos), selection);
+    }
+
+    /** Test-only seam; see {@link #seedPausedNetherSelectionForTest}. */
+    boolean hasNetherSelectionForTest(ResourceKey<Level> dimension, BlockPos pos) {
+        return netherSelectionScans.containsKey(new NetherSourceKey(dimension, pos));
+    }
+
+    /** Test-only seam; see {@link #seedPausedNetherSelectionForTest}. */
+    int netherPoolReferenceCountForTest(ResourceKey<Level> destinationDimension) {
+        DiscoveredPool discovered = netherDiscoveredPools.get(new NetherBoxKey(destinationDimension, 0, 0, 0, 0));
+        return discovered == null ? 0 : discovered.referenceCount;
+    }
+
+    /** Test-only seam; see {@link #seedPausedNetherSelectionForTest}. Exercises the exact cleanup call every early-return guard in {@code transferNetherPortal} now makes. */
+    void abandonNetherSelectionForTest(ResourceKey<Level> dimension, BlockPos pos) {
+        abandonNetherSelection(dimension, pos);
+    }
+
+    /** Test-only seam: seeds this chunk's pending Nether queue directly, so {@link #clearPendingWork} can be exercised without a real level. */
+    void seedPendingNetherQueueForTest(ResourceKey<Level> dimension, long chunkKey, Iterator<BlockPos> positions) {
+        pendingNetherTransfers.computeIfAbsent(dimension, ignored -> new HashMap<>()).put(chunkKey, new SourceQueue(positions));
+    }
+
+    /**
+     * MINECRAFT-435: bespoke peek/pop drain for the Nether leg -- a source whose destination
+     * discovery or nearest SELECTION is not yet complete (budget exhausted mid-scan, see {@link
+     * #advanceNetherCandidateScan}/{@link #advanceNetherSelection}) must stay at the FRONT of the
+     * queue and be retried, never popped and never counted as serviced. Once a source cannot make
+     * further progress this call, there is no point trying later sources either (the shared budget
+     * is spent), so this stops rather than skipping ahead.
+     */
+    private boolean drainNetherTransfers(
+        MinecraftServer server, ServerLevel level, ResourceKey<Level> dimension, long chunkKey,
+        int throughput, int maxSources, Budget candidateBudget
+    ) {
+        var queue = queueFor(pendingNetherTransfers, dimension, chunkKey);
+        if (queue == null) return true;
+        int processed = 0;
+        while (processed < maxSources && !queue.isEmpty()) {
+            BlockPos pos = queue.peek();
+            if (!transferNetherPortal(server, level, pos, throughput, candidateBudget)) break;
+            queue.poll();
+            processed++;
+        }
+        if (queue.isEmpty()) {
+            clearQueue(pendingNetherTransfers, dimension, chunkKey);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * MINECRAFT-435: bespoke peek/pop drain for the End leg, mirroring {@link
+     * #drainNetherTransfers} -- a source is popped only once {@link #transferEndPortal} reports
+     * it fully handled (transferred, declined, or found to have nothing to transfer); one whose
+     * destination search is still in progress (budget exhausted) stays at the front and is
+     * retried, never dropped. Earlier revisions popped every polled source unconditionally, which
+     * could silently drop a source whose resolution simply hadn't finished yet.
+     */
+    private boolean drainEndTransfers(
+        MinecraftServer server, ServerLevel level, ResourceKey<Level> dimension, long chunkKey,
+        int throughput, int maxSources, Budget candidateBudget
+    ) {
+        var queue = queueFor(pendingEndTransfers, dimension, chunkKey);
+        if (queue == null) return true;
+        int processed = 0;
+        while (processed < maxSources && !queue.isEmpty()) {
+            BlockPos pos = queue.peek();
+            if (!transferEndPortal(server, level, pos, throughput, candidateBudget)) break;
+            queue.poll();
+            processed++;
+        }
+        if (queue.isEmpty()) {
+            clearQueue(pendingEndTransfers, dimension, chunkKey);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * MINECRAFT-435: peek/poll view over a discovery's own result set via a single live {@link
+     * Iterator}, never a copy into an {@link ArrayDeque} -- so handing an arbitrarily large
+     * just-completed discovery off to its pending-transfer queue costs nothing beyond the
+     * discovery itself. {@code peek()}/{@code isEmpty()} pull at most one element ahead of what
+     * {@code poll()} has consumed.
+     */
+    static final class SourceQueue {
+        private final Iterator<BlockPos> source;
+        private BlockPos peeked;
+        private boolean hasPeeked;
+
+        SourceQueue(Iterator<BlockPos> source) {
+            this.source = source;
+        }
+
+        boolean isEmpty() {
+            if (hasPeeked) return false;
+            if (!source.hasNext()) return true;
+            peeked = source.next();
+            hasPeeked = true;
+            return false;
+        }
+
+        BlockPos peek() {
+            if (!hasPeeked) {
+                peeked = source.next();
+                hasPeeked = true;
+            }
+            return peeked;
+        }
+
+        void poll() {
+            peek();
+            hasPeeked = false;
+            peeked = null;
+        }
+    }
+
+    static void ensureQueue(
+        Map<ResourceKey<Level>, Map<Long, SourceQueue>> queues,
+        ResourceKey<Level> dimension, long chunkKey, Set<BlockPos> positions
+    ) {
+        if (positions.isEmpty()) return;
+        // computeIfAbsent on the inner map only creates an entry if one is not already there, so
+        // a still-draining prior pass's queue is never stomped by a fresh (re-)discovery.
+        queues.computeIfAbsent(dimension, ignored -> new HashMap<>())
+            .computeIfAbsent(chunkKey, ignored -> new SourceQueue(positions.iterator()));
+    }
+
+    static SourceQueue queueFor(
+        Map<ResourceKey<Level>, Map<Long, SourceQueue>> queues, ResourceKey<Level> dimension, long chunkKey
+    ) {
+        var byChunk = queues.get(dimension);
+        return byChunk == null ? null : byChunk.get(chunkKey);
+    }
+
+    static void clearQueue(
+        Map<ResourceKey<Level>, Map<Long, SourceQueue>> queues, ResourceKey<Level> dimension, long chunkKey
+    ) {
+        var byChunk = queues.get(dimension);
+        if (byChunk != null) byChunk.remove(chunkKey);
     }
 
     private static void recordObserved(
-        Map<ResourceKey<Level>, Map<Long, Set<BlockPos>>> registry,
+        Map<ResourceKey<Level>, NavigableMap<Long, Set<BlockPos>>> registry,
         ResourceKey<Level> dimension, long chunkKey, Set<BlockPos> observedThisScan
     ) {
-        var byChunk = registry.computeIfAbsent(dimension, ignored -> new HashMap<>());
+        var byChunk = registry.computeIfAbsent(dimension, ignored -> new TreeMap<>());
         if (observedThisScan.isEmpty()) {
             byChunk.remove(chunkKey);
         } else {
-            byChunk.put(chunkKey, Set.copyOf(observedThisScan));
+            // observedThisScan is a scan's own freshly-allocated result set (never aliased by the
+            // caller afterward -- see PortalChunkScanner.scan), so it is stored directly rather
+            // than defensively copied, avoiding an O(n) copy of what could be an arbitrarily large
+            // densely-populated chunk's portal positions.
+            byChunk.put(chunkKey, observedThisScan);
         }
     }
 
-    private static Collection<BlockPos> knownPositions(
-        Map<ResourceKey<Level>, Map<Long, Set<BlockPos>>> registry, ResourceKey<Level> dimension
+    /**
+     * MINECRAFT-435: in-progress state for the End leg's resumable "is there any eligible
+     * destination" search -- which registry chunk entry to resume at (a {@link NavigableMap}
+     * cursor, wrapping around), every chunk key visited so far THIS scan attempt (to detect a
+     * full pass over the registry robustly -- see {@link #advanceEndCandidateScan}), which
+     * position within the current entry's set to resume at, and the first eligible position found
+     * (if any). Package-private fields: driven entirely by {@link #advanceEndCandidateScan}.
+     */
+    static final class EndCandidateScan {
+        long nextChunkKey = Long.MIN_VALUE;
+        final Set<Long> visitedChunkKeys = new HashSet<>();
+        Iterator<BlockPos> currentChunkPositions = Collections.emptyIterator();
+        BlockPos found;
+        boolean done;
+    }
+
+    /**
+     * MINECRAFT-435: resumable, budget-bounded search for ANY eligible End destination -- the End
+     * leg never needs "nearest", so this short-circuits the instant one eligible position is
+     * found, unlike {@link #advanceNetherCandidateScan}. Pure and injectable like that method, for
+     * the same reason: {@code registry} is a plain snapshot and {@code isEligible} stands in for a
+     * live loaded-chunk-and-block check.
+     *
+     * <p>Walks the registry's {@link NavigableMap} directly via {@code ceilingKey}/{@code
+     * higherKey} (wrapping around), examining at most {@code maxChunkEntriesPerCall} distinct chunk
+     * entries PER CALL -- unlike a sort-then-slice approach, the registry's full key set is never
+     * materialized or sorted. Within each chunk entry, its {@code Set<BlockPos>} is walked via a
+     * live {@link Iterator} retained in {@code scan} -- also never sorted or copied into a List --
+     * so an arbitrarily densely-populated single chunk entry still only costs exactly {@code
+     * budget}-many examinations per call, resumed via the retained iterator on the next call
+     * rather than re-walked from its start.</p>
+     *
+     * <p>{@code maxChunkEntriesPerCall} bounds only how much of the registry THIS CALL may touch
+     * (a yield point, returning with neither {@link EndCandidateScan#done} set nor anything found
+     * yet), never how much of the registry the OVERALL (possibly many-call) search attempt may
+     * cover: {@link EndCandidateScan#done} only becomes {@code true} once a position is found, or
+     * once the cursor revisits a key already in {@code visitedChunkKeys} -- a genuine traversal
+     * boundary among whatever keys actually remain, never an arbitrary partial window mistaken for
+     * "nothing exists". Tracking every VISITED key (rather than detecting a wraparound back to a
+     * single remembered starting key) stays correct even if the registry changes mid-scan,
+     * including the chunk entry this scan attempt started at being removed entirely (e.g. its only
+     * portal destroyed and rescanned as empty) -- that starting key would then never be seen again
+     * by {@code ceilingKey}/{@code higherKey}, so a wraparound keyed on it specifically would never
+     * fire and the scan would loop forever; re-hitting ANY already-visited key still correctly
+     * signals a completed pass regardless.
+     *
+     * <p>MINECRAFT-435 (eighth review, kickback): completion must NOT also be inferred from {@code
+     * visitedChunkKeys.size() >= registry.size()} -- that compares a historical (ever-visited)
+     * count against the registry's CURRENT size, which can coincidentally match well before every
+     * currently-remaining key has actually been visited. For example {@code {A,B,C}}: visit
+     * ineligible A, A is removed (registry now {@code {B,C}}, size 2), visit ineligible B --
+     * {@code visitedChunkKeys} is now {@code {A,B}} (size 2 too), matching the shrunk registry's
+     * size even though C, the one remaining key, was never examined. Repeat-key detection alone
+     * (the branch above) has no such false positive: it only concludes "done" once the cursor
+     * genuinely lands on a key it has already visited THIS pass, which can only happen once every
+     * key actually reachable from the cursor's path has been seen.</p>
+     */
+    static void advanceEndCandidateScan(
+        NavigableMap<Long, Set<BlockPos>> registry, int maxChunkEntriesPerCall,
+        EndCandidateScan scan, Budget budget, Predicate<BlockPos> isEligible
     ) {
-        var byChunk = registry.get(dimension);
-        if (byChunk == null || byChunk.isEmpty()) return Set.of();
-        var all = new HashSet<BlockPos>();
-        byChunk.values().forEach(all::addAll);
-        return all;
+        if (scan.done) return;
+        if (registry == null || registry.isEmpty()) {
+            scan.done = true;
+            return;
+        }
+        int entriesStartedThisCall = 0;
+        while (budget.hasRemaining()) {
+            if (!scan.currentChunkPositions.hasNext()) {
+                if (entriesStartedThisCall >= maxChunkEntriesPerCall) return; // yield for this call; not done
+                Long key = registry.ceilingKey(scan.nextChunkKey);
+                if (key == null) key = registry.firstKey();
+                if (key == null) {
+                    // The registry emptied out entirely since the top-of-call check above.
+                    scan.done = true;
+                    return;
+                }
+                if (!scan.visitedChunkKeys.add(key)) {
+                    // Already visited this key earlier in the pass -- the cursor has cycled back
+                    // to it, a genuine traversal boundary regardless of how the registry's current
+                    // size happens to compare to a historical visited count.
+                    scan.done = true;
+                    return;
+                }
+                entriesStartedThisCall++;
+                Long next = registry.higherKey(key);
+                scan.nextChunkKey = next != null ? next : registry.firstKey();
+                scan.currentChunkPositions = registry.getOrDefault(key, Set.of()).iterator();
+                continue;
+            }
+            BlockPos candidate = scan.currentChunkPositions.next();
+            budget.spend();
+            if (isEligible.test(candidate)) {
+                scan.found = candidate;
+                scan.done = true;
+                return;
+            }
+        }
+        // Budget exhausted mid-call; not done, resumes next call from exactly here.
+    }
+
+    /** The inclusive chunk-coordinate box every block within {@code radius} of {@code anchor} must lie in. */
+    static int[] chunkBoxAround(BlockPos anchor, int radius) {
+        return new int[] {
+            Math.floorDiv(anchor.getX() - radius, 16), Math.floorDiv(anchor.getX() + radius, 16),
+            Math.floorDiv(anchor.getZ() - radius, 16), Math.floorDiv(anchor.getZ() + radius, 16)
+        };
     }
 
     /** Pure, so the vanilla 8:1 Nether/Overworld coordinate scale is unit-testable without a live level. */
@@ -159,9 +609,185 @@ public final class PortalTransferSink {
         return Optional.ofNullable(best);
     }
 
-    /** The End's exit portal is not coordinate-linked to any source position; any known one will do. */
-    static Optional<BlockPos> any(Collection<BlockPos> candidates) {
-        return candidates.stream().findFirst();
+    /**
+     * MINECRAFT-435: a per-call budget shared across however many positions a resumable
+     * candidate search examines, independent of {@code MaterialPorts} or any live level --
+     * decrementing it is the only side effect {@link #advanceNetherCandidateScan} and {@link
+     * #resolveEndDestination} have in common with each other.
+     */
+    static final class Budget {
+        private int remaining;
+
+        Budget(int remaining) {
+            this.remaining = remaining;
+        }
+
+        boolean hasRemaining() {
+            return remaining > 0;
+        }
+
+        void spend() {
+            remaining--;
+        }
+    }
+
+    /**
+     * MINECRAFT-435: in-progress state for one Nether destination box's resumable ELIGIBILITY
+     * discovery -- which chunk entry (by index into the box's own deterministic coordinate
+     * sequence) and which position within that entry's set to resume at, plus every eligible
+     * candidate found so far. Deliberately anchor-independent (see {@link #netherCandidateScans});
+     * {@link #transferNetherPortal} computes the anchor-specific nearest selection separately, via
+     * {@link #advanceNetherSelection}, once this discovery is {@link #done}. Package-private fields:
+     * driven entirely by {@link #advanceNetherCandidateScan}.
+     */
+    static final class CandidateScan {
+        int chunkIndex;
+        Iterator<BlockPos> currentChunkPositions = Collections.emptyIterator();
+        final Set<BlockPos> eligibleCandidates = new HashSet<>();
+        boolean done;
+    }
+
+    /**
+     * MINECRAFT-435: resumable, budget-bounded discovery of every eligible position in one box --
+     * the part of destination resolution the review found still unbounded ("one source can still
+     * collect and live-check every portal block in the ... chunk box"). Deliberately
+     * anchor-independent (accumulates every eligible position found, not "the nearest to some
+     * anchor") so it is safely shareable across different sources/anchors that happen to resolve
+     * to the same box -- see {@link #netherCandidateScans}; the nearest-to-a-specific-anchor
+     * selection happens afterward, separately, in {@link #advanceNetherSelection}. Pure and injectable:
+     * {@code byChunk} is a plain registry snapshot and {@code isEligible} stands in for a live
+     * loaded-chunk-and-block check, so this is directly unit-testable with a fake dense chunk
+     * entry and a counting predicate, without a real level.
+     *
+     * <p>Walks the box's (bounded, radius-derived) chunk-coordinate sequence in a fixed
+     * deterministic order, and within each chunk entry walks its {@code Set<BlockPos>} via a
+     * live {@link Iterator} retained in {@code scan} -- never sorted or copied into a List, so an
+     * arbitrarily densely-populated single chunk entry still only costs exactly {@code
+     * budget}-many examinations per call, resumed via the retained iterator on the next call
+     * rather than re-walked from its start. {@link CandidateScan#done} only becomes {@code true}
+     * once every chunk entry in the box has been fully walked.</p>
+     */
+    static void advanceNetherCandidateScan(
+        Map<Long, Set<BlockPos>> byChunk, int minChunkX, int maxChunkX, int minChunkZ, int maxChunkZ,
+        CandidateScan scan, Budget budget, Predicate<BlockPos> isEligible
+    ) {
+        if (scan.done) return;
+        int heightInChunks = maxChunkZ - minChunkZ + 1;
+        int totalChunks = (maxChunkX - minChunkX + 1) * heightInChunks;
+        while (budget.hasRemaining()) {
+            if (!scan.currentChunkPositions.hasNext()) {
+                if (scan.chunkIndex >= totalChunks) {
+                    scan.done = true;
+                    return;
+                }
+                int chunkX = minChunkX + scan.chunkIndex / heightInChunks;
+                int chunkZ = minChunkZ + scan.chunkIndex % heightInChunks;
+                scan.chunkIndex++;
+                Set<BlockPos> positions = byChunk == null ? null : byChunk.get(ChunkPos.asLong(chunkX, chunkZ));
+                scan.currentChunkPositions = positions == null ? Collections.emptyIterator() : positions.iterator();
+                continue;
+            }
+            BlockPos candidate = scan.currentChunkPositions.next();
+            budget.spend();
+            if (isEligible.test(candidate)) scan.eligibleCandidates.add(candidate);
+        }
+        if (scan.chunkIndex >= totalChunks && !scan.currentChunkPositions.hasNext()) {
+            scan.done = true;
+        }
+    }
+
+    /**
+     * MINECRAFT-435: in-progress state for one SOURCE's resumable, budget-bounded nearest-candidate
+     * SELECTION over an already-discovered, shared pool -- see {@link #netherSelectionScans}. A
+     * snapshot {@link Iterator} over the pool (taken once, when selection begins, since the pool
+     * itself is immutable discovery data for the duration of one pass), the running nearest-so-far
+     * ELIGIBLE candidate and its squared distance, and which {@link NetherBoxKey} to release the
+     * pool reference for once selection completes. Package-private fields: driven by {@link
+     * #advanceNetherSelection}, with {@link #finalizeNetherSelection} additionally resetting
+     * {@code remaining}/{@code best}/{@code bestDistanceSquared}/{@code done} to restart a
+     * finished selection whose final live revalidation found {@code best} had gone stale in the
+     * meantime, so the next-nearest genuinely live candidate is still found rather than the whole
+     * source being given up on.
+     */
+    static final class NetherSelectionScan {
+        Iterator<BlockPos> remaining;
+        BlockPos best;
+        long bestDistanceSquared = Long.MAX_VALUE;
+        boolean done;
+        NetherBoxKey boxKey;
+    }
+
+    /**
+     * MINECRAFT-435: the anchor-specific half of Nether destination selection, kept separate from
+     * the (shareable, anchor-independent) discovery in {@link #advanceNetherCandidateScan} -- see
+     * {@link #netherSelectionScans}. Resumable and budget-bounded: walks {@code selection.remaining}
+     * (a snapshot iterator over the discovered pool) via a single monotonic nearest-so-far pass --
+     * each candidate's distance is compared first, and {@code isEligible} (a live
+     * loaded-chunk-and-block check) is only actually invoked when a candidate could improve on the
+     * current best, so eligibility is never rechecked against a candidate that cannot win. This
+     * keeps the whole selection O(pool size) in the worst case (never O(pool size squared), unlike
+     * naively re-scanning the pool after discarding each stale nearer candidate), is itself
+     * budget-charged per candidate examined, and resumes across calls via the retained iterator for
+     * an arbitrarily large pool. {@link NetherSelectionScan#done} becomes {@code true} once the
+     * whole pool has been examined.
+     */
+    static void advanceNetherSelection(BlockPos anchor, int maxRadius, NetherSelectionScan selection, Budget budget, Predicate<BlockPos> isEligible) {
+        if (selection.done) return;
+        long maxDistanceSquared = (long) maxRadius * maxRadius;
+        while (budget.hasRemaining() && selection.remaining.hasNext()) {
+            BlockPos candidate = selection.remaining.next();
+            budget.spend();
+            long dx = (long) candidate.getX() - anchor.getX();
+            long dz = (long) candidate.getZ() - anchor.getZ();
+            long distanceSquared = dx * dx + dz * dz;
+            if (distanceSquared > maxDistanceSquared || distanceSquared >= selection.bestDistanceSquared) continue;
+            if (isEligible.test(candidate)) {
+                selection.bestDistanceSquared = distanceSquared;
+                selection.best = candidate;
+            }
+        }
+        if (!selection.remaining.hasNext()) selection.done = true;
+    }
+
+    /**
+     * MINECRAFT-435: finalizes an already-{@link NetherSelectionScan#done done} selection with
+     * one final live revalidation of its retained winner before it is actually used --
+     * {@code selection.best} may have been chosen several calls ago (whenever it last improved on
+     * the running best) and never revisited since, so it could have gone stale (its chunk
+     * unloaded, or the block itself changed) in the meantime without anything in {@link
+     * #advanceNetherSelection} ever rechecking it again. On a miss, restarts the selection over
+     * {@code pool} rather than giving up on the source entirely -- the live recheck naturally
+     * rejects the same now-stale candidate again on the restart, so this always makes forward
+     * progress toward the next-nearest genuinely live candidate. Each restart is itself
+     * budget-bounded and resumable exactly like the original selection pass, never unbounded. Pure
+     * and injectable like {@link #advanceNetherSelection}, for the same reason.
+     *
+     * @return {@code true} once revalidation (and however many restarts it took) concluded with a
+     *     winner confirmed live right now, or no winner at all; {@code false} if a restart's own
+     *     budget ran out mid-scan and the caller must retry this exact source later.
+     */
+    static boolean finalizeNetherSelection(
+        BlockPos anchor, int maxRadius, NetherSelectionScan selection, Collection<BlockPos> pool,
+        Budget budget, Predicate<BlockPos> isEligible
+    ) {
+        while (selection.best != null) {
+            // MINECRAFT-435 (sixth review, kickback): the final revalidation check itself must
+            // spend the shared candidate budget, exactly like every other live-eligibility check
+            // in this scan -- otherwise a call whose budget is already exhausted could still do
+            // one uncharged check here, on top of whatever the budgeted selection pass already
+            // spent. If nothing is left, retain the still-unconfirmed best and retry this exact
+            // check on a later call rather than checking it for free.
+            if (!budget.hasRemaining()) return false;
+            budget.spend();
+            if (isEligible.test(selection.best)) break;
+            selection.best = null;
+            selection.bestDistanceSquared = Long.MAX_VALUE;
+            selection.remaining = pool.iterator();
+            selection.done = false;
+            advanceNetherSelection(anchor, maxRadius, selection, budget, isEligible);
+            if (!selection.done) return false;
+        }
+        return true;
     }
 
     /**
@@ -177,8 +803,8 @@ public final class PortalTransferSink {
      * Keeps only positions whose chunk is CURRENTLY loaded and whose live block still matches
      * {@code expected} right now. Never forces a load to check: an unloaded candidate is simply
      * not eligible for selection this pass (not trusted, not guessed at) -- it stays in the
-     * historical cache ({@link #knownPositions}) for a later pass where its chunk might be
-     * loaded, but a farther, currently-reachable candidate is always preferred over it this pass.
+     * historical registry for a later pass where its chunk might be loaded, but a farther,
+     * currently-reachable candidate is always preferred over it this pass.
      */
     private Collection<BlockPos> eligibleCandidates(
         ServerLevel destinationLevel, Collection<BlockPos> candidates, Predicate<BlockState> expected
@@ -216,7 +842,43 @@ public final class PortalTransferSink {
         return Math.max(0, destinationAfter - destinationBefore);
     }
 
-    private void transferNetherPortal(MinecraftServer server, ServerLevel level, BlockPos pos, int throughput) {
+    /**
+     * MINECRAFT-435: {@code pos} is first revalidated against the already-loaded source chunk's
+     * OWN live block state -- a portal discovered by the scan several ticks ago may have since
+     * been destroyed, and a destroyed source is never a valid transfer source regardless of what
+     * the atmosphere grid still records there. The source-amount check then runs so a portal with
+     * nothing to transfer never pays for the (bounded, but still non-free) destination search at
+     * all. Once the SELECTION itself completes, its retained winner -- possibly chosen several
+     * calls ago -- is also given one final live revalidation right before it's actually used,
+     * restarting the selection over the shared pool if it has since gone stale, so a destination
+     * that died between selection and use can never be transferred to.
+     *
+     * @return {@code true} if this source was fully handled this call (transferred, declined, or
+     *     found to have nothing to transfer) and the caller should advance past it; {@code false}
+     *     if its destination box's discovery or this source's own nearest SELECTION is still in
+     *     progress (the shared {@code candidateBudget} ran out mid-scan) and the caller must retry
+     *     this exact source later, never treating it as serviced.
+     */
+    private boolean transferNetherPortal(
+        MinecraftServer server, ServerLevel level, BlockPos pos, int throughput, Budget candidateBudget
+    ) {
+        // MINECRAFT-435 (eighth review, kickback): every "handled, nothing more to do" early
+        // return below must first abandon any NetherSelectionScan already retained for this exact
+        // source from an earlier, budget-paused call -- the source's own state (destroyed, gas
+        // emptied, dimension no longer eligible, destination level unloaded) can change between
+        // when a selection was paused and when a later call reaches one of these checks. Left
+        // behind, that selection (and its DiscoveredPool reference) would be detached forever: the
+        // new abandonFrontOnly-based clearPendingWork only ever inspects the CURRENT queue front,
+        // not a source that already got popped via one of these early returns. abandonNetherSelection
+        // is a cheap no-op when nothing is actually retained, which is the common case.
+        if (!level.getBlockState(pos).is(Blocks.NETHER_PORTAL)) {
+            abandonNetherSelection(level.dimension(), pos);
+            return true;
+        }
+        if (ports.state(level, AtmosphereMaterial.NETHER_GAS, pos).map(AtmosphereMaterialState::amount).orElse(0) <= 0) {
+            abandonNetherSelection(level.dimension(), pos);
+            return true;
+        }
         ResourceKey<Level> destinationDimension;
         BlockPos anchor;
         if (level.dimension().equals(Level.NETHER)) {
@@ -226,27 +888,123 @@ public final class PortalTransferSink {
             destinationDimension = Level.NETHER;
             anchor = overworldToNether(pos);
         } else {
-            return;
+            abandonNetherSelection(level.dimension(), pos);
+            return true;
         }
         ServerLevel destinationLevel = server.getLevel(destinationDimension);
-        if (destinationLevel == null) return;
-        var candidates = eligibleCandidates(destinationLevel,
-            knownPositions(knownNetherPortals, destinationDimension), state -> state.is(Blocks.NETHER_PORTAL));
-        Optional<BlockPos> destination = nearestWithinRadius(anchor, candidates, NETHER_LINK_SEARCH_RADIUS);
-        if (destination.isEmpty()) return;
-        transfer(level, pos, destinationLevel, destination.get(), AtmosphereMaterial.NETHER_GAS, throughput);
+        if (destinationLevel == null) {
+            abandonNetherSelection(level.dimension(), pos);
+            return true;
+        }
+        Predicate<BlockPos> isEligible = candidate ->
+            !eligibleCandidates(destinationLevel, List.of(candidate), state -> state.is(Blocks.NETHER_PORTAL)).isEmpty();
+
+        var sourceKey = new NetherSourceKey(level.dimension(), pos);
+        NetherSelectionScan selection = netherSelectionScans.get(sourceKey);
+        if (selection == null) {
+            int[] box = chunkBoxAround(anchor, NETHER_LINK_SEARCH_RADIUS);
+            var boxKey = new NetherBoxKey(destinationDimension, box[0], box[1], box[2], box[3]);
+            DiscoveredPool discovered = netherDiscoveredPools.get(boxKey);
+            if (discovered == null) {
+                CandidateScan scan = netherCandidateScans.computeIfAbsent(boxKey, ignored -> new CandidateScan());
+                advanceNetherCandidateScan(knownNetherPortals.get(destinationDimension), box[0], box[1], box[2], box[3],
+                    scan, candidateBudget, isEligible);
+                if (!scan.done) return false;
+                netherCandidateScans.remove(boxKey);
+                discovered = new DiscoveredPool(scan.eligibleCandidates);
+                netherDiscoveredPools.put(boxKey, discovered);
+            }
+            discovered.referenceCount++;
+            selection = new NetherSelectionScan();
+            selection.remaining = discovered.positions.iterator();
+            selection.boxKey = boxKey;
+            netherSelectionScans.put(sourceKey, selection);
+        }
+        advanceNetherSelection(anchor, NETHER_LINK_SEARCH_RADIUS, selection, candidateBudget, isEligible);
+        if (!selection.done) return false;
+        DiscoveredPool discovered = netherDiscoveredPools.get(selection.boxKey);
+        if (!finalizeNetherSelection(anchor, NETHER_LINK_SEARCH_RADIUS, selection, discovered.positions,
+            candidateBudget, isEligible)) {
+            return false;
+        }
+        netherSelectionScans.remove(sourceKey);
+        releasePoolReference(selection.boxKey);
+        if (selection.best != null) {
+            transfer(level, pos, destinationLevel, selection.best, AtmosphereMaterial.NETHER_GAS, throughput);
+        }
+        return true;
     }
 
-    private void transferEndPortal(MinecraftServer server, ServerLevel level, BlockPos pos, int throughput) {
-        if (level.dimension().equals(Level.END)) return;
-        ServerLevel endLevel = server.getLevel(Level.END);
-        if (endLevel == null) return;
-        var candidates = eligibleCandidates(endLevel, knownPositions(knownEndPortals, Level.END), state -> state.is(Blocks.END_PORTAL));
-        Optional<BlockPos> destination = any(candidates);
-        if (destination.isEmpty()) return;
+    /**
+     * MINECRAFT-435: revalidates {@code pos} against the already-loaded source chunk's own live
+     * block state first -- a destroyed End portal is never a valid transfer source, regardless of
+     * what the atmosphere grid still records there -- then skips the destination search entirely
+     * when nothing at {@code pos} has anything to transfer.
+     *
+     * @return {@code true} if this source was fully handled this call (transferred, declined, or
+     *     found to have nothing to transfer) and the caller should advance past it; {@code false}
+     *     if the (single, global) End destination search is still in progress and the caller must
+     *     retry this exact source later, never treating it as serviced.
+     */
+    private boolean transferEndPortal(MinecraftServer server, ServerLevel level, BlockPos pos, int throughput, Budget candidateBudget) {
+        if (level.dimension().equals(Level.END) || !level.getBlockState(pos).is(Blocks.END_PORTAL)) return true;
+        List<AtmosphereMaterial> withSource = new ArrayList<>();
         for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
-            transfer(level, pos, endLevel, destination.get(), material, throughput);
+            if (ports.state(level, material, pos).map(AtmosphereMaterialState::amount).orElse(0) > 0) {
+                withSource.add(material);
+            }
         }
+        if (withSource.isEmpty()) return true;
+        ServerLevel endLevel = server.getLevel(Level.END);
+        if (endLevel == null) return true;
+        Optional<BlockPos> destination = resolveEndDestination(endLevel, candidateBudget);
+        if (destination.isEmpty() && pendingEndScan != null) return false;
+        destination.ifPresent(found -> {
+            for (AtmosphereMaterial material : withSource) {
+                transfer(level, pos, endLevel, found, material, throughput);
+            }
+        });
+        return true;
+    }
+
+    /**
+     * MINECRAFT-435: bounded, resumable alternative to flattening and validating the whole
+     * historical End registry on every call. Tries the last resolved destination first (cheap,
+     * O(1), free -- does not spend {@code candidateBudget}); only when that is no longer eligible
+     * does it advance the single, global, persisted {@link #pendingEndScan} ({@link
+     * #advanceEndCandidateScan}), which bounds both the number of registry chunk entries AND the
+     * number of individual positions examined THIS CALL, while still persisting the SAME scan
+     * attempt across however many calls a genuinely finite full-registry search takes before
+     * concluding "found" or "nothing exists".
+     *
+     * @return the resolved destination, or empty either because none exists (the scan completed
+     *     with nothing found -- {@link #pendingEndScan} is then {@code null}) or because the scan
+     *     is still in progress ({@link #pendingEndScan} is non-null) -- the caller must
+     *     distinguish these via {@link #pendingEndScan}'s nullness, since only the latter means
+     *     "retry the source, don't treat it as serviced".
+     */
+    private Optional<BlockPos> resolveEndDestination(ServerLevel endLevel, Budget candidateBudget) {
+        if (cachedEndDestination != null && isEligibleEndPortal(endLevel, cachedEndDestination)) {
+            return Optional.of(cachedEndDestination);
+        }
+        cachedEndDestination = null;
+        if (pendingEndScan == null) {
+            pendingEndScan = new EndCandidateScan();
+            pendingEndScan.nextChunkKey = endRegistryCursor;
+        }
+        int maxChunkEntries = DynamicAtmosphereServerConfig.snapshot().portalTransferSink().maxSourcesPerCall();
+        advanceEndCandidateScan(knownEndPortals.get(Level.END), maxChunkEntries, pendingEndScan, candidateBudget,
+            candidate -> isEligibleEndPortal(endLevel, candidate));
+        if (!pendingEndScan.done) return Optional.empty();
+        endRegistryCursor = pendingEndScan.nextChunkKey;
+        BlockPos found = pendingEndScan.found;
+        pendingEndScan = null;
+        if (found != null) cachedEndDestination = found;
+        return Optional.ofNullable(found);
+    }
+
+    private boolean isEligibleEndPortal(ServerLevel endLevel, BlockPos pos) {
+        return !eligibleCandidates(endLevel, List.of(pos), state -> state.is(Blocks.END_PORTAL)).isEmpty();
     }
 
     /**
