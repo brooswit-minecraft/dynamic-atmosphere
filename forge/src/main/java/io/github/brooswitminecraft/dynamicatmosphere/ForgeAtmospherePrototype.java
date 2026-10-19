@@ -105,15 +105,21 @@ final class ForgeAtmospherePrototype {
     private final AtmosphereFanSchedule<ChunkKey> fanSchedule = new AtmosphereFanSchedule<>();
     private final AtmosphereSyncPlanner<UUID, ResourceKey<Level>> syncPlanner =
         new AtmosphereSyncPlanner<>(AtmosphereGridPayload.MAX_CELLS_PER_PAYLOAD);
+    private final PacedSyncQueue<UUID, AtmosphereSyncPlanner.Update<ResourceKey<Level>>> syncQueue =
+        new PacedSyncQueue<>(ForgeAtmospherePrototype::operationWeight, AtmosphereSyncPlanner.Update::reset);
     private final AtmosphereGrid<ResourceKey<Level>> smokeGrid =
         new AtmosphereGrid<>(SmokeGridLayout::nextSimulationTick);
     private final AtmosphereProducerSchedule<ChunkKey> smokeProducerSchedule = new AtmosphereProducerSchedule<>();
     private final SmokeSyncPlanner<UUID, ResourceKey<Level>> smokeSyncPlanner =
         new SmokeSyncPlanner<>(SmokeGridPayload.MAX_CELLS_PER_PAYLOAD);
+    private final PacedSyncQueue<UUID, SmokeSyncPlanner.Update<ResourceKey<Level>>> smokeSyncQueue =
+        new PacedSyncQueue<>(ForgeAtmospherePrototype::operationWeight, SmokeSyncPlanner.Update::reset);
     private final Map<AtmosphereMaterial, AtmosphereGrid<ResourceKey<Level>>> materialGrids =
         createMaterialGrids();
     private final Map<AtmosphereMaterial, SmokeSyncPlanner<UUID, ResourceKey<Level>>> materialSyncPlanners =
         createMaterialSyncPlanners();
+    private final Map<AtmosphereMaterial, PacedSyncQueue<UUID, SmokeSyncPlanner.Update<ResourceKey<Level>>>> materialSyncQueues =
+        createMaterialSyncQueues();
     private final DustGameplay dustGameplay = DustGameplay.create();
     private final ObsidianPowderGameplay obsidianPowderGameplay = ObsidianPowderGameplay.create();
     private final VoidGasGameplay voidGasGameplay = VoidGasGameplay.create();
@@ -163,6 +169,26 @@ final class ForgeAtmospherePrototype {
                 MaterialGridPayload.MAX_CELLS_PER_PAYLOAD, material::chunkCoordinate));
         }
         return planners;
+    }
+
+    private static Map<AtmosphereMaterial, PacedSyncQueue<UUID, SmokeSyncPlanner.Update<ResourceKey<Level>>>>
+    createMaterialSyncQueues() {
+        var queues = new EnumMap<AtmosphereMaterial,
+            PacedSyncQueue<UUID, SmokeSyncPlanner.Update<ResourceKey<Level>>>>(AtmosphereMaterial.class);
+        for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
+            queues.put(material, new PacedSyncQueue<>(
+                ForgeAtmospherePrototype::operationWeight, SmokeSyncPlanner.Update::reset));
+        }
+        return queues;
+    }
+
+    /** Operation-count weight of one planned batch: chunks plus cells, the unit the budget counts in. */
+    private static int operationWeight(AtmosphereSyncPlanner.Update<?> update) {
+        return update.authoritativeChunks().size() + update.cells().size();
+    }
+
+    private static int operationWeight(SmokeSyncPlanner.Update<?> update) {
+        return update.authoritativeChunks().size() + update.cells().size();
     }
 
     private static Map<AtmosphereMaterial, AtmosphereProducerSchedule<ChunkKey>> createMaterialProducerSchedules() {
@@ -251,9 +277,10 @@ final class ForgeAtmospherePrototype {
         flushSmokeDirtyChunks();
         flushMaterialDirtyChunks();
         if (serverTicks % tuning().runtime().syncIntervalTicks() == 0) {
-            syncPlayers(server, serverTicks % tuning().runtime().fullSnapshotIntervalTicks() == 0);
-            syncSmokePlayers(server, serverTicks % tuning().runtime().fullSnapshotIntervalTicks() == 0);
-            syncMaterialPlayers(server, serverTicks % tuning().runtime().fullSnapshotIntervalTicks() == 0);
+            int fullSnapshotIntervalTicks = tuning().runtime().fullSnapshotIntervalTicks();
+            syncPlayers(server, serverTicks, fullSnapshotIntervalTicks);
+            syncSmokePlayers(server, serverTicks, fullSnapshotIntervalTicks);
+            syncMaterialPlayers(server, serverTicks, fullSnapshotIntervalTicks);
         }
         flushDirtyChunks();
         flushSmokeDirtyChunks();
@@ -308,8 +335,11 @@ final class ForgeAtmospherePrototype {
     void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
             syncPlanner.disconnect(player.getUUID());
+            syncQueue.release(player.getUUID());
             smokeSyncPlanner.disconnect(player.getUUID());
+            smokeSyncQueue.release(player.getUUID());
             materialSyncPlanners.values().forEach(planner -> planner.disconnect(player.getUUID()));
+            materialSyncQueues.values().forEach(queue -> queue.release(player.getUUID()));
         }
     }
 
@@ -370,8 +400,11 @@ final class ForgeAtmospherePrototype {
         }
         AtmosphereWaterTransitions.clear();
         syncPlanner.clear();
+        syncQueue.clear();
         smokeSyncPlanner.clear();
+        smokeSyncQueue.clear();
         materialSyncPlanners.values().forEach(SmokeSyncPlanner::clear);
+        materialSyncQueues.values().forEach(PacedSyncQueue::clear);
     }
 
     // Package-visible so the disposable command-tree fixture tests cover the
@@ -426,8 +459,11 @@ final class ForgeAtmospherePrototype {
             smokeProducerSchedule::clear,
             () -> materialProducerSchedules.values().forEach(AtmosphereProducerSchedule::clear),
             syncPlanner::clear,
+            syncQueue::clear,
             smokeSyncPlanner::clear,
-            () -> materialSyncPlanners.values().forEach(SmokeSyncPlanner::clear));
+            smokeSyncQueue::clear,
+            () -> materialSyncPlanners.values().forEach(SmokeSyncPlanner::clear),
+            () -> materialSyncQueues.values().forEach(PacedSyncQueue::clear));
 
         source.sendSuccess(() -> Component.literal(
             "Deleted loaded Dynamic Atmosphere data only: " + formatDumpReport(report)
@@ -1704,12 +1740,26 @@ final class ForgeAtmospherePrototype {
             : UNKNOWN_VIEW_RADIUS;
     }
 
-    private void syncPlayers(MinecraftServer server, boolean forceSnapshot) {
+    /**
+     * MINECRAFT-436: {@code fullSnapshotIntervalTicks} is the period, but which exact tick within
+     * it is "due" is staggered per player (a stable hash of the player's own UUID), rather than
+     * every connected player's full re-snapshot landing on the exact same tick. Without this, all
+     * players' full snapshots fire in the same tick every {@code fullSnapshotIntervalTicks}, which
+     * is the thundering-herd this pacing work exists to avoid.
+     */
+    private static boolean dueForStaggeredFullSnapshot(UUID player, long serverTicks, int fullSnapshotIntervalTicks) {
+        int phase = Math.floorMod(player.hashCode(), fullSnapshotIntervalTicks);
+        return Math.floorMod(serverTicks, fullSnapshotIntervalTicks) == phase;
+    }
+
+    private void syncPlayers(MinecraftServer server, long serverTicks, int fullSnapshotIntervalTicks) {
         List<ServerPlayer> players = server.getPlayerList().getPlayers();
         var capacities = new HashMap<AtmosphereGrid.CellKey<ResourceKey<Level>>, Integer>();
-        syncPlanner.retainPlayers(players.stream().map(ServerPlayer::getUUID).toList());
+        List<UUID> connected = players.stream().map(ServerPlayer::getUUID).toList();
+        syncPlanner.retainPlayers(connected);
+        syncQueue.retainPlayers(connected);
         for (ServerPlayer player : players) {
-            if (forceSnapshot) {
+            if (dueForStaggeredFullSnapshot(player.getUUID(), serverTicks, fullSnapshotIntervalTicks)) {
                 syncPlanner.reset(player.getUUID());
             }
             syncPlayer(player, capacities);
@@ -1750,8 +1800,10 @@ final class ForgeAtmospherePrototype {
             }
         }
 
+        syncQueue.enqueue(player.getUUID(),
+            syncPlanner.plan(player.getUUID(), dimension, viewRadiusOf(trackingView), authoritativeChunks, visible));
         for (AtmosphereSyncPlanner.Update<ResourceKey<Level>> update
-            : syncPlanner.plan(player.getUUID(), dimension, viewRadiusOf(trackingView), authoritativeChunks, visible)) {
+            : syncQueue.drain(player.getUUID(), tuning().runtime().maxSyncOperationsPerPlayerPerTick())) {
             List<AtmosphereGridPayload.Chunk> chunks = update.authoritativeChunks().stream()
                 .map(chunk -> new AtmosphereGridPayload.Chunk(chunk.x(), chunk.z()))
                 .toList();
@@ -1765,11 +1817,15 @@ final class ForgeAtmospherePrototype {
         }
     }
 
-    private void syncSmokePlayers(MinecraftServer server, boolean forceSnapshot) {
+    private void syncSmokePlayers(MinecraftServer server, long serverTicks, int fullSnapshotIntervalTicks) {
         List<ServerPlayer> players = server.getPlayerList().getPlayers();
-        smokeSyncPlanner.retainPlayers(players.stream().map(ServerPlayer::getUUID).toList());
+        List<UUID> connected = players.stream().map(ServerPlayer::getUUID).toList();
+        smokeSyncPlanner.retainPlayers(connected);
+        smokeSyncQueue.retainPlayers(connected);
         for (ServerPlayer player : players) {
-            if (forceSnapshot) smokeSyncPlanner.reset(player.getUUID());
+            if (dueForStaggeredFullSnapshot(player.getUUID(), serverTicks, fullSnapshotIntervalTicks)) {
+                smokeSyncPlanner.reset(player.getUUID());
+            }
             syncSmokePlayer(player);
         }
     }
@@ -1794,7 +1850,9 @@ final class ForgeAtmospherePrototype {
             }
         });
 
-        for (var update : smokeSyncPlanner.plan(player.getUUID(), dimension, viewRadiusOf(trackingView), scope, visible)) {
+        smokeSyncQueue.enqueue(player.getUUID(),
+            smokeSyncPlanner.plan(player.getUUID(), dimension, viewRadiusOf(trackingView), scope, visible));
+        for (var update : smokeSyncQueue.drain(player.getUUID(), tuning().runtime().maxSyncOperationsPerPlayerPerTick())) {
             List<SmokeGridPayload.Chunk> payloadChunks = update.authoritativeChunks().stream()
                 .map(chunk -> new SmokeGridPayload.Chunk(chunk.x(), chunk.z())).toList();
             List<SmokeGridPayload.Cell> payloadCells = update.cells().stream()
@@ -1807,15 +1865,19 @@ final class ForgeAtmospherePrototype {
         }
     }
 
-    private void syncMaterialPlayers(MinecraftServer server, boolean forceSnapshot) {
+    private void syncMaterialPlayers(MinecraftServer server, long serverTicks, int fullSnapshotIntervalTicks) {
         List<ServerPlayer> players = server.getPlayerList().getPlayers();
         List<UUID> connected = players.stream().map(ServerPlayer::getUUID).toList();
         for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
             SmokeSyncPlanner<UUID, ResourceKey<Level>> planner = materialSyncPlanners.get(material);
+            PacedSyncQueue<UUID, SmokeSyncPlanner.Update<ResourceKey<Level>>> queue = materialSyncQueues.get(material);
             planner.retainPlayers(connected);
+            queue.retainPlayers(connected);
             for (ServerPlayer player : players) {
-                if (forceSnapshot) planner.reset(player.getUUID());
-                syncMaterialPlayer(player, material, planner);
+                if (dueForStaggeredFullSnapshot(player.getUUID(), serverTicks, fullSnapshotIntervalTicks)) {
+                    planner.reset(player.getUUID());
+                }
+                syncMaterialPlayer(player, material, planner, queue);
             }
         }
     }
@@ -1823,7 +1885,8 @@ final class ForgeAtmospherePrototype {
     private void syncMaterialPlayer(
         ServerPlayer player,
         AtmosphereMaterial material,
-        SmokeSyncPlanner<UUID, ResourceKey<Level>> planner
+        SmokeSyncPlanner<UUID, ResourceKey<Level>> planner,
+        PacedSyncQueue<UUID, SmokeSyncPlanner.Update<ResourceKey<Level>>> queue
     ) {
         ResourceKey<Level> dimension = player.serverLevel().dimension();
         var scope = new ArrayList<SmokeSyncPlanner.Chunk>();
@@ -1844,7 +1907,9 @@ final class ForgeAtmospherePrototype {
             }
         });
 
-        for (var update : planner.plan(player.getUUID(), dimension, viewRadiusOf(trackingView), scope, visible)) {
+        queue.enqueue(player.getUUID(),
+            planner.plan(player.getUUID(), dimension, viewRadiusOf(trackingView), scope, visible));
+        for (var update : queue.drain(player.getUUID(), tuning().runtime().maxSyncOperationsPerPlayerPerTick())) {
             List<MaterialGridPayload.Chunk> payloadChunks = update.authoritativeChunks().stream()
                 .map(chunk -> new MaterialGridPayload.Chunk(chunk.x(), chunk.z())).toList();
             List<MaterialGridPayload.Cell> payloadCells = update.cells().stream()

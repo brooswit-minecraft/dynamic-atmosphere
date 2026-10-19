@@ -26,6 +26,7 @@ public final class DynamicAtmosphereServerConfig {
     private static final IntOption CHUNK_IMPORTS;
     private static final IntOption PRODUCER_CHUNKS;
     private static final IntOption SMOKE_PRODUCER_CHUNKS;
+    private static final IntOption MAX_SYNC_OPERATIONS_PER_TICK;
 
     private static final DoubleOption VAPOR_PRODUCER_CHANCE;
     private static final IntOption VERTICAL_MOVEMENT_DEAD_BAND;
@@ -183,6 +184,11 @@ public final class DynamicAtmosphereServerConfig {
         CHUNK_IMPORTS = integer(builder, "maxChunkImportsPerTick", 8, 1, 1024);
         PRODUCER_CHUNKS = integer(builder, "maxProducerChunksPerTick", 32, 1, 4096);
         SMOKE_PRODUCER_CHUNKS = integer(builder, "maxSmokeProducerChunksPerTick", 4, 1, 4096);
+        builder.comment("Per-player, per-sync-channel cap on chunk/cell operations released from the",
+            "paced send queue each sync tick (MINECRAFT-436): bounds how much of one full snapshot",
+            "goes out per tick instead of all at once, while a single oversized batch still always",
+            "makes progress (never deadlocked).");
+        MAX_SYNC_OPERATIONS_PER_TICK = integer(builder, "maxSyncOperationsPerPlayerPerTick", 4096, 1, 1_000_000);
         builder.pop();
 
         builder.push("verticalMovement");
@@ -525,7 +531,8 @@ public final class DynamicAtmosphereServerConfig {
     private static Snapshot readSnapshot() {
         return new Snapshot(
             new RuntimeTuning(SYNC_INTERVAL.get(), FULL_SNAPSHOT_INTERVAL.get(), SIMULATION_INTERVAL.get(),
-                PRODUCER_INTERVAL.get(), CHUNK_IMPORTS.get(), PRODUCER_CHUNKS.get(), SMOKE_PRODUCER_CHUNKS.get(), SIMULATION_SKIP_CHANCE.get()),
+                PRODUCER_INTERVAL.get(), CHUNK_IMPORTS.get(), PRODUCER_CHUNKS.get(), SMOKE_PRODUCER_CHUNKS.get(),
+                SIMULATION_SKIP_CHANCE.get(), MAX_SYNC_OPERATIONS_PER_TICK.get()),
             new Vapor(VAPOR_PRODUCER_CHANCE.get(),
                 HIGH_TERRAIN.get(), RAIN_CLOUD.get(), SNOW_ICE.get(), DARK_GROUND.get(),
                 SNOW_LAYER.get(), ICE_REMOVAL.get(), CONDENSATION_CHANCE.get(),
@@ -645,7 +652,8 @@ public final class DynamicAtmosphereServerConfig {
     public record RuntimeTuning(int syncIntervalTicks, int fullSnapshotIntervalTicks,
                                 int simulationIntervalTicks, int producerIntervalTicks,
                                 int maxChunkImportsPerTick, int maxProducerChunksPerTick,
-                                int maxSmokeProducerChunksPerTick, double simulationSkipChance) { }
+                                int maxSmokeProducerChunksPerTick, double simulationSkipChance,
+                                int maxSyncOperationsPerPlayerPerTick) { }
     public record Vapor(double producerChance,
                         int highTerrainEmission, int rainCloudEmission, int snowIceEmission,
                         int maxDarkGroundEmission, int snowRemovalPerLayer, int iceRemovalEmission,
