@@ -22,6 +22,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.levelgen.Heightmap;
@@ -2121,9 +2122,9 @@ final class ForgeAtmospherePrototype {
             flushMaterialDirtyChunks();
             previous.cells.keySet().forEach(grid::remove);
             previous.smokeCells.keySet().forEach(smokeGrid::remove);
-            for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
-                previous.materialCells.get(material).keySet().forEach(materialGrids.get(material)::remove);
-            }
+            // Material eviction is folded into reimportMaterialCells below so the old
+            // incarnation's eviction and the new incarnation's import for the same material run
+            // back-to-back as one seam -- see that method's Javadoc.
         }
         ChunkState state = new ChunkState(chunk);
         chunks.put(key, state);
@@ -2152,13 +2153,11 @@ final class ForgeAtmospherePrototype {
                 level.dimension().location(), exception.getMessage());
         }
         for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
+            Map<AtmosphereGrid.CellKey<ResourceKey<Level>>, MaterialChunkData.Cell> previousMaterialCells =
+                previous == null ? null : previous.materialCells.get(material);
             try {
-                for (MaterialChunkData.Cell cell : ForgeMaterialStorage.read(chunk, material)) {
-                    var cellKey = new AtmosphereGrid.CellKey<>(level.dimension(), cell.x(), cell.y(), cell.z());
-                    state.materialCells.get(material).put(cellKey, cell);
-                    materialGrids.get(material).restore(new AtmosphereGrid.Cell<>(
-                        cellKey, cell.amount(), 0, Long.MIN_VALUE, serverTicks), serverTicks);
-                }
+                reimportMaterialCells(materialGrids.get(material), level.dimension(), chunk, material,
+                    previousMaterialCells, state.materialCells.get(material), serverTicks);
             } catch (IllegalStateException exception) {
                 state.materialReadable.remove(material);
                 LOGGER.warn("Skipping {} simulation for chunk {} in {}: {}", material.id(), chunk.getPos(),
@@ -2166,6 +2165,49 @@ final class ForgeAtmospherePrototype {
             }
         }
         return state;
+    }
+
+    /**
+     * MINECRAFT-437 review follow-up: the material-persistence half of {@link #ensureImported}'s
+     * old-incarnation-swap sequence for one material -- evict the old incarnation's cells (if any)
+     * from the live grid, then import the new incarnation's own stored cells via
+     * {@link ForgeMaterialStorage#read} and restore them into the grid. Extracted as a standalone
+     * method operating on real production types ({@link AtmosphereGrid}, {@link ChunkAccess},
+     * {@link ForgeMaterialStorage}) with no {@code ChunkState}/{@code LevelChunk}/
+     * {@code ServerLevel} dependency, so {@code MaterialIncarnationSwapSeamTest} can call it
+     * directly with two {@code ProtoChunk}-backed incarnations at the same coordinates -- this
+     * repo's test suite has no {@code ServerLevel} stand-in to drive {@link #ensureImported} itself
+     * end to end (see {@code ForgeAtmospherePrototypeFreezeGateTest}'s class Javadoc), so the global
+     * {@link #flushDirtyChunks}/{@link #flushSmokeDirtyChunks}/{@link #flushMaterialDirtyChunks}
+     * calls that precede this swap in {@code ensureImported} (and already persist a dirty old
+     * incarnation before it is evicted) remain covered separately: by this method's caller for
+     * wiring, and by {@code MaterialDirtyChunkCollectorTest}/
+     * {@code ForgeMaterialStorageProductionChunkTest} for the real collector and
+     * {@code writeBatch} pieces that compose them.
+     *
+     * @param previousMaterialCells the old incarnation's persisted-cells map for this material, or
+     *     {@code null} if there was no old incarnation at these coordinates (a first import)
+     * @param newMaterialCells the new incarnation's (initially empty) persisted-cells map for this
+     *     material, mutated in place exactly as production's inline import loop previously did
+     */
+    static void reimportMaterialCells(
+        AtmosphereGrid<ResourceKey<Level>> materialGrid,
+        ResourceKey<Level> dimension,
+        ChunkAccess newChunk,
+        AtmosphereMaterial material,
+        Map<AtmosphereGrid.CellKey<ResourceKey<Level>>, MaterialChunkData.Cell> previousMaterialCells,
+        Map<AtmosphereGrid.CellKey<ResourceKey<Level>>, MaterialChunkData.Cell> newMaterialCells,
+        long serverTicks
+    ) {
+        if (previousMaterialCells != null) {
+            previousMaterialCells.keySet().forEach(materialGrid::remove);
+        }
+        for (MaterialChunkData.Cell cell : ForgeMaterialStorage.read(newChunk, material)) {
+            var cellKey = new AtmosphereGrid.CellKey<>(dimension, cell.x(), cell.y(), cell.z());
+            newMaterialCells.put(cellKey, cell);
+            materialGrid.restore(new AtmosphereGrid.Cell<>(cellKey, cell.amount(), 0, Long.MIN_VALUE, serverTicks),
+                serverTicks);
+        }
     }
 
     private void flushDirtyChunks() {
