@@ -4,6 +4,10 @@ import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.function.IntPredicate;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.LivingEntity;
@@ -109,36 +113,91 @@ public final class ExhaustGameplay {
         }
     }
 
-    /** Called exactly once for an Exhaust cell selected by its simulation turn. */
-    public int processTurn(ServerLevel level, BlockPos source, Iterable<? extends LivingEntity> entities) {
-        Optional<AtmosphereMaterialState> state =
-            DynamicAtmosphereMod.materialState(level, AtmosphereMaterial.EXHAUST, source);
+    /** {@code target.hurt(damage)}, named so call sites read like the LivingEntity call it wraps. */
+    interface DamageOp<T> {
+        boolean hurt(T target, float damage);
+    }
+
+    /** Exposes the re-entrancy guard for {@link ExhaustGameplayTest} to observe directly; not
+     * for production use (production never needs to ask, only to set/clear it). */
+    static boolean isGuardedForTesting(UUID uuid) {
+        return EXHAUST_DAMAGE.get().contains(uuid);
+    }
+
+    /**
+     * ServerLevel-independent seam {@link #processTurn} delegates to for the eligible-target
+     * damage loop: dedups by UUID, keeps the existing alive/same-level/same-cell filtering, and
+     * guards {@code EXHAUST_DAMAGE} around each {@code hurt} call so a damage-triggered Exhaust
+     * emission never counts its own suffocation damage. Generic purely to stay testable --
+     * production passes {@code LivingEntity} and its own methods directly, with no per-entity
+     * wrapper allocation.
+     */
+    static <T> int processEligible(
+        float damage, BlockPos source, Iterable<? extends T> targets,
+        Function<? super T, UUID> uuidOf, Predicate<? super T> isAlive, Predicate<? super T> sameLevel,
+        Function<? super T, BlockPos> eyeBlockPosOf, DamageOp<? super T> hurt
+    ) {
+        int damaged = 0;
+        Set<UUID> visited = new HashSet<>();
+        for (T target : targets) {
+            UUID uuid = uuidOf.apply(target);
+            if (!visited.add(uuid) || !isAlive.test(target) || !sameLevel.test(target)
+                || !sameExhaustCell(source, eyeBlockPosOf.apply(target))) continue;
+            Set<UUID> guarded = EXHAUST_DAMAGE.get();
+            guarded.add(uuid);
+            try {
+                if (hurt.hurt(target, damage)) damaged++;
+            } finally {
+                guarded.remove(uuid);
+                if (guarded.isEmpty()) EXHAUST_DAMAGE.remove();
+            }
+        }
+        return damaged;
+    }
+
+    /**
+     * ServerLevel-independent seam {@link #processTurn} delegates to: {@code targetsSupplier} is
+     * invoked exactly once when {@code state} makes suffocation eligible, and never otherwise;
+     * {@code consume} is invoked exactly once, with the computed cost, only when at least one
+     * target was actually damaged, and a refusal yields no reported damage.
+     */
+    static <T> int runTurn(
+        Optional<AtmosphereMaterialState> state, DynamicAtmosphereServerConfig.Exhaust config,
+        BlockPos source, Supplier<? extends Iterable<? extends T>> targetsSupplier,
+        Function<? super T, UUID> uuidOf, Predicate<? super T> isAlive, Predicate<? super T> sameLevel,
+        Function<? super T, BlockPos> eyeBlockPosOf, DamageOp<? super T> hurt, IntPredicate consume
+    ) {
         if (state.isEmpty()) return 0;
         AtmosphereMaterialState current = state.orElseThrow();
-        DynamicAtmosphereServerConfig.Exhaust config = DynamicAtmosphereServerConfig.snapshot().exhaust();
         Suffocation effect = suffocation(current.amount(), current.capacity(), config.suffocationMinFullness(),
             config.suffocationMaxFullness(), config.suffocationMinDamage(), config.suffocationMaxDamage(),
             config.suffocationMinCostFraction(), config.suffocationMaxCostFraction());
         if (!effect.active()) return 0;
 
-        int damaged = 0;
-        Set<UUID> visited = new HashSet<>();
-        for (LivingEntity entity : entities) {
-            BlockPos exposure = BlockPos.containing(entity.getEyePosition());
-            if (!visited.add(entity.getUUID()) || !entity.isAlive() || entity.level() != level
-                || !sameExhaustCell(source, exposure)) continue;
-            Set<UUID> guarded = EXHAUST_DAMAGE.get();
-            guarded.add(entity.getUUID());
-            try {
-                if (entity.hurt(level.damageSources().inWall(), effect.damage())) damaged++;
-            } finally {
-                guarded.remove(entity.getUUID());
-                if (guarded.isEmpty()) EXHAUST_DAMAGE.remove();
-            }
-        }
+        int damaged = processEligible(effect.damage(), source, targetsSupplier.get(),
+            uuidOf, isAlive, sameLevel, eyeBlockPosOf, hurt);
         if (damaged == 0) return 0;
-        return DynamicAtmosphereMod.consumeMaterial(
-            level, AtmosphereMaterial.EXHAUST, source, effect.cost()) ? damaged : 0;
+        return consume.test(effect.cost()) ? damaged : 0;
+    }
+
+    /**
+     * Called exactly once for an Exhaust cell selected by its simulation turn. The entity
+     * supplier is only invoked once suffocation is eligible, so inactive cells never issue the
+     * underlying living-entity spatial query.
+     */
+    public int processTurn(
+        ServerLevel level, BlockPos source, Supplier<Iterable<? extends LivingEntity>> entitiesSupplier
+    ) {
+        return runTurn(
+            DynamicAtmosphereMod.materialState(level, AtmosphereMaterial.EXHAUST, source),
+            DynamicAtmosphereServerConfig.snapshot().exhaust(),
+            source, entitiesSupplier,
+            LivingEntity::getUUID,
+            LivingEntity::isAlive,
+            entity -> entity.level() == level,
+            entity -> BlockPos.containing(entity.getEyePosition()),
+            (entity, damage) -> entity.hurt(level.damageSources().inWall(), damage),
+            cost -> DynamicAtmosphereMod.consumeMaterial(level, AtmosphereMaterial.EXHAUST, source, cost));
     }
 
     private ExhaustGameplay() { }

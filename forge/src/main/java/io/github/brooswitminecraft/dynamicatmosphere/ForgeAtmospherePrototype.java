@@ -1101,14 +1101,14 @@ final class ForgeAtmospherePrototype {
                 if (material == AtmosphereMaterial.NETHER_GAS) {
                     int size = material.cellSize();
                     netherGasGameplay.processTurn(cellLevel, origin,
-                        cellLevel.getEntitiesOfClass(net.minecraft.world.entity.LivingEntity.class,
+                        () -> cellLevel.getEntitiesOfClass(net.minecraft.world.entity.LivingEntity.class,
                             new net.minecraft.world.phys.AABB(origin).expandTowards(size - 1, size - 1, size - 1)));
                     dissipateHeavyGas(cellLevel, materialGrid, key, capacityAt);
                 }
                 if (material == AtmosphereMaterial.EXHAUST) {
                     int size = material.cellSize();
                     exhaustGameplay.processTurn(cellLevel, origin,
-                        cellLevel.getEntitiesOfClass(net.minecraft.world.entity.LivingEntity.class,
+                        () -> cellLevel.getEntitiesOfClass(net.minecraft.world.entity.LivingEntity.class,
                             new net.minecraft.world.phys.AABB(origin).expandTowards(size - 1, size - 1, size - 1)));
                     growPlants(cellLevel, materialGrid, key, size, capacityAt);
                     capacities.clear();
