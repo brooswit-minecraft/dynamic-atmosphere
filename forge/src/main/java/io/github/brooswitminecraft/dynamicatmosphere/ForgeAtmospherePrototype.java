@@ -16,6 +16,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.tags.BlockTags;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LiquidBlock;
@@ -32,7 +33,9 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 import java.util.Comparator;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -146,9 +149,37 @@ final class ForgeAtmospherePrototype {
     private final Map<ChunkKey, Integer> glowstoneScanCursor = new HashMap<>();
     /** MINECRAFT-435: same resumable-across-ticks shape as {@link #portalScanProgress}, for fire/smoke. */
     private final Map<ChunkKey, Integer> fireScanCursor = new HashMap<>();
+    /**
+     * MINECRAFT-435: a finite, persisted-per-chunk queue of Nether portal positions still owed an
+     * Obsidian Powder emission from the most recently completed scan -- populated once a scan
+     * exhausts and drained to empty (at most {@code portalTransferSink.maxSourcesPerCall} per
+     * call) before a new scan may begin for that chunk's emission leg.
+     */
+    private final Map<ChunkKey, Deque<BlockPos>> obsidianPortalEmissionQueue = new HashMap<>();
+    /**
+     * MINECRAFT-435: per-material, per-chunk sub-hook completion tracking for {@link
+     * #processMaterialProducerChunks} -- a hook that already reported done for the chunk's
+     * current (possibly multi-call) visit is skipped on every later call of that same visit,
+     * instead of being rerun. Without this, an O(1) hook with its own random sample or chance
+     * roll (e.g. the passive Obsidian/Netherrack samples, the End ambient-emission gate) would
+     * get an extra, uncounted roll against the shared RNG stream on every call a DIFFERENT hook
+     * for the same material needed to resume bounded work -- changing cadence, emission
+     * opportunities, and the RNG sequence everything after it in the tick observes.
+     */
+    private final Map<AtmosphereMaterial, Map<ChunkKey, boolean[]>> materialHookProgress =
+        createMaterialHookProgress();
+
+    private static Map<AtmosphereMaterial, Map<ChunkKey, boolean[]>> createMaterialHookProgress() {
+        var progress = new EnumMap<AtmosphereMaterial, Map<ChunkKey, boolean[]>>(AtmosphereMaterial.class);
+        for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
+            progress.put(material, new HashMap<>());
+        }
+        return progress;
+    }
 
     ForgeAtmospherePrototype() {
-        registerMaterialProducer(AtmosphereMaterial.OBSIDIAN_POWDER, this::sampleObsidianPowderChunk);
+        registerMaterialProducer(AtmosphereMaterial.OBSIDIAN_POWDER, this::sampleObsidianPowderPassive);
+        registerMaterialProducer(AtmosphereMaterial.OBSIDIAN_POWDER, this::sampleObsidianPowderPortalEmission);
         registerMaterialProducer(AtmosphereMaterial.OBSIDIAN_POWDER, (level, chunk) -> {
             sampleEndEnderGasChunk(level, chunk);
             return true;
@@ -166,7 +197,8 @@ final class ForgeAtmospherePrototype {
             slimeGameplay.onLoadedChunkProducerCheck(level, chunk);
             return true;
         });
-        registerMaterialProducer(AtmosphereMaterial.NETHER_GAS, this::sampleNetherGasAndPortalTransfer);
+        registerMaterialProducer(AtmosphereMaterial.NETHER_GAS, this::sampleNetherGasAmbient);
+        registerMaterialProducer(AtmosphereMaterial.NETHER_GAS, this::sampleNetherGasPortalTransfer);
         registerMaterialProducer(AtmosphereMaterial.GLOW_GAS, this::sampleGlowGasChunk);
         registerMaterialProducer(AtmosphereMaterial.NETHER_FOG, (level, chunk) -> {
             sampleNetherFogChunk(level, chunk);
@@ -396,6 +428,9 @@ final class ForgeAtmospherePrototype {
         portalScanProgress.clear();
         glowstoneScanCursor.clear();
         fireScanCursor.clear();
+        obsidianPortalEmissionQueue.clear();
+        materialHookProgress.values().forEach(Map::clear);
+        portalTransferSink.clearAllPendingWork();
         producerSchedule.clear();
         fanSchedule.clear();
         smokeProducerSchedule.clear();
@@ -657,6 +692,9 @@ final class ForgeAtmospherePrototype {
         glowstoneScanCursor.remove(key);
         fireScanCursor.remove(key);
         portalScanProgress.remove(key);
+        obsidianPortalEmissionQueue.remove(key);
+        materialHookProgress.values().forEach(progress -> progress.remove(key));
+        portalTransferSink.clearPendingWork(key.dimension(), ChunkPos.asLong(key.x(), key.z()));
     }
 
     private boolean isSmokeProducerChunkActive(MinecraftServer server, ChunkKey key) {
@@ -681,6 +719,13 @@ final class ForgeAtmospherePrototype {
         }
     }
 
+    /**
+     * MINECRAFT-435: tracks per-hook completion across however many calls one chunk's (possibly
+     * bounded, multi-call) visit takes -- see {@link #materialHookProgress}. A hook that already
+     * reported done this visit is skipped on every later call, so e.g. a trivial always-true
+     * ambient/passive hook sharing a material with a resumable hook runs exactly once per visit,
+     * not once per call.
+     */
     private void processMaterialProducerChunks(MinecraftServer server) {
         long activeMaterials = materialProducerHooks.values().stream().filter(hooks -> !hooks.isEmpty()).count();
         if (activeMaterials == 0) return;
@@ -689,6 +734,7 @@ final class ForgeAtmospherePrototype {
             List<AtmosphereMaterialProducer> hooks = List.copyOf(materialProducerHooks.get(material));
             if (hooks.isEmpty()) continue;
             var schedule = materialProducerSchedules.get(material);
+            var progressByChunk = materialHookProgress.get(material);
             for (ChunkKey key : schedule.poll(perMaterialBudget, candidate -> {
                 boolean active = isMaterialProducerChunkActive(server, candidate, material);
                 if (!active) clearScanCursors(candidate);
@@ -697,11 +743,21 @@ final class ForgeAtmospherePrototype {
                 ServerLevel level = server.getLevel(key.dimension());
                 ChunkState state = chunks.get(key);
                 if (level == null || state == null) continue;
+                boolean[] done = progressByChunk.computeIfAbsent(key, ignored -> new boolean[hooks.size()]);
                 boolean allDone = true;
-                for (AtmosphereMaterialProducer hook : hooks) {
-                    if (!hook.sampleLoadedChunk(level, state.chunk)) allDone = false;
+                for (int i = 0; i < hooks.size(); i++) {
+                    if (done[i]) continue;
+                    if (hooks.get(i).sampleLoadedChunk(level, state.chunk)) {
+                        done[i] = true;
+                    } else {
+                        allDone = false;
+                    }
                 }
-                if (!allDone) schedule.requeue(key);
+                if (allDone) {
+                    progressByChunk.remove(key);
+                } else {
+                    schedule.requeue(key);
+                }
             }
         }
     }
@@ -712,40 +768,72 @@ final class ForgeAtmospherePrototype {
     }
 
     /**
-     * MINECRAFT-435: the passive block sample is a single random position per call, unrelated to
-     * portal scanning; it is intentionally left ungated by {@link #scanPortalsBounded} so it keeps
-     * running every call rather than needing its own separate "have I already sampled for this
-     * chunk's current (possibly multi-call) portal scan" bookkeeping. The one consequence is a
-     * chunk whose portal scan takes N calls to exhaust gets its passive sample re-rolled N times
-     * instead of once -- a small, bounded increase in sampling frequency only for portal-dense
-     * chunks, not a change to the per-sample odds or amounts themselves.
+     * MINECRAFT-435: the passive block sample is a single random position, unrelated to portal
+     * scanning; registered as its own hook (see {@link #materialHookProgress}) so it rolls exactly
+     * once per visit regardless of how many calls {@link #sampleObsidianPowderPortalEmission}
+     * needs to finish its own bounded work this same visit.
      */
-    private boolean sampleObsidianPowderChunk(ServerLevel level, LevelChunk chunk) {
+    private boolean sampleObsidianPowderPassive(ServerLevel level, LevelChunk chunk) {
         int x = chunk.getPos().getMinBlockX() + level.random.nextInt(16);
         int z = chunk.getPos().getMinBlockZ() + level.random.nextInt(16);
         int y = level.getMinBuildHeight()
             + level.random.nextInt(level.getMaxBuildHeight() - level.getMinBuildHeight());
         BlockPos sample = new BlockPos(x, y, z);
         obsidianPowderGameplay.onPassiveBlockSample(level, sample, chunk.getBlockState(sample));
-        Optional<PortalChunkScanner.Scan> scan = scanPortalsBounded(level, chunk);
-        if (scan.isEmpty()) return false;
-        obsidianPowderGameplay.onLoadedChunkProducerCheck(level, scan.get().netherPortals());
         return true;
     }
 
     /**
-     * MINECRAFT-435: ambient Netherrack sampling runs every call (unrelated to portal scanning,
-     * O(1) single-sample work, same re-roll-on-resumption caveat as {@link
-     * #sampleObsidianPowderChunk}'s passive sample); the portal leg only fires once {@link
-     * #scanPortalsBounded} has a completed scan for this chunk, which can take more than one call
-     * for a chunk with many matching sections.
+     * MINECRAFT-435: emits for at most {@code portalTransferSink.maxSourcesPerCall} queued Nether
+     * portal positions per call -- queued once {@link #scanPortalsBounded} completes a full
+     * section/block pass, and drained to empty (never looped over in a single call) before a new
+     * scan may begin for this chunk's emission leg.
      */
-    private boolean sampleNetherGasAndPortalTransfer(ServerLevel level, LevelChunk chunk) {
+    private boolean sampleObsidianPowderPortalEmission(ServerLevel level, LevelChunk chunk) {
+        ChunkKey key = chunkKey(level, chunk);
+        Deque<BlockPos> queue = obsidianPortalEmissionQueue.get(key);
+        if (queue == null) {
+            Optional<PortalChunkScanner.Scan> scan = scanPortalsBounded(level, chunk);
+            if (scan.isEmpty()) return false;
+            if (scan.get().netherPortals().isEmpty()) return true;
+            queue = new ArrayDeque<>(scan.get().netherPortals());
+            obsidianPortalEmissionQueue.put(key, queue);
+        }
+        int budget = tuning().portalTransferSink().maxSourcesPerCall();
+        var batch = new HashSet<BlockPos>(Math.min(budget, queue.size()));
+        for (int i = 0; i < budget && !queue.isEmpty(); i++) batch.add(queue.poll());
+        obsidianPowderGameplay.onLoadedChunkProducerCheck(level, batch);
+        if (queue.isEmpty()) {
+            obsidianPortalEmissionQueue.remove(key);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * MINECRAFT-435: ambient Netherrack sampling, unrelated to portal scanning; registered as its
+     * own hook (see {@link #materialHookProgress}) so it rolls exactly once per visit regardless
+     * of how many calls {@link #sampleNetherGasPortalTransfer} needs to finish its own bounded
+     * work this same visit.
+     */
+    private boolean sampleNetherGasAmbient(ServerLevel level, LevelChunk chunk) {
         netherGasGameplay.onLoadedChunkProducerCheck(level, chunk);
+        return true;
+    }
+
+    /**
+     * MINECRAFT-435: if a prior discovery's transfer pass is still being drained for this chunk,
+     * continues it directly (never re-triggering {@link #scanPortalsBounded}, which would
+     * otherwise restart a whole new section/block scan from scratch); only once that pass is
+     * fully drained does this ask for the next completed scan to start a new one.
+     */
+    private boolean sampleNetherGasPortalTransfer(ServerLevel level, LevelChunk chunk) {
+        if (portalTransferSink.hasPendingWork(level.dimension(), chunk.getPos().toLong())) {
+            return portalTransferSink.drainPending(level, chunk);
+        }
         Optional<PortalChunkScanner.Scan> scan = scanPortalsBounded(level, chunk);
         if (scan.isEmpty()) return false;
-        portalTransferSink.onLoadedChunkProducerCheck(level, chunk, scan.get().netherPortals(), scan.get().endPortals());
-        return true;
+        return portalTransferSink.onLoadedChunkProducerCheck(level, chunk, scan.get().netherPortals(), scan.get().endPortals());
     }
 
     /**

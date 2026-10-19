@@ -10,15 +10,19 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Comparator;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 /**
@@ -70,105 +74,156 @@ import java.util.function.Predicate;
  * never destroys material either -- it is retried on a later producer pass instead. A portal links
  * two independently simulated regions; nothing here forces either one to stay active just because
  * the other is (design brief section 50's "ONE THING TO WATCH").</p>
+ *
+ * <p><b>MINECRAFT-435 bounded, finite passes:</b> {@link #onLoadedChunkProducerCheck} only
+ * begins a new pass over a chunk's just-discovered source positions when the previous pass has
+ * fully drained ({@link #hasPendingWork}); a pass in progress is continued via {@link
+ * #drainPending} instead, without touching the discovery side at all. Each call drains at most
+ * {@code portalTransferSink.maxSourcesPerCall} positions per leg; the caller is told whether the
+ * whole pass finished (both legs' queues empty) so it knows whether to revisit this chunk before
+ * considering its own visit complete -- a finite pass is always serviced exactly once, never
+ * abandoned partway and never looped over in a single call.</p>
  */
 public final class PortalTransferSink {
     static final int NETHER_PORTAL_COORDINATE_SCALE = 8;
     static final int NETHER_LINK_SEARCH_RADIUS = 128;
 
-    private final Map<ResourceKey<Level>, Map<Long, Set<BlockPos>>> knownNetherPortals = new HashMap<>();
-    private final Map<ResourceKey<Level>, Map<Long, Set<BlockPos>>> knownEndPortals = new HashMap<>();
+    private final Map<ResourceKey<Level>, NavigableMap<Long, Set<BlockPos>>> knownNetherPortals = new HashMap<>();
+    private final Map<ResourceKey<Level>, NavigableMap<Long, Set<BlockPos>>> knownEndPortals = new HashMap<>();
     /**
-     * MINECRAFT-435: persisted, per-chunk rotating cursor into that chunk's own discovered
-     * source-portal list -- bounds how many source positions {@link #onLoadedChunkProducerCheck}
-     * actually transfers in one call (instead of looping every one of them synchronously), while
-     * guaranteeing every position still gets serviced over however many calls that takes, since
-     * the window rotates rather than always re-selecting the same prefix.
+     * MINECRAFT-435: a finite, persisted-per-chunk queue of source positions still owed a
+     * transfer attempt from the current pass -- populated once (from a freshly completed
+     * discovery) and drained to empty before a new pass may begin for that chunk.
      */
-    private final Map<ResourceKey<Level>, Map<Long, Integer>> netherSourceCursor = new HashMap<>();
-    private final Map<ResourceKey<Level>, Map<Long, Integer>> endSourceCursor = new HashMap<>();
+    private final Map<ResourceKey<Level>, Map<Long, Deque<BlockPos>>> pendingNetherTransfers = new HashMap<>();
+    private final Map<ResourceKey<Level>, Map<Long, Deque<BlockPos>>> pendingEndTransfers = new HashMap<>();
     /**
      * MINECRAFT-435: opportunistic cache of the last resolved End destination, checked first
      * (O(1)) so a repeatedly-valid destination never pays for {@link #resolveEndDestination}'s
      * bounded registry probe at all; see that method.
      */
     private BlockPos cachedEndDestination;
-    /** Persisted, rotating cursor into the End registry's own chunk-entry list; see {@link #resolveEndDestination}. */
-    private int endRegistryProbeCursor;
+    /** Persisted, rotating cursor into the End registry's own chunk-entry key space; see {@link #resolveEndDestination}. */
+    private long endRegistryProbeCursor = Long.MIN_VALUE;
 
     /**
-     * MINECRAFT-435: {@code netherPortalsHere}/{@code endPortalsHere} are the positions
-     * {@link PortalChunkScanner} already found for this chunk visit -- scanning itself no
-     * longer happens here, since {@link ObsidianPowderGameplay} needs the identical Nether
-     * portal positions on the same cadence and the two scans were otherwise redundant.
+     * MINECRAFT-435: {@code netherPortalsHere}/{@code endPortalsHere} are the positions {@link
+     * PortalChunkScanner} already found for this chunk visit -- scanning itself no longer happens
+     * here, since {@link ObsidianPowderGameplay} needs the identical Nether portal positions on
+     * the same cadence and the two scans were otherwise redundant. The caller must not call this
+     * while {@link #hasPendingWork} still reports a pass in progress for this chunk (it would
+     * silently be ignored below); call {@link #drainPending} instead in that case.
+     *
+     * @return {@code true} once every position discovered this pass has been serviced exactly
+     *     once (both legs); {@code false} if bounded work remains and the caller must revisit
+     *     this chunk (via {@link #drainPending}, not another discovery) before its own visit is done.
      */
-    public void onLoadedChunkProducerCheck(
+    public boolean onLoadedChunkProducerCheck(
         ServerLevel level, LevelChunk chunk, Set<BlockPos> netherPortalsHere, Set<BlockPos> endPortalsHere
     ) {
-        MinecraftServer server = level.getServer();
         long chunkKey = chunk.getPos().toLong();
         recordObserved(knownNetherPortals, level.dimension(), chunkKey, netherPortalsHere);
         recordObserved(knownEndPortals, level.dimension(), chunkKey, endPortalsHere);
+        ensureQueue(pendingNetherTransfers, level.dimension(), chunkKey, netherPortalsHere);
+        ensureQueue(pendingEndTransfers, level.dimension(), chunkKey, endPortalsHere);
+        return drainPending(level, chunk);
+    }
 
+    /** Whether a chunk still has an in-progress, not-yet-fully-drained pass from a prior discovery. */
+    public boolean hasPendingWork(ResourceKey<Level> dimension, long chunkKey) {
+        return queueFor(pendingNetherTransfers, dimension, chunkKey) != null
+            || queueFor(pendingEndTransfers, dimension, chunkKey) != null;
+    }
+
+    /**
+     * Continues draining whatever is already queued for this chunk, without touching discovery
+     * at all -- safe to call repeatedly across ticks while {@link #hasPendingWork} is {@code true}.
+     *
+     * @return {@code true} once both legs' queues are empty.
+     */
+    public boolean drainPending(ServerLevel level, LevelChunk chunk) {
+        MinecraftServer server = level.getServer();
+        long chunkKey = chunk.getPos().toLong();
         int throughput = DynamicAtmosphereServerConfig.snapshot().portalTransferSink().throughputPerPortalBlock();
-        if (throughput <= 0) return;
+        if (throughput <= 0) {
+            clearQueue(pendingNetherTransfers, level.dimension(), chunkKey);
+            clearQueue(pendingEndTransfers, level.dimension(), chunkKey);
+            return true;
+        }
         int maxPerCall = DynamicAtmosphereServerConfig.snapshot().portalTransferSink().maxSourcesPerCall();
-
         // Pass-local: every position below is checked against the identical, already-recorded
         // registry snapshot for this one synchronous call, so a resolved destination chunk-box
         // is safely reused across positions that land on it rather than re-resolved each time.
         var netherCandidateCache = new HashMap<List<Integer>, Collection<BlockPos>>();
-        for (BlockPos pos : windowedSources(netherSourceCursor, level.dimension(), chunkKey, netherPortalsHere, maxPerCall)) {
-            transferNetherPortal(server, level, pos, throughput, netherCandidateCache);
-        }
-        for (BlockPos pos : windowedSources(endSourceCursor, level.dimension(), chunkKey, endPortalsHere, maxPerCall)) {
-            transferEndPortal(server, level, pos, throughput);
-        }
+        boolean netherDone = drainQueue(pendingNetherTransfers, level.dimension(), chunkKey, maxPerCall,
+            pos -> transferNetherPortal(server, level, pos, throughput, netherCandidateCache));
+        boolean endDone = drainQueue(pendingEndTransfers, level.dimension(), chunkKey, maxPerCall,
+            pos -> transferEndPortal(server, level, pos, throughput));
+        return netherDone && endDone;
     }
 
-    /**
-     * MINECRAFT-435: bounds a chunk visit's source-position processing to at most {@code
-     * maxPerCall} positions, rotating through {@code positions} (stably ordered) via a cursor
-     * persisted in {@code cursorByChunk} so the same subset is never favored forever -- any
-     * remainder is serviced on this chunk's next visit instead of looped over in this one call.
-     */
-    private static Collection<BlockPos> windowedSources(
-        Map<ResourceKey<Level>, Map<Long, Integer>> cursorByDimension,
-        ResourceKey<Level> dimension, long chunkKey, Set<BlockPos> positions, int maxPerCall
+    /** Drops any in-progress pass for this chunk -- see the unload/replacement invalidation this ticket requires. */
+    public void clearPendingWork(ResourceKey<Level> dimension, long chunkKey) {
+        clearQueue(pendingNetherTransfers, dimension, chunkKey);
+        clearQueue(pendingEndTransfers, dimension, chunkKey);
+    }
+
+    /** Drops every in-progress pass, for a full world/session reset. */
+    public void clearAllPendingWork() {
+        pendingNetherTransfers.clear();
+        pendingEndTransfers.clear();
+    }
+
+    static void ensureQueue(
+        Map<ResourceKey<Level>, Map<Long, Deque<BlockPos>>> queues,
+        ResourceKey<Level> dimension, long chunkKey, Set<BlockPos> positions
     ) {
-        if (positions.isEmpty()) return Set.of();
-        var cursorByChunk = cursorByDimension.computeIfAbsent(dimension, ignored -> new HashMap<>());
-        var ordered = positions.stream().sorted(Comparator.comparingLong(BlockPos::asLong)).toList();
-        var selected = window(ordered, cursorByChunk.getOrDefault(chunkKey, 0), maxPerCall);
-        if (ordered.size() <= maxPerCall) cursorByChunk.remove(chunkKey);
-        else cursorByChunk.put(chunkKey, selected.nextStart());
-        return selected.selected();
+        if (positions.isEmpty()) return;
+        // computeIfAbsent on the inner map only creates an entry if one is not already there, so
+        // a still-draining prior pass's queue is never stomped by a fresh (re-)discovery.
+        queues.computeIfAbsent(dimension, ignored -> new HashMap<>())
+            .computeIfAbsent(chunkKey, ignored -> new ArrayDeque<>(positions));
+    }
+
+    static Deque<BlockPos> queueFor(
+        Map<ResourceKey<Level>, Map<Long, Deque<BlockPos>>> queues, ResourceKey<Level> dimension, long chunkKey
+    ) {
+        var byChunk = queues.get(dimension);
+        return byChunk == null ? null : byChunk.get(chunkKey);
+    }
+
+    static void clearQueue(
+        Map<ResourceKey<Level>, Map<Long, Deque<BlockPos>>> queues, ResourceKey<Level> dimension, long chunkKey
+    ) {
+        var byChunk = queues.get(dimension);
+        if (byChunk != null) byChunk.remove(chunkKey);
     }
 
     /**
-     * Pure, injectable rotating window over a stably-ordered list: selects at most {@code
-     * maxPerCall} consecutive elements starting at {@code startIndex} (wrapping around), and
-     * reports where the next call should start so repeated calls eventually cover the whole
-     * list rather than always re-selecting the same prefix. The whole list is returned unchanged
-     * (cursor {@code 0}) when it already fits within {@code maxPerCall}.
+     * Pure queue-draining bookkeeping (no live level access of its own -- {@code action} is the
+     * only place that happens), so it is directly unit-testable: drains at most {@code
+     * maxPerCall} elements, reports {@code true} once the queue is empty (including when there
+     * was never one to begin with -- an already-finished or never-started pass counts as done).
      */
-    record Window<T>(List<T> selected, int nextStart) { }
-
-    static <T> Window<T> window(List<T> ordered, int startIndex, int maxPerCall) {
-        if (maxPerCall <= 0) throw new IllegalArgumentException("maxPerCall must be positive");
-        int size = ordered.size();
-        if (size == 0) return new Window<>(List.of(), 0);
-        if (size <= maxPerCall) return new Window<>(ordered, 0);
-        int start = Math.floorMod(startIndex, size);
-        var picked = new ArrayList<T>(maxPerCall);
-        for (int i = 0; i < maxPerCall; i++) picked.add(ordered.get((start + i) % size));
-        return new Window<>(List.copyOf(picked), (start + maxPerCall) % size);
+    static boolean drainQueue(
+        Map<ResourceKey<Level>, Map<Long, Deque<BlockPos>>> queues,
+        ResourceKey<Level> dimension, long chunkKey, int maxPerCall, Consumer<BlockPos> action
+    ) {
+        var queue = queueFor(queues, dimension, chunkKey);
+        if (queue == null) return true;
+        for (int i = 0; i < maxPerCall && !queue.isEmpty(); i++) action.accept(queue.poll());
+        if (queue.isEmpty()) {
+            clearQueue(queues, dimension, chunkKey);
+            return true;
+        }
+        return false;
     }
 
     private static void recordObserved(
-        Map<ResourceKey<Level>, Map<Long, Set<BlockPos>>> registry,
+        Map<ResourceKey<Level>, NavigableMap<Long, Set<BlockPos>>> registry,
         ResourceKey<Level> dimension, long chunkKey, Set<BlockPos> observedThisScan
     ) {
-        var byChunk = registry.computeIfAbsent(dimension, ignored -> new HashMap<>());
+        var byChunk = registry.computeIfAbsent(dimension, ignored -> new TreeMap<>());
         if (observedThisScan.isEmpty()) {
             byChunk.remove(chunkKey);
         } else {
@@ -187,7 +242,7 @@ public final class PortalTransferSink {
      * otherwise have rejected. Pure and injectable, so it is testable with a fake registry map.
      */
     static Collection<BlockPos> knownPositionsNear(
-        Map<ResourceKey<Level>, Map<Long, Set<BlockPos>>> registry, ResourceKey<Level> dimension,
+        Map<ResourceKey<Level>, ? extends Map<Long, Set<BlockPos>>> registry, ResourceKey<Level> dimension,
         int minChunkX, int maxChunkX, int minChunkZ, int maxChunkZ
     ) {
         var byChunk = registry.get(dimension);
@@ -204,25 +259,35 @@ public final class PortalTransferSink {
 
     /**
      * MINECRAFT-435: bounded registry lookup for the End leg, which has no spatial search-radius
-     * concept to narrow by (the End's exit is not coordinate-linked to any source) -- examines
-     * only a rotating window of up to {@code maxChunkEntries} of the
-     * registry's own chunk entries (stably ordered), instead of flattening every chunk the
-     * dimension has ever recorded a portal in on every call. Pure and injectable, like {@link
+     * concept to narrow by (the End's exit is not coordinate-linked to any source). Walks a
+     * {@link NavigableMap} directly via {@code ceilingKey}/{@code higherKey} starting at {@code
+     * startKey} (wrapping around), examining at most {@code maxChunkEntries} distinct chunk
+     * entries -- unlike a sort-then-slice approach, the registry's full key set is never
+     * materialized or sorted, so the traversal cost itself (not just the returned entry count) is
+     * bounded regardless of how large the registry has grown. Pure and injectable, like {@link
      * #knownPositionsNear}.
      */
-    record WindowedPositions(Collection<BlockPos> positions, int nextStartIndex) { }
+    record WindowedPositions(Collection<BlockPos> positions, long nextStartKey) { }
 
     static WindowedPositions knownPositionsWindowed(
-        Map<ResourceKey<Level>, Map<Long, Set<BlockPos>>> registry, ResourceKey<Level> dimension,
-        int startIndex, int maxChunkEntries
+        Map<ResourceKey<Level>, ? extends NavigableMap<Long, Set<BlockPos>>> registry, ResourceKey<Level> dimension,
+        long startKey, int maxChunkEntries
     ) {
+        if (maxChunkEntries <= 0) throw new IllegalArgumentException("maxChunkEntries must be positive");
         var byChunk = registry.get(dimension);
-        if (byChunk == null || byChunk.isEmpty()) return new WindowedPositions(Set.of(), 0);
-        var keys = byChunk.keySet().stream().sorted().toList();
-        var selectedKeys = window(keys, startIndex, maxChunkEntries);
+        if (byChunk == null || byChunk.isEmpty()) return new WindowedPositions(Set.of(), startKey);
+        int toExamine = Math.min(maxChunkEntries, byChunk.size());
         var result = new HashSet<BlockPos>();
-        for (Long chunkKey : selectedKeys.selected()) result.addAll(byChunk.getOrDefault(chunkKey, Set.of()));
-        return new WindowedPositions(result, selectedKeys.nextStart());
+        Long key = byChunk.ceilingKey(startKey);
+        if (key == null) key = byChunk.firstKey();
+        long nextStart = startKey;
+        for (int i = 0; i < toExamine; i++) {
+            result.addAll(byChunk.getOrDefault(key, Set.of()));
+            Long next = byChunk.higherKey(key);
+            nextStart = next != null ? next : byChunk.firstKey();
+            key = nextStart;
+        }
+        return new WindowedPositions(result, nextStart);
     }
 
     /** The inclusive chunk-coordinate box every block within {@code radius} of {@code anchor} must lie in. */
@@ -325,15 +390,19 @@ public final class PortalTransferSink {
 
     /**
      * MINECRAFT-435: {@code candidateCache} lets several portal positions resolved within the
-     * same {@link #onLoadedChunkProducerCheck} call reuse an already-validated candidate set for
-     * an identical chunk box, instead of each re-querying and re-validating it. The source-amount
-     * check below runs first so a portal with nothing to transfer never pays for the (now bounded,
-     * but still non-free) destination search at all.
+     * same {@link #drainPending} call reuse an already-validated candidate set for an identical
+     * chunk box, instead of each re-querying and re-validating it. {@code pos} is first
+     * revalidated against the already-loaded source chunk's OWN live block state -- a portal
+     * discovered by the scan several ticks ago may have since been destroyed, and a destroyed
+     * source is never a valid transfer source regardless of what the atmosphere grid still
+     * records there. The source-amount check then runs so a portal with nothing to transfer
+     * never pays for the (now bounded, but still non-free) destination search at all.
      */
     private void transferNetherPortal(
         MinecraftServer server, ServerLevel level, BlockPos pos, int throughput,
         Map<List<Integer>, Collection<BlockPos>> candidateCache
     ) {
+        if (!level.getBlockState(pos).is(Blocks.NETHER_PORTAL)) return;
         if (ports.state(level, AtmosphereMaterial.NETHER_GAS, pos).map(AtmosphereMaterialState::amount).orElse(0) <= 0) {
             return;
         }
@@ -360,9 +429,14 @@ public final class PortalTransferSink {
         transfer(level, pos, destinationLevel, destination.get(), AtmosphereMaterial.NETHER_GAS, throughput);
     }
 
-    /** MINECRAFT-435: skips the destination search entirely when nothing at {@code pos} has anything to transfer. */
+    /**
+     * MINECRAFT-435: revalidates {@code pos} against the already-loaded source chunk's own live
+     * block state first -- a destroyed End portal is never a valid transfer source, regardless of
+     * what the atmosphere grid still records there -- then skips the destination search entirely
+     * when nothing at {@code pos} has anything to transfer.
+     */
     private void transferEndPortal(MinecraftServer server, ServerLevel level, BlockPos pos, int throughput) {
-        if (level.dimension().equals(Level.END)) return;
+        if (level.dimension().equals(Level.END) || !level.getBlockState(pos).is(Blocks.END_PORTAL)) return;
         List<AtmosphereMaterial> withSource = new ArrayList<>();
         for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
             if (ports.state(level, material, pos).map(AtmosphereMaterialState::amount).orElse(0) > 0) {
@@ -382,10 +456,10 @@ public final class PortalTransferSink {
     /**
      * MINECRAFT-435: bounded alternative to flattening and validating the whole historical End
      * registry on every call. Tries the last resolved destination first (cheap, O(1)); only when
-     * that is no longer eligible does it fall back to a small rotating window of the registry's
-     * own chunk entries ({@link #knownPositionsWindowed}, cursor persisted in {@link
-     * #endRegistryProbeCursor}), so repeated calls eventually cover the whole registry rather
-     * than always re-probing the same prefix.
+     * that is no longer eligible does it fall back to a small rotating, non-materializing probe
+     * of the registry's own chunk entries ({@link #knownPositionsWindowed}, cursor persisted in
+     * {@link #endRegistryProbeCursor}), so repeated calls eventually cover the whole registry
+     * rather than always re-probing the same prefix.
      */
     private Optional<BlockPos> resolveEndDestination(ServerLevel endLevel) {
         if (cachedEndDestination != null && !eligibleCandidates(
@@ -395,7 +469,7 @@ public final class PortalTransferSink {
         cachedEndDestination = null;
         int maxProbes = DynamicAtmosphereServerConfig.snapshot().portalTransferSink().maxSourcesPerCall();
         var windowed = knownPositionsWindowed(knownEndPortals, Level.END, endRegistryProbeCursor, maxProbes);
-        endRegistryProbeCursor = windowed.nextStartIndex();
+        endRegistryProbeCursor = windowed.nextStartKey();
         Optional<BlockPos> destination = any(
             eligibleCandidates(endLevel, windowed.positions(), state -> state.is(Blocks.END_PORTAL)));
         destination.ifPresent(found -> cachedEndDestination = found);
