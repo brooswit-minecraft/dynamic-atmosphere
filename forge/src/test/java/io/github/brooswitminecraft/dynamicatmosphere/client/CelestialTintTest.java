@@ -76,6 +76,19 @@ class CelestialTintTest {
         assertEquals(0, CelestialTint.weight(UP, UP, 0, 0.35));
     }
 
+    /**
+     * MINECRAFT-432: {@code AtmosphereVolumeRenderer#celestialFrame} skips its entire per-frame
+     * ray-casting/horizon/rain computation whenever {@code celestialTintMaxStrength} is
+     * configured to 0, relying on exactly this invariant to stay behavior-preserving -- weight
+     * is 0 regardless of angle or visibility, so the skipped work could never have produced a
+     * nonzero contribution anyway. Looking directly at the body (maximal angle) and full
+     * visibility would otherwise be the single most favourable case for a nonzero weight.
+     */
+    @Test
+    void zeroMaxStrengthCollapsesWeightRegardlessOfAngleOrVisibility() {
+        assertEquals(0, CelestialTint.weight(UP, UP, 1, 0));
+    }
+
     @Test
     void nonFiniteInputsFoldToZeroWeight() {
         assertEquals(0, CelestialTint.weight(new CelestialTint.Vector(Double.NaN, 0, 0), UP, 1, 0.35));
