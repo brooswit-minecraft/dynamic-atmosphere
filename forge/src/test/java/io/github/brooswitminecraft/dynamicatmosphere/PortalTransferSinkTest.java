@@ -246,9 +246,8 @@ class PortalTransferSinkTest {
      * starting entry being removed entirely between calls (e.g. that chunk's only portal
      * destroyed and rescanned as empty) -- a wraparound keyed on remembering that one specific
      * starting key would never fire again once it's gone, starving the scan forever. Tracking
-     * every visited key (and completing once that count reaches the registry's current size, or
-     * an already-visited key repeats) must still terminate and still examine every remaining
-     * entry.
+     * every visited key and completing once an already-visited key repeats must still terminate
+     * and still examine every remaining entry.
      */
     @Test
     void advanceEndCandidateScanTerminatesEvenWhenItsStartingEntryIsRemovedMidScan() {
@@ -272,6 +271,50 @@ class PortalTransferSinkTest {
                 + "must not starve forever just because the starting entry vanished");
         }
         assertEquals(null, scan.found, "nothing eligible in this fixture");
+    }
+
+    /**
+     * MINECRAFT-435 (eighth review, kickback): completion must never be inferred from comparing
+     * a historical visited-key COUNT against the registry's CURRENT size -- that can
+     * coincidentally match well before every still-remaining key has actually been examined.
+     * Exact counterexample from the review: {A,B,C}; visit ineligible A; A is removed (registry
+     * now {B,C}, size 2); visit ineligible B (visitedChunkKeys now {A,B}, ALSO size 2) -- a
+     * size-based check would wrongly call the pass complete right there, never examining C, even
+     * though C holds the one eligible destination.
+     */
+    @Test
+    void advanceEndCandidateScanStillExaminesARemainingEligibleEntryAfterAnEarlierEntryIsRemoved() {
+        var a = new ChunkPos(0, 0);
+        var b = new ChunkPos(1, 0);
+        var c = new ChunkPos(2, 0);
+        var eligible = new BlockPos(3, 64, 3);
+        var registry = navigableRegistryOf(Map.of(
+            a, Set.of(new BlockPos(1, 64, 1)),
+            b, Set.of(new BlockPos(2, 64, 2)),
+            c, Set.of(eligible)));
+        var scan = new PortalTransferSink.EndCandidateScan();
+        java.util.function.Predicate<BlockPos> isEligible = pos -> pos.equals(eligible);
+
+        // Call 1: visits A (ineligible), one entry per call.
+        PortalTransferSink.advanceEndCandidateScan(registry, 1, scan, new PortalTransferSink.Budget(100), isEligible);
+        assertFalse(scan.done);
+        assertEquals(null, scan.found);
+
+        // A's only portal is destroyed and its chunk rescanned as empty between calls.
+        registry.remove(a.toLong());
+
+        // Call 2: visits B (ineligible). visitedChunkKeys == {A, B} (size 2), coincidentally
+        // matching the now-shrunk registry {B, C}'s size (also 2) -- the exact false-positive
+        // shape the review flagged.
+        PortalTransferSink.advanceEndCandidateScan(registry, 1, scan, new PortalTransferSink.Budget(100), isEligible);
+        assertFalse(scan.done, "C has not been examined yet -- the pass must not be reported complete");
+        assertEquals(null, scan.found);
+
+        // Call 3: C must still be reached and found eligible, not silently skipped.
+        PortalTransferSink.advanceEndCandidateScan(registry, 1, scan, new PortalTransferSink.Budget(100), isEligible);
+        assertTrue(scan.done);
+        assertEquals(eligible, scan.found, "C must be examined and found -- never omitted just because a historical "
+            + "visited-key count happened to match the shrunk registry's current size");
     }
 
     @Test

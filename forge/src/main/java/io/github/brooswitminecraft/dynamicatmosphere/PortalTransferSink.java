@@ -503,17 +503,26 @@ public final class PortalTransferSink {
      * (a yield point, returning with neither {@link EndCandidateScan#done} set nor anything found
      * yet), never how much of the registry the OVERALL (possibly many-call) search attempt may
      * cover: {@link EndCandidateScan#done} only becomes {@code true} once a position is found, or
-     * once {@code visitedChunkKeys} covers every distinct chunk entry currently in the registry --
-     * a genuinely finite full search over the registry as it exists right now, never a search that
-     * gives up after an arbitrary partial window and calls that a definitive "nothing exists".
-     * Tracking every VISITED key (rather than detecting a wraparound back to a single remembered
-     * starting key) stays correct even if the registry changes mid-scan, including the chunk entry
-     * this scan attempt started at being removed entirely (e.g. its only portal destroyed and
-     * rescanned as empty) -- that starting key would then never be seen again by {@code
-     * ceilingKey}/{@code higherKey}, so a wraparound keyed on it specifically would never fire and
-     * the scan would loop forever; re-hitting ANY already-visited key, or simply having visited as
-     * many distinct keys as the registry currently holds, both correctly signal a completed pass
-     * regardless of such changes.</p>
+     * once the cursor revisits a key already in {@code visitedChunkKeys} -- a genuine traversal
+     * boundary among whatever keys actually remain, never an arbitrary partial window mistaken for
+     * "nothing exists". Tracking every VISITED key (rather than detecting a wraparound back to a
+     * single remembered starting key) stays correct even if the registry changes mid-scan,
+     * including the chunk entry this scan attempt started at being removed entirely (e.g. its only
+     * portal destroyed and rescanned as empty) -- that starting key would then never be seen again
+     * by {@code ceilingKey}/{@code higherKey}, so a wraparound keyed on it specifically would never
+     * fire and the scan would loop forever; re-hitting ANY already-visited key still correctly
+     * signals a completed pass regardless.
+     *
+     * <p>MINECRAFT-435 (eighth review, kickback): completion must NOT also be inferred from {@code
+     * visitedChunkKeys.size() >= registry.size()} -- that compares a historical (ever-visited)
+     * count against the registry's CURRENT size, which can coincidentally match well before every
+     * currently-remaining key has actually been visited. For example {@code {A,B,C}}: visit
+     * ineligible A, A is removed (registry now {@code {B,C}}, size 2), visit ineligible B --
+     * {@code visitedChunkKeys} is now {@code {A,B}} (size 2 too), matching the shrunk registry's
+     * size even though C, the one remaining key, was never examined. Repeat-key detection alone
+     * (the branch above) has no such false positive: it only concludes "done" once the cursor
+     * genuinely lands on a key it has already visited THIS pass, which can only happen once every
+     * key actually reachable from the cursor's path has been seen.</p>
      */
     static void advanceEndCandidateScan(
         NavigableMap<Long, Set<BlockPos>> registry, int maxChunkEntriesPerCall,
@@ -528,19 +537,17 @@ public final class PortalTransferSink {
         while (budget.hasRemaining()) {
             if (!scan.currentChunkPositions.hasNext()) {
                 if (entriesStartedThisCall >= maxChunkEntriesPerCall) return; // yield for this call; not done
-                if (scan.visitedChunkKeys.size() >= registry.size()) {
-                    // Visited as many distinct keys as currently exist -- a complete pass, even if
-                    // the registry shrank (including losing this attempt's own starting entry)
-                    // since the scan began.
+                Long key = registry.ceilingKey(scan.nextChunkKey);
+                if (key == null) key = registry.firstKey();
+                if (key == null) {
+                    // The registry emptied out entirely since the top-of-call check above.
                     scan.done = true;
                     return;
                 }
-                Long key = registry.ceilingKey(scan.nextChunkKey);
-                if (key == null) key = registry.firstKey();
                 if (!scan.visitedChunkKeys.add(key)) {
-                    // Already visited this key earlier in the pass -- the registry shrank enough
-                    // that the cursor cycled back sooner than visitedChunkKeys.size() predicted.
-                    // Nothing new left to examine either way.
+                    // Already visited this key earlier in the pass -- the cursor has cycled back
+                    // to it, a genuine traversal boundary regardless of how the registry's current
+                    // size happens to compare to a historical visited count.
                     scan.done = true;
                     return;
                 }
