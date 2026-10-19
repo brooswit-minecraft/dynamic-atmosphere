@@ -127,19 +127,25 @@ final class ForgeAtmospherePrototype {
      */
     private final Set<UUID> pendingFullSnapshot = new HashSet<>();
     /**
-     * MINECRAFT-436: per-chunk "has this chunk's amount data actually changed" revision, bumped
-     * in {@link #flushDirtyChunks} exactly when a cell in that chunk is found genuinely dirty
-     * (an amount change or removal, never merely touched) -- the same signal flushDirtyChunks
-     * already computes for persistence, reused here rather than duplicated. Paired with {@link
-     * ForgeTerrainFacts#generation}, which already unifies capacity-affecting block-change
-     * invalidation across Vapor/Smoke/every material, this is enough to safely cache a chunk's
-     * built cell list across ticks (see {@link #chunkCellCache}): a cache hit requires the SAME
-     * revision AND the SAME terrain generation as when it was built, so both amount-only and
-     * capacity-only changes are still always picked up, just without re-deriving a chunk's cells
-     * on a tick where it provably has not changed either way.
+     * MINECRAFT-436 review (sixth round): a process-wide allocator for {@code ChunkState}'s
+     * {@code incarnation} token (see that field's doc) -- handed out once per {@code ChunkState}
+     * ever created, whether a fresh import, a replacement at an already-tracked key, or a reload
+     * after an unload. A single counter, not a per-coordinate map, so this adds no per-chunk
+     * bookkeeping at all.
      */
-    private final Map<ChunkKey, Long> amountRevision = new HashMap<>();
-    /** See {@link #amountRevision}'s doc; the cross-tick cache it, and terrain generation, gate. */
+    private long nextIncarnation = 1;
+    /**
+     * MINECRAFT-436: the shared cross-tick cache of one chunk's already-built, capacity-resolved
+     * cell list, reused across every overlapping player's view. A cache hit requires the SAME
+     * (incarnation, amountRevision, terrainGeneration) triple as when the entry was built -- see
+     * {@code ChunkState.incarnation}'s doc for why incarnation uniqueness needs no persistent
+     * per-coordinate state, and {@code ChunkState.amountRevision}'s doc for the within-incarnation
+     * half -- so amount-only, capacity-only, AND chunk-incarnation changes are all still always
+     * picked up, just without re-deriving a chunk's cells on a tick where it provably has not
+     * changed any of those three ways. Entries are dropped on unload/replacement purely as memory
+     * hygiene (see {@code dropSharedChunkCellCache}); it is never required for correctness, since
+     * a stale entry's incarnation can never match a new one's.
+     */
     private final Map<ChunkKey, CachedChunkCells<AtmosphereSyncPlanner.Cell>> chunkCellCache = new HashMap<>();
     private final AtmosphereGrid<ResourceKey<Level>> smokeGrid =
         new AtmosphereGrid<>(SmokeGridLayout::nextSimulationTick);
@@ -151,8 +157,6 @@ final class ForgeAtmospherePrototype {
             ForgeAtmospherePrototype::splitSmokeUpdate);
     /** See {@link #pendingFullSnapshot}; same latch, for the smoke channel. */
     private final Set<UUID> pendingSmokeFullSnapshot = new HashSet<>();
-    /** See {@link #amountRevision}; same revision tracking, for the smoke grid. */
-    private final Map<ChunkKey, Long> smokeAmountRevision = new HashMap<>();
     /** See {@link #chunkCellCache}; same cross-tick cache, for the smoke channel. */
     private final Map<ChunkKey, CachedChunkCells<SmokeSyncPlanner.Cell>> smokeChunkCellCache = new HashMap<>();
     private final Map<AtmosphereMaterial, AtmosphereGrid<ResourceKey<Level>>> materialGrids =
@@ -163,8 +167,6 @@ final class ForgeAtmospherePrototype {
         createMaterialSyncQueues();
     /** See {@link #pendingFullSnapshot}; same latch, one per material channel. */
     private final Map<AtmosphereMaterial, Set<UUID>> pendingMaterialFullSnapshot = createMaterialPendingFullSnapshots();
-    /** See {@link #amountRevision}; one revision map per material channel. */
-    private final Map<AtmosphereMaterial, Map<ChunkKey, Long>> materialAmountRevision = createMaterialAmountRevisions();
     /** See {@link #chunkCellCache}; one cross-tick cache per material channel. */
     private final Map<AtmosphereMaterial, Map<ChunkKey, CachedChunkCells<SmokeSyncPlanner.Cell>>> materialChunkCellCaches =
         createMaterialChunkCellCaches();
@@ -239,14 +241,6 @@ final class ForgeAtmospherePrototype {
         return sets;
     }
 
-    private static Map<AtmosphereMaterial, Map<ChunkKey, Long>> createMaterialAmountRevisions() {
-        var revisions = new EnumMap<AtmosphereMaterial, Map<ChunkKey, Long>>(AtmosphereMaterial.class);
-        for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
-            revisions.put(material, new HashMap<>());
-        }
-        return revisions;
-    }
-
     private static Map<AtmosphereMaterial, Map<ChunkKey, CachedChunkCells<SmokeSyncPlanner.Cell>>>
     createMaterialChunkCellCaches() {
         var caches = new EnumMap<AtmosphereMaterial,
@@ -258,10 +252,11 @@ final class ForgeAtmospherePrototype {
     }
 
     /**
-     * MINECRAFT-436: one chunk's built cell list, stamped with the revision/generation pair it
-     * was built under. See {@link #amountRevision}'s doc for how a cache hit is decided.
+     * MINECRAFT-436: one chunk's built cell list, stamped with the (incarnation, amountRevision,
+     * terrainGeneration) triple it was built under. See {@code ChunkState.incarnation}'s and
+     * {@code ChunkState.amountRevision}'s docs for how a cache hit is decided.
      */
-    record CachedChunkCells<C>(long amountRevision, long terrainGeneration, List<C> cells) { }
+    record CachedChunkCells<C>(long incarnation, long amountRevision, long terrainGeneration, List<C> cells) { }
 
     /** Operation-count weight of one planned batch: chunks plus cells, the unit the budget counts in. */
     private static int operationWeight(AtmosphereSyncPlanner.Update<?> update) {
@@ -453,7 +448,7 @@ final class ForgeAtmospherePrototype {
                     for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
                         state.materialCells.get(material).keySet().forEach(materialGrids.get(material)::remove);
                     }
-                    invalidateChunkCellCaches(key);
+                    dropSharedChunkCellCache(key);
                 }
             };
             if (level.getServer().isSameThread()) {
@@ -541,17 +536,14 @@ final class ForgeAtmospherePrototype {
         syncPlanner.clear();
         syncQueue.clear();
         pendingFullSnapshot.clear();
-        amountRevision.clear();
         chunkCellCache.clear();
         smokeSyncPlanner.clear();
         smokeSyncQueue.clear();
         pendingSmokeFullSnapshot.clear();
-        smokeAmountRevision.clear();
         smokeChunkCellCache.clear();
         materialSyncPlanners.values().forEach(SmokeSyncPlanner::clear);
         materialSyncQueues.values().forEach(PacedSyncQueue::clear);
         pendingMaterialFullSnapshot.values().forEach(Set::clear);
-        materialAmountRevision.values().forEach(Map::clear);
         materialChunkCellCaches.values().forEach(Map::clear);
     }
 
@@ -609,17 +601,14 @@ final class ForgeAtmospherePrototype {
             syncPlanner::clear,
             syncQueue::clear,
             pendingFullSnapshot::clear,
-            amountRevision::clear,
             chunkCellCache::clear,
             smokeSyncPlanner::clear,
             smokeSyncQueue::clear,
             pendingSmokeFullSnapshot::clear,
-            smokeAmountRevision::clear,
             smokeChunkCellCache::clear,
             () -> materialSyncPlanners.values().forEach(SmokeSyncPlanner::clear),
             () -> materialSyncQueues.values().forEach(PacedSyncQueue::clear),
             () -> pendingMaterialFullSnapshot.values().forEach(Set::clear),
-            () -> materialAmountRevision.values().forEach(Map::clear),
             () -> materialChunkCellCaches.values().forEach(Map::clear));
 
         source.sendSuccess(() -> Component.literal(
@@ -2019,28 +2008,27 @@ final class ForgeAtmospherePrototype {
     }
 
     /**
-     * Returns {@code key}'s cached cell list if it is still valid -- same {@code revisions}
-     * entry (see {@link #amountRevision}'s doc) and same {@code generation} (the caller's current
+     * Returns {@code key}'s cached cell list if it is still valid -- same {@code incarnation}
+     * (see {@code ChunkState.incarnation}'s doc), same {@code amountRevision} (see {@code
+     * ChunkState.amountRevision}'s doc), and same {@code terrainGeneration} (the caller's current
      * {@link ForgeTerrainFacts#generation}) as when it was built -- or rebuilds it via {@code
      * builder} and caches the fresh result otherwise. {@code builder} does the actual grid read,
      * capacity resolution, and {@code Cell} construction (one implementation per grid: {@code
      * atmosphereCellsForChunk}/{@code smokeCellsForChunk}/{@code materialCellsForChunk}); this
-     * method is the single place that decides WHETHER that work is needed at all. See {@link
-     * #amountRevision}'s doc for why these two signals together are sufficient to always pick up
-     * both amount-only and capacity-only changes. A pure, static, key-type-generic algorithm
-     * (taking {@code generation} as a plain {@code long} rather than deriving it from a {@code
-     * ChunkState} itself) specifically so it is directly unit-testable with no {@code
-     * LevelChunk}/{@code ChunkState} involved at all.
+     * method is the single place that decides WHETHER that work is needed at all. A pure, static,
+     * key-type-generic algorithm (taking all three freshness components as plain values rather
+     * than deriving them from a {@code ChunkState} itself) specifically so it is directly
+     * unit-testable with no {@code LevelChunk}/{@code ChunkState} involved at all.
      */
-    static <K, C> List<C> cachedChunkCells(Map<K, CachedChunkCells<C>> cache, Map<K, Long> revisions,
-            K key, long generation, Supplier<List<C>> builder) {
-        long revision = revisions.getOrDefault(key, 0L);
+    static <K, C> List<C> cachedChunkCells(Map<K, CachedChunkCells<C>> cache, K key,
+            long incarnation, long amountRevision, long terrainGeneration, Supplier<List<C>> builder) {
         CachedChunkCells<C> cached = cache.get(key);
-        if (cached != null && cached.amountRevision() == revision && cached.terrainGeneration() == generation) {
+        if (cached != null && cached.incarnation() == incarnation && cached.amountRevision() == amountRevision
+                && cached.terrainGeneration() == terrainGeneration) {
             return cached.cells();
         }
         List<C> cells = builder.get();
-        cache.put(key, new CachedChunkCells<>(revision, generation, cells));
+        cache.put(key, new CachedChunkCells<>(incarnation, amountRevision, terrainGeneration, cells));
         return cells;
     }
 
@@ -2134,12 +2122,12 @@ final class ForgeAtmospherePrototype {
                     return;
                 }
                 ChunkKey key = new ChunkKey(dimension, chunk.x, chunk.z);
-                long revision = amountRevision.getOrDefault(key, 0L);
                 long terrainGeneration = ForgeTerrainFacts.generation(state.chunk);
-                List<AtmosphereSyncPlanner.Cell> cells = cachedChunkCells(chunkCellCache, amountRevision, key,
-                    terrainGeneration, () -> atmosphereCellsForChunk(player.serverLevel(), state, capacities));
-                chunkCells.add(new AtmosphereSyncPlanner.ChunkCells(
-                    new AtmosphereSyncPlanner.Chunk(chunk.x, chunk.z), revision, terrainGeneration, cells));
+                List<AtmosphereSyncPlanner.Cell> cells = cachedChunkCells(chunkCellCache, key,
+                    state.incarnation, state.amountRevision, terrainGeneration,
+                    () -> atmosphereCellsForChunk(player.serverLevel(), state, capacities));
+                chunkCells.add(new AtmosphereSyncPlanner.ChunkCells(new AtmosphereSyncPlanner.Chunk(chunk.x, chunk.z),
+                    state.incarnation, state.amountRevision, terrainGeneration, cells));
             });
             syncQueue.enqueue(id, syncPlanner.planChunks(id, dimension, viewRadius, chunkCells));
         }
@@ -2177,12 +2165,12 @@ final class ForgeAtmospherePrototype {
                 ChunkState state = ensureImported(player.serverLevel(), chunk.x, chunk.z);
                 if (state == null || !state.smokeReadable) return;
                 ChunkKey key = new ChunkKey(dimension, chunk.x, chunk.z);
-                long revision = smokeAmountRevision.getOrDefault(key, 0L);
                 long terrainGeneration = ForgeTerrainFacts.generation(state.chunk);
-                List<SmokeSyncPlanner.Cell> cells = cachedChunkCells(smokeChunkCellCache, smokeAmountRevision, key,
-                    terrainGeneration, () -> smokeCellsForChunk(player.serverLevel(), state));
-                chunkCells.add(new SmokeSyncPlanner.ChunkCells(
-                    new SmokeSyncPlanner.Chunk(chunk.x, chunk.z), revision, terrainGeneration, cells));
+                List<SmokeSyncPlanner.Cell> cells = cachedChunkCells(smokeChunkCellCache, key,
+                    state.incarnation, state.smokeAmountRevision, terrainGeneration,
+                    () -> smokeCellsForChunk(player.serverLevel(), state));
+                chunkCells.add(new SmokeSyncPlanner.ChunkCells(new SmokeSyncPlanner.Chunk(chunk.x, chunk.z),
+                    state.incarnation, state.smokeAmountRevision, terrainGeneration, cells));
             });
             smokeSyncQueue.enqueue(id, smokeSyncPlanner.planChunks(id, dimension, viewRadius, chunkCells));
         }
@@ -2223,18 +2211,18 @@ final class ForgeAtmospherePrototype {
             var chunkCells = new ArrayList<SmokeSyncPlanner.ChunkCells>();
             Map<ChunkKey, CachedChunkCells<SmokeSyncPlanner.Cell>> materialChunkCellCache =
                 materialChunkCellCaches.get(material);
-            Map<ChunkKey, Long> materialRevision = materialAmountRevision.get(material);
             // MINECRAFT-436: cross-tick shared chunk cell cache; see #cachedChunkCells's doc.
             trackingView.forEach(chunk -> {
                 ChunkState state = ensureImported(player.serverLevel(), chunk.x, chunk.z);
                 if (state == null || !state.materialReadable.contains(material)) return;
                 ChunkKey key = new ChunkKey(dimension, chunk.x, chunk.z);
-                long revision = materialRevision.getOrDefault(key, 0L);
+                long materialRevision = state.materialAmountRevision(material);
                 long terrainGeneration = ForgeTerrainFacts.generation(state.chunk);
-                List<SmokeSyncPlanner.Cell> cells = cachedChunkCells(materialChunkCellCache, materialRevision, key,
-                    terrainGeneration, () -> materialCellsForChunk(player.serverLevel(), material, state));
-                chunkCells.add(new SmokeSyncPlanner.ChunkCells(
-                    new SmokeSyncPlanner.Chunk(chunk.x, chunk.z), revision, terrainGeneration, cells));
+                List<SmokeSyncPlanner.Cell> cells = cachedChunkCells(materialChunkCellCache, key,
+                    state.incarnation, materialRevision, terrainGeneration,
+                    () -> materialCellsForChunk(player.serverLevel(), material, state));
+                chunkCells.add(new SmokeSyncPlanner.ChunkCells(new SmokeSyncPlanner.Chunk(chunk.x, chunk.z),
+                    state.incarnation, materialRevision, terrainGeneration, cells));
             });
             queue.enqueue(id, planner.planChunks(id, dimension, viewRadius, chunkCells));
         }
@@ -2520,25 +2508,16 @@ final class ForgeAtmospherePrototype {
             // Material eviction is folded into reimportMaterialCells below so the old
             // incarnation's eviction and the new incarnation's import for the same material run
             // back-to-back as one seam -- see that method's Javadoc.
-            // MINECRAFT-436 review: a replacement LevelChunk at the same key is a new
-            // incarnation with its own fresh ForgeTerrainFacts attachment (generation restarts),
-            // and its persisted cells are restored directly into the new ChunkState.cells -- so
-            // the very next flushDirtyChunks sees persisted == live and never bumps
-            // amountRevision for this key either. Equal (amountRevision, terrainGeneration)
-            // across two different incarnations could otherwise reuse a stale cached cell list,
-            // including for a periodic full snapshot -- and merely clearing the revision back to
-            // its implicit default is not enough on its own, since a per-player planner entry
-            // already retained at that same default would then see no change at all.
-            // invalidateChunkCellCaches bumps the revision (guaranteed different from before)
-            // rather than clearing it, so every consumer -- the shared cache here AND each
-            // subscribed player's own retained planner state -- detects the swap, not just this
-            // cache. (A later unload of the now-replaced OLD ChunkState never reaches this path
-            // at all -- chunks.get(key) is already the NEW state by then and fails state.chunk ==
-            // chunk -- so this is the only place that can catch a replacement specifically; it is
-            // not optional/best-effort.)
-            invalidateChunkCellCaches(key);
+            // MINECRAFT-436 review (sixth round): the new ChunkState below always gets a fresh,
+            // process-wide-unique incarnation token, so its cross-tick cell-cache freshness key
+            // always differs from the old incarnation's -- no explicit cache eviction is needed
+            // here for correctness (an incarnation mismatch alone forces a rebuild). Freeing the
+            // old incarnation's now-unreachable shared-cache entry here is still worthwhile
+            // hygiene, not a correctness requirement, so it is done unconditionally below for both
+            // this path and the normal unload path via dropSharedChunkCellCache.
+            dropSharedChunkCellCache(key);
         }
-        ChunkState state = new ChunkState(chunk);
+        ChunkState state = new ChunkState(chunk, nextIncarnation++);
         chunks.put(key, state);
         pendingLoads.remove(key, chunk);
         try {
@@ -2642,8 +2621,8 @@ final class ForgeAtmospherePrototype {
             dirtyChunks.add(chunkKey);
         }
         for (ChunkKey key : dirtyChunks) {
-            amountRevision.merge(key, 1L, Long::sum);
             ChunkState state = chunks.get(key);
+            state.amountRevision++;
             try {
                 ForgeAtmosphereStorage.write(state.chunk, List.copyOf(state.cells.values()));
             } catch (IllegalStateException exception) {
@@ -2673,8 +2652,8 @@ final class ForgeAtmospherePrototype {
             dirtyChunks.add(chunkKey);
         }
         for (ChunkKey key : dirtyChunks) {
-            smokeAmountRevision.merge(key, 1L, Long::sum);
             ChunkState state = chunks.get(key);
+            state.smokeAmountRevision++;
             try {
                 ForgeSmokeStorage.write(state.chunk, List.copyOf(state.smokeCells.values()));
             } catch (IllegalStateException exception) {
@@ -2716,12 +2695,11 @@ final class ForgeAtmospherePrototype {
                 },
                 chunkKey -> chunks.get(chunkKey).materialCells.get(material),
                 List::copyOf);
-            // MINECRAFT-436: bump this material's per-chunk amount revision for every chunk this
-            // batch actually touched (same signal the main/smoke flushes bump; reused here, not
-            // duplicated -- see #amountRevision's doc).
-            Map<ChunkKey, Long> revisionForMaterial = materialAmountRevision.get(material);
+            // MINECRAFT-436: bump this material's per-chunk amount revision (on ChunkState
+            // itself, bounded by currently-loaded chunks -- see ChunkState.amountRevision's doc)
+            // for every chunk this batch actually touched.
             for (ChunkKey touchedKey : updates.keySet()) {
-                revisionForMaterial.merge(touchedKey, 1L, Long::sum);
+                chunks.get(touchedKey).bumpMaterialAmountRevision(material);
             }
             for (var entry : updates.entrySet()) {
                 perChunkUpdates.computeIfAbsent(entry.getKey(), unused -> new EnumMap<>(AtmosphereMaterial.class))
@@ -2797,43 +2775,28 @@ final class ForgeAtmospherePrototype {
     }
 
     /**
-     * MINECRAFT-436 review (fifth round): drops {@code key}'s entry from every channel's shared
-     * cross-tick cell-list cache, and BUMPS (never clears to the implicit default) every channel's
-     * per-chunk amount-revision counter for that key. Used both on a normal chunk unload and on
-     * {@code ensureImported} replacing a different {@code LevelChunk} incarnation at the same key.
+     * MINECRAFT-436 review (sixth round): drops {@code key}'s entry from every channel's shared
+     * cross-tick cell-list cache. Used on both a normal chunk unload and {@code ensureImported}
+     * replacing a different {@code LevelChunk} incarnation at the same key -- purely as memory
+     * hygiene (freeing a now-unreachable cached cell list promptly) rather than for correctness:
+     * since the chunk that follows (a reload or a replacement) always gets a fresh {@code
+     * ChunkState} with a new, process-wide-unique {@code incarnation} token (see that field's
+     * doc), a stale cache entry here can never match it, so a rebuild is guaranteed regardless of
+     * whether this method runs at all.
      *
-     * <p>Earlier revisions of this fix used plain removal for unload (reasoning that nothing
-     * could still be comparing against a retained revision for a chunk no player is subscribed to
-     * any more) and only bumped on replacement. That missed a real sequence the review found: a
-     * busy paced channel can still hold a player's OLD retained planner entry for this chunk when
-     * it unloads (the exit was never yet observed, since planning only runs while idle or on a
-     * genuine change); if the chunk later reloads, {@code ensureImported} takes the {@code
-     * previous == null} branch (not the replacement branch, since unload already removed the
-     * {@code chunks} entry) and the reload's gather reads whatever this method leaves behind. A
-     * plain {@code remove} leaves the next read at the implicit default (0), which can
-     * coincidentally equal that player's still-retained revision, wrongly suppressing the
-     * ordinary delta/tombstones that should fire once the channel finally replans. Always bumping
-     * instead of clearing closes this regardless of which path (replacement or unload+reload)
-     * produced the new incarnation.
-     *
-     * <p>Removing the shared cell-list CACHE entry (as opposed to the revision counter) stays
-     * correct and unchanged: it is always safe to drop and rebuild on demand, and the bumped
-     * revision alone already guarantees the next build is used instead of a stale one. Trade-off,
-     * stated plainly: unlike the cache entries, the revision counters themselves are never
-     * removed, so these maps grow by one entry per distinct chunk ever unloaded or replaced over
-     * a server's lifetime rather than staying bounded to currently-loaded chunks -- accepted
-     * deliberately so correctness does not depend on globally invalidating every subscribed
-     * player's retained planner state on every unload, which this codebase has no efficient way
-     * to do. Each entry is a small, fixed-size (dimension, x, z) key mapped to a boxed long; the
-     * growth is bounded in practice by a server's total ever-explored area, not by play time.
+     * <p>Earlier revisions of this fix tried to preserve correctness by bumping or clearing a
+     * separate, persistent per-coordinate revision map (first only on replacement, then on unload
+     * too) -- but a persistent map keyed by every coordinate ever unloaded, never shrinking, grew
+     * without bound over a server's lifetime, which a later review correctly rejected. Moving the
+     * revision (and the new incarnation token) onto {@code ChunkState} itself instead -- live,
+     * currently-tracked state that is already removed on unload -- gets genuine global uniqueness
+     * with no persistent per-coordinate bookkeeping of any kind: memory is bounded by
+     * currently-loaded chunks, the same as {@code chunks} itself.
      */
-    private void invalidateChunkCellCaches(ChunkKey key) {
-        amountRevision.merge(key, 1L, Long::sum);
+    private void dropSharedChunkCellCache(ChunkKey key) {
         chunkCellCache.remove(key);
-        smokeAmountRevision.merge(key, 1L, Long::sum);
         smokeChunkCellCache.remove(key);
         for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
-            materialAmountRevision.get(material).merge(key, 1L, Long::sum);
             materialChunkCellCaches.get(material).remove(key);
         }
     }
@@ -2860,12 +2823,45 @@ final class ForgeAtmospherePrototype {
         private final EnumSet<AtmosphereMaterial> materialReadable = EnumSet.allOf(AtmosphereMaterial.class);
         private boolean readable = true;
         private boolean smokeReadable = true;
+        /**
+         * MINECRAFT-436 review (sixth round): a process-wide-unique token assigned once when this
+         * {@code ChunkState} is created (see {@code ensureImported}'s {@code nextIncarnation}),
+         * stored ONLY here -- on live, currently-tracked chunk state that is itself removed on
+         * unload -- rather than in a separate map keyed by coordinate that would otherwise have to
+         * either leak forever (to stay correct across an unload/reload) or be bounded (and risk
+         * exactly the staleness bug incarnation tokens exist to prevent). Two different {@code
+         * ChunkState} instances -- whether from an in-place replacement or an unload followed by a
+         * later reload -- always get different incarnations, with no persistent per-coordinate
+         * bookkeeping at all: memory is bounded by currently-loaded chunks, the same as {@code
+         * chunks} itself.
+         */
+        private final long incarnation;
+        /**
+         * Bumped by {@code flushDirtyChunks} exactly when a cell in this chunk is found genuinely
+         * amount-dirty (never merely touched) -- the within-incarnation half of this chunk's
+         * cross-tick cell-cache freshness key (paired with {@link #incarnation} and {@code
+         * ForgeTerrainFacts#generation}). Safe to start at 0 and reset implicitly to 0 for every
+         * new incarnation (a fresh field on a fresh object), since {@link #incarnation} alone
+         * already distinguishes this chunk's data from any earlier incarnation's.
+         */
+        private long amountRevision;
+        private long smokeAmountRevision;
+        private final Map<AtmosphereMaterial, Long> materialAmountRevisions = new EnumMap<>(AtmosphereMaterial.class);
 
-        private ChunkState(LevelChunk chunk) {
+        private ChunkState(LevelChunk chunk, long incarnation) {
             this.chunk = chunk;
+            this.incarnation = incarnation;
             for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
                 materialCells.put(material, new LinkedHashMap<>());
             }
+        }
+
+        private long materialAmountRevision(AtmosphereMaterial material) {
+            return materialAmountRevisions.getOrDefault(material, 0L);
+        }
+
+        private void bumpMaterialAmountRevision(AtmosphereMaterial material) {
+            materialAmountRevisions.merge(material, 1L, Long::sum);
         }
     }
 

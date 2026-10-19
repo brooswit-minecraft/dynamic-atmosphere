@@ -22,7 +22,7 @@ class SmokeSyncPlannerChunkedTest {
     private static SmokeSyncPlanner.ChunkCells chunkCells(
         int cx, int cz, long revision, long generation, SmokeSyncPlanner.Cell... cells
     ) {
-        return new SmokeSyncPlanner.ChunkCells(new SmokeSyncPlanner.Chunk(cx, cz), revision, generation, List.of(cells));
+        return new SmokeSyncPlanner.ChunkCells(new SmokeSyncPlanner.Chunk(cx, cz), 1L, revision, generation, List.of(cells));
     }
 
     @Test
@@ -55,11 +55,11 @@ class SmokeSyncPlannerChunkedTest {
         var chunk = new SmokeSyncPlanner.Chunk(0, 0);
         var originalCell = new SmokeSyncPlanner.Cell(0, 0, 0, 100, 1000);
         planner.planChunks("player", "overworld", 8,
-            List.of(new SmokeSyncPlanner.ChunkCells(chunk, 1, 1, List.of(originalCell))));
+            List.of(new SmokeSyncPlanner.ChunkCells(chunk, 1L, 1, 1, List.of(originalCell))));
 
         var wrongCell = new SmokeSyncPlanner.Cell(0, 0, 0, 999, 1000);
         var updates = planner.planChunks("player", "overworld", 8,
-            List.of(new SmokeSyncPlanner.ChunkCells(chunk, 1, 1, List.of(wrongCell))));
+            List.of(new SmokeSyncPlanner.ChunkCells(chunk, 1L, 1, 1, List.of(wrongCell))));
 
         assertEquals(List.of(), updates, "an unchanged (revision, generation) pair must skip the chunk "
             + "entirely, never noticing the supplied cell data disagrees with what's stored");

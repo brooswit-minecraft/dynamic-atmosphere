@@ -27,11 +27,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class AtmosphereSyncPlannerChunkedTest {
 
+    /** Fixed incarnation: these tests exercise the revision/generation comparison, not the
+     *  incarnation-token mechanism (see {@code ChunkIncarnationInvalidationTest} for that). */
     private static AtmosphereSyncPlanner.ChunkCells chunkCells(
         int cx, int cz, long revision, long generation, AtmosphereSyncPlanner.Cell... cells
     ) {
         return new AtmosphereSyncPlanner.ChunkCells(
-            new AtmosphereSyncPlanner.Chunk(cx, cz), revision, generation, List.of(cells));
+            new AtmosphereSyncPlanner.Chunk(cx, cz), 1L, revision, generation, List.of(cells));
     }
 
     @Test
@@ -66,13 +68,13 @@ class AtmosphereSyncPlannerChunkedTest {
         var chunk = new AtmosphereSyncPlanner.Chunk(0, 0);
         var originalCell = new AtmosphereSyncPlanner.Cell(0, 0, 0, 100, 1000);
         planner.planChunks("player", "overworld", 8,
-            List.of(new AtmosphereSyncPlanner.ChunkCells(chunk, 1, 1, List.of(originalCell))));
+            List.of(new AtmosphereSyncPlanner.ChunkCells(chunk, 1L, 1, 1, List.of(originalCell))));
 
         // Same (revision, generation) as before, but deliberately WRONG cell data. If planChunks
         // actually looked at this chunk's cells, it would see a disagreement and emit an update.
         var wrongCell = new AtmosphereSyncPlanner.Cell(0, 0, 0, 999, 1000);
         var updates = planner.planChunks("player", "overworld", 8,
-            List.of(new AtmosphereSyncPlanner.ChunkCells(chunk, 1, 1, List.of(wrongCell))));
+            List.of(new AtmosphereSyncPlanner.ChunkCells(chunk, 1L, 1, 1, List.of(wrongCell))));
 
         assertEquals(List.of(), updates, "an unchanged (revision, generation) pair must skip the chunk "
             + "entirely -- the planner must trust the revision pairing rather than re-examining cells");

@@ -14,10 +14,19 @@ import static org.junit.jupiter.api.Assertions.assertSame;
  * MINECRAFT-436: coverage for {@link ForgeAtmospherePrototype#cachedChunkCells}, the cross-tick
  * cache-or-rebuild algorithm behind the ticket's "reusable immutable chunk snapshots shared
  * across overlapping player views" requirement. Deliberately a pure, static, key-type-generic
- * method taking the terrain generation as a plain {@code long} (rather than deriving it from a
- * {@code ChunkState}/{@code LevelChunk} itself) specifically so it is directly testable here with
- * no Minecraft runtime involved at all -- unlike most of {@code ForgeAtmospherePrototype}, which
- * has no such harness (see {@code ForgeAtmospherePrototypeFreezeGateTest}'s class doc).
+ * method taking the incarnation/amountRevision/terrain generation as plain {@code long}s (rather
+ * than deriving them from a {@code ChunkState}/{@code LevelChunk} itself) specifically so it is
+ * directly testable here with no Minecraft runtime involved at all -- unlike most of {@code
+ * ForgeAtmospherePrototype}, which has no such harness (see {@code
+ * ForgeAtmospherePrototypeFreezeGateTest}'s class doc).
+ *
+ * <p>MINECRAFT-436 review (sixth round): production no longer tracks a persistent,
+ * never-shrinking {@code Map<ChunkKey, Long>} of revisions per coordinate -- that bookkeeping is
+ * now carried directly on the bounded, already-unload-removed {@code ChunkState} object, keyed by
+ * a process-wide monotonic incarnation token assigned once per {@code ChunkState} at creation.
+ * This test therefore drives {@code cachedChunkCells} with the three freshness values directly,
+ * exactly as a caller holding a live {@code ChunkState} would, rather than through an
+ * accompanying revision map.
  */
 class ForgeAtmospherePrototypeCachedChunkCellsTest {
 
@@ -27,18 +36,17 @@ class ForgeAtmospherePrototypeCachedChunkCellsTest {
     }
 
     @Test
-    void sameRevisionAndGenerationReusesTheCachedListWithoutRebuilding() {
+    void sameIncarnationRevisionAndGenerationReusesTheCachedListWithoutRebuilding() {
         Map<String, ForgeAtmospherePrototype.CachedChunkCells<String>> cache = new HashMap<>();
-        Map<String, Long> revisions = new HashMap<>();
         var builds = new AtomicInteger();
 
         var first = ForgeAtmospherePrototype.cachedChunkCells(
-            cache, revisions, "chunk-0-0", 5L, () -> build(builds, "a"));
+            cache, "chunk-0-0", 1L, 0L, 5L, () -> build(builds, "a"));
         var second = ForgeAtmospherePrototype.cachedChunkCells(
-            cache, revisions, "chunk-0-0", 5L, () -> build(builds, "a"));
+            cache, "chunk-0-0", 1L, 0L, 5L, () -> build(builds, "a"));
 
-        assertEquals(1, builds.get(), "the builder must not run again when neither the revision nor the "
-            + "terrain generation changed -- this is the whole point of the cache");
+        assertEquals(1, builds.get(), "the builder must not run again when neither the incarnation, "
+            + "the revision, nor the terrain generation changed -- this is the whole point of the cache");
         assertSame(first, second, "the exact same cached List instance must be returned, not merely an "
             + "equal copy -- this is what lets multiple overlapping players share one built list");
     }
@@ -46,13 +54,11 @@ class ForgeAtmospherePrototypeCachedChunkCellsTest {
     @Test
     void changedAmountRevisionForcesARebuild() {
         Map<String, ForgeAtmospherePrototype.CachedChunkCells<String>> cache = new HashMap<>();
-        Map<String, Long> revisions = new HashMap<>();
         var builds = new AtomicInteger();
 
-        revisions.put("chunk-0-0", 1L);
-        ForgeAtmospherePrototype.cachedChunkCells(cache, revisions, "chunk-0-0", 5L, () -> build(builds, "a"));
-        revisions.put("chunk-0-0", 2L); // simulates flushDirtyChunks finding a genuine amount change
-        var result = ForgeAtmospherePrototype.cachedChunkCells(cache, revisions, "chunk-0-0", 5L, () -> build(builds, "b"));
+        ForgeAtmospherePrototype.cachedChunkCells(cache, "chunk-0-0", 1L, 1L, 5L, () -> build(builds, "a"));
+        // simulates flushDirtyChunks finding a genuine amount change: state.amountRevision++
+        var result = ForgeAtmospherePrototype.cachedChunkCells(cache, "chunk-0-0", 1L, 2L, 5L, () -> build(builds, "b"));
 
         assertEquals(2, builds.get(), "a changed amount revision alone must force a rebuild");
         assertEquals(List.of("b"), result);
@@ -61,11 +67,10 @@ class ForgeAtmospherePrototypeCachedChunkCellsTest {
     @Test
     void changedTerrainGenerationForcesARebuildEvenWithTheSameAmountRevision() {
         Map<String, ForgeAtmospherePrototype.CachedChunkCells<String>> cache = new HashMap<>();
-        Map<String, Long> revisions = new HashMap<>();
         var builds = new AtomicInteger();
 
-        ForgeAtmospherePrototype.cachedChunkCells(cache, revisions, "chunk-0-0", 5L, () -> build(builds, "a"));
-        var result = ForgeAtmospherePrototype.cachedChunkCells(cache, revisions, "chunk-0-0", 6L, () -> build(builds, "b"));
+        ForgeAtmospherePrototype.cachedChunkCells(cache, "chunk-0-0", 1L, 0L, 5L, () -> build(builds, "a"));
+        var result = ForgeAtmospherePrototype.cachedChunkCells(cache, "chunk-0-0", 1L, 0L, 6L, () -> build(builds, "b"));
 
         assertEquals(2, builds.get(), "a changed terrain generation alone (a capacity-only world change, "
             + "with no amount change at all) must still force a rebuild");
@@ -75,12 +80,11 @@ class ForgeAtmospherePrototypeCachedChunkCellsTest {
     @Test
     void aDifferentKeyIsCachedIndependently() {
         Map<String, ForgeAtmospherePrototype.CachedChunkCells<String>> cache = new HashMap<>();
-        Map<String, Long> revisions = new HashMap<>();
         var builds = new AtomicInteger();
 
-        var chunkA = ForgeAtmospherePrototype.cachedChunkCells(cache, revisions, "chunk-A", 1L, () -> build(builds, "a"));
-        var chunkB = ForgeAtmospherePrototype.cachedChunkCells(cache, revisions, "chunk-B", 1L, () -> build(builds, "b"));
-        var chunkAAgain = ForgeAtmospherePrototype.cachedChunkCells(cache, revisions, "chunk-A", 1L, () -> build(builds, "a"));
+        var chunkA = ForgeAtmospherePrototype.cachedChunkCells(cache, "chunk-A", 1L, 0L, 1L, () -> build(builds, "a"));
+        var chunkB = ForgeAtmospherePrototype.cachedChunkCells(cache, "chunk-B", 1L, 0L, 1L, () -> build(builds, "b"));
+        var chunkAAgain = ForgeAtmospherePrototype.cachedChunkCells(cache, "chunk-A", 1L, 0L, 1L, () -> build(builds, "a"));
 
         assertEquals(2, builds.get(), "two distinct chunk keys must each build once, independently");
         assertEquals(List.of("a"), chunkA);
@@ -89,55 +93,52 @@ class ForgeAtmospherePrototypeCachedChunkCellsTest {
     }
 
     @Test
-    void anAbsentRevisionEntryDefaultsToZeroConsistently() {
-        Map<String, ForgeAtmospherePrototype.CachedChunkCells<String>> cache = new HashMap<>();
-        Map<String, Long> revisions = new HashMap<>(); // no entry for "chunk-0-0" at all
+    void anAbsentCacheEntryBuildsConsistentlyOnFirstUse() {
+        Map<String, ForgeAtmospherePrototype.CachedChunkCells<String>> cache = new HashMap<>(); // no entry yet
         var builds = new AtomicInteger();
 
-        ForgeAtmospherePrototype.cachedChunkCells(cache, revisions, "chunk-0-0", 1L, () -> build(builds, "a"));
-        ForgeAtmospherePrototype.cachedChunkCells(cache, revisions, "chunk-0-0", 1L, () -> build(builds, "a"));
+        ForgeAtmospherePrototype.cachedChunkCells(cache, "chunk-0-0", 1L, 0L, 1L, () -> build(builds, "a"));
+        ForgeAtmospherePrototype.cachedChunkCells(cache, "chunk-0-0", 1L, 0L, 1L, () -> build(builds, "a"));
 
         assertEquals(1, builds.get(),
-            "a chunk never found dirty (no revisions entry) must still cache-hit on repeated calls, "
-                + "defaulting consistently to the same implied revision rather than rebuilding every time");
+            "a chunk never found dirty (amountRevision 0) must still cache-hit on repeated calls with the "
+                + "same incarnation/revision/generation triple, rather than rebuilding every time");
     }
 
     /**
      * MINECRAFT-436 review: models the exact bug a chunk-replacement incarnation can produce --
-     * a stale cached entry remains reachable under a (revision, generation) pair that
+     * a stale cached entry remains reachable under an (amountRevision, generation) pair that
      * coincidentally matches the NEW incarnation's own starting values, even though the
-     * underlying data is for a completely different chunk instance with different cells. This
-     * proves eviction forces THIS shared cache to rebuild; it does not by itself prove an
-     * already-subscribed player's own retained planner entry is also invalidated -- that needs
-     * the revision to actually change value, not just be cleared/evicted, which is why
-     * production's {@code invalidateChunkCellCaches} bumps the revision rather than merely
-     * clearing it, for both a chunk-incarnation replacement and a normal unload. See {@code
-     * ChunkIncarnationInvalidationTest} for the full shared-cache-plus-planner story, including
-     * the exact case where clearing alone is insufficient.
+     * underlying data is for a completely different chunk instance with different cells. The
+     * production fix is to give every {@code ChunkState} its own unique, process-wide incarnation
+     * token at creation and feed THAT (not just the revision/generation pair) into this cache, so
+     * a coincidental revision/generation match can never cause a stale hit across incarnations --
+     * no explicit eviction call is even needed. See {@code ChunkIncarnationInvalidationTest} for
+     * the full shared-cache-plus-planner story.
      */
     @Test
-    void evictingAnEntryForcesARebuildEvenWithIdenticalRevisionAndGenerationAsBefore() {
+    void aDifferentIncarnationForcesARebuildEvenWithIdenticalRevisionAndGenerationAsBefore() {
         Map<String, ForgeAtmospherePrototype.CachedChunkCells<String>> cache = new HashMap<>();
-        Map<String, Long> revisions = new HashMap<>();
         var builds = new AtomicInteger();
 
-        // Old chunk incarnation: revision 0 (never found dirty), generation 1 (fresh attachment).
+        // Old chunk incarnation: token 1, revision 0 (never found dirty), generation 1 (fresh attachment).
         var oldChunkCells = ForgeAtmospherePrototype.cachedChunkCells(
-            cache, revisions, "chunk-0-0", 1L, () -> build(builds, "old-incarnation-cell"));
+            cache, "chunk-0-0", 1L, 0L, 1L, () -> build(builds, "old-incarnation-cell"));
 
-        // A replacement LevelChunk at the SAME coordinate is imported. Its own fresh
+        // A replacement LevelChunk at the SAME coordinate is imported, getting a brand-new,
+        // guaranteed-unique incarnation token (2) from the process-wide allocator. Its own fresh
         // TerrainFactsCache also starts at generation 1, and its persisted cells are restored
         // directly into the new ChunkState, so the very next flushDirtyChunks sees persisted ==
         // live and never bumps the revision either: both signals coincidentally match the old
-        // incarnation's. Without eviction, the stale "old-incarnation-cell" would be reused here.
-        cache.remove("chunk-0-0"); // the cache-eviction half of what invalidateChunkCellCaches does
+        // incarnation's -- only the incarnation token itself tells them apart.
         var newChunkCells = ForgeAtmospherePrototype.cachedChunkCells(
-            cache, revisions, "chunk-0-0", 1L, () -> build(builds, "new-incarnation-cell"));
+            cache, "chunk-0-0", 2L, 0L, 1L, () -> build(builds, "new-incarnation-cell"));
 
-        assertEquals(2, builds.get(), "eviction must force a rebuild even though revision (0) and "
-            + "generation (1) are identical to what the old incarnation's entry was stamped with");
+        assertEquals(2, builds.get(), "a different incarnation token must force a rebuild even though "
+            + "revision (0) and generation (1) are identical to what the old incarnation's entry was "
+            + "stamped with");
         assertEquals(List.of("old-incarnation-cell"), oldChunkCells);
         assertEquals(List.of("new-incarnation-cell"), newChunkCells,
-            "the new incarnation's actual data must be served, not the evicted stale entry");
+            "the new incarnation's actual data must be served, not the stale entry");
     }
 }

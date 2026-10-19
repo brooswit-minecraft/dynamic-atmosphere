@@ -86,7 +86,7 @@ class AtmosphereSyncPacingIntegrationTest {
             && planner.wouldForceResetChunked(player, dimension, AtmosphereSyncPlanner.UNKNOWN_VIEW_RADIUS);
         if (idle || genuineChange) {
             if (idle && periodicDue) planner.reset(player);
-            var chunkCells = List.of(new AtmosphereSyncPlanner.ChunkCells(PSEUDO_CHUNK, revision, 0L, cells));
+            var chunkCells = List.of(new AtmosphereSyncPlanner.ChunkCells(PSEUDO_CHUNK, 1L, revision, 0L, cells));
             queue.enqueue(player,
                 planner.planChunks(player, dimension, AtmosphereSyncPlanner.UNKNOWN_VIEW_RADIUS, chunkCells));
         }

@@ -35,9 +35,9 @@ final class SmokeSyncPlanner<P, D> {
      * {@link #plan} re-indexing and re-diffing every visible cell in the player's entire view on
      * every call regardless of how much (if any) of it actually changed.
      */
-    record ChunkCells(Chunk chunk, long amountRevision, long terrainGeneration, List<Cell> cells) { }
+    record ChunkCells(Chunk chunk, long incarnation, long amountRevision, long terrainGeneration, List<Cell> cells) { }
 
-    private record ChunkEntry(long amountRevision, long terrainGeneration, Map<Coordinate, Cell> cells) { }
+    private record ChunkEntry(long incarnation, long amountRevision, long terrainGeneration, Map<Coordinate, Cell> cells) { }
 
     private record ChunkedPlayerView<D>(D dimension, int viewRadius, Map<Chunk, ChunkEntry> chunkEntries) { }
 
@@ -119,7 +119,7 @@ final class SmokeSyncPlanner<P, D> {
             Map<Chunk, ChunkEntry> entries = new LinkedHashMap<>();
             for (ChunkCells input : chunks) {
                 entries.put(input.chunk(),
-                    new ChunkEntry(input.amountRevision(), input.terrainGeneration(), index(input.cells())));
+                    new ChunkEntry(input.incarnation(), input.amountRevision(), input.terrainGeneration(), index(input.cells())));
             }
             if (dimensionChanged && previous != null) {
                 updates.add(new Update<>(previous.dimension(), true, true, List.of(), List.of()));
@@ -148,6 +148,7 @@ final class SmokeSyncPlanner<P, D> {
         for (ChunkCells input : chunks) {
             ChunkEntry oldEntry = previousEntries.get(input.chunk());
             boolean changed = oldEntry == null
+                || oldEntry.incarnation() != input.incarnation()
                 || oldEntry.amountRevision() != input.amountRevision()
                 || oldEntry.terrainGeneration() != input.terrainGeneration();
             if (!changed) continue;
@@ -164,7 +165,7 @@ final class SmokeSyncPlanner<P, D> {
                 if (!cell.equals(old)) delta.add(cell);
             }
             nextEntries.put(input.chunk(),
-                new ChunkEntry(input.amountRevision(), input.terrainGeneration(), newCells));
+                new ChunkEntry(input.incarnation(), input.amountRevision(), input.terrainGeneration(), newCells));
         }
 
         chunkedViews.put(player, new ChunkedPlayerView<>(dimension, viewRadius, nextEntries));
