@@ -1,7 +1,6 @@
 package io.github.brooswitminecraft.dynamicatmosphere;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.SectionPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -11,9 +10,11 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -76,31 +77,27 @@ public final class PortalTransferSink {
     private final Map<ResourceKey<Level>, Map<Long, Set<BlockPos>>> knownNetherPortals = new HashMap<>();
     private final Map<ResourceKey<Level>, Map<Long, Set<BlockPos>>> knownEndPortals = new HashMap<>();
 
-    public void onLoadedChunkProducerCheck(ServerLevel level, LevelChunk chunk) {
+    /**
+     * MINECRAFT-435: {@code netherPortalsHere}/{@code endPortalsHere} are the positions
+     * {@link PortalChunkScanner} already found for this chunk visit -- scanning itself no
+     * longer happens here, since {@link ObsidianPowderGameplay} needs the identical Nether
+     * portal positions on the same cadence and the two scans were otherwise redundant.
+     */
+    public void onLoadedChunkProducerCheck(
+        ServerLevel level, LevelChunk chunk, Set<BlockPos> netherPortalsHere, Set<BlockPos> endPortalsHere
+    ) {
         MinecraftServer server = level.getServer();
-        ChunkPos chunkPos = chunk.getPos();
-        var netherPortalsHere = new HashSet<BlockPos>();
-        var endPortalsHere = new HashSet<BlockPos>();
-        var sections = chunk.getSections();
-        for (int index = 0; index < sections.length; index++) {
-            var section = sections[index];
-            boolean hasNetherPortal = section.maybeHas(state -> state.is(Blocks.NETHER_PORTAL));
-            boolean hasEndPortal = section.maybeHas(state -> state.is(Blocks.END_PORTAL));
-            if (!hasNetherPortal && !hasEndPortal) continue;
-            int baseY = SectionPos.sectionToBlockCoord(chunk.getSectionYFromSectionIndex(index));
-            for (int y = 0; y < 16; y++) for (int z = 0; z < 16; z++) for (int x = 0; x < 16; x++) {
-                var state = section.getBlockState(x, y, z);
-                var pos = new BlockPos(chunkPos.getMinBlockX() + x, baseY + y, chunkPos.getMinBlockZ() + z);
-                if (hasNetherPortal && state.is(Blocks.NETHER_PORTAL)) netherPortalsHere.add(pos);
-                if (hasEndPortal && state.is(Blocks.END_PORTAL)) endPortalsHere.add(pos);
-            }
-        }
-        recordObserved(knownNetherPortals, level.dimension(), chunkPos.toLong(), netherPortalsHere);
-        recordObserved(knownEndPortals, level.dimension(), chunkPos.toLong(), endPortalsHere);
+        long chunkKey = chunk.getPos().toLong();
+        recordObserved(knownNetherPortals, level.dimension(), chunkKey, netherPortalsHere);
+        recordObserved(knownEndPortals, level.dimension(), chunkKey, endPortalsHere);
 
         int throughput = DynamicAtmosphereServerConfig.snapshot().portalTransferSink().throughputPerPortalBlock();
         if (throughput <= 0) return;
-        for (BlockPos pos : netherPortalsHere) transferNetherPortal(server, level, pos, throughput);
+        // Pass-local: every position below is checked against the identical, already-recorded
+        // registry snapshot for this one synchronous call, so a resolved destination chunk-box
+        // is safely reused across positions that land on it rather than re-resolved each time.
+        var netherCandidateCache = new HashMap<List<Integer>, Collection<BlockPos>>();
+        for (BlockPos pos : netherPortalsHere) transferNetherPortal(server, level, pos, throughput, netherCandidateCache);
         for (BlockPos pos : endPortalsHere) transferEndPortal(server, level, pos, throughput);
     }
 
@@ -124,6 +121,40 @@ public final class PortalTransferSink {
         var all = new HashSet<BlockPos>();
         byChunk.values().forEach(all::addAll);
         return all;
+    }
+
+    /**
+     * MINECRAFT-435: bounded alternative to {@link #knownPositions} -- touches only the chunk
+     * entries whose chunk coordinates fall inside the given box, instead of flattening every
+     * chunk the destination dimension has ever recorded a portal in. The box is expected to
+     * already cover every block position within the real search radius (chunk-granular, so it
+     * is allowed to be a little generous at the edges); {@link #nearestWithinRadius} still
+     * applies the exact per-block distance check afterward, so a chunk-box-level over-inclusion
+     * here can never admit a candidate that search radius would otherwise have rejected. Pure
+     * and injectable, like {@link #knownPositions}, so it is testable with a fake registry map.
+     */
+    static Collection<BlockPos> knownPositionsNear(
+        Map<ResourceKey<Level>, Map<Long, Set<BlockPos>>> registry, ResourceKey<Level> dimension,
+        int minChunkX, int maxChunkX, int minChunkZ, int maxChunkZ
+    ) {
+        var byChunk = registry.get(dimension);
+        if (byChunk == null || byChunk.isEmpty()) return Set.of();
+        var result = new HashSet<BlockPos>();
+        for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+            for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+                var atChunk = byChunk.get(ChunkPos.asLong(chunkX, chunkZ));
+                if (atChunk != null) result.addAll(atChunk);
+            }
+        }
+        return result;
+    }
+
+    /** The inclusive chunk-coordinate box every block within {@code radius} of {@code anchor} must lie in. */
+    static int[] chunkBoxAround(BlockPos anchor, int radius) {
+        return new int[] {
+            Math.floorDiv(anchor.getX() - radius, 16), Math.floorDiv(anchor.getX() + radius, 16),
+            Math.floorDiv(anchor.getZ() - radius, 16), Math.floorDiv(anchor.getZ() + radius, 16)
+        };
     }
 
     /** Pure, so the vanilla 8:1 Nether/Overworld coordinate scale is unit-testable without a live level. */
@@ -216,7 +247,20 @@ public final class PortalTransferSink {
         return Math.max(0, destinationAfter - destinationBefore);
     }
 
-    private void transferNetherPortal(MinecraftServer server, ServerLevel level, BlockPos pos, int throughput) {
+    /**
+     * MINECRAFT-435: {@code candidateCache} lets several portal positions resolved within the
+     * same {@link #onLoadedChunkProducerCheck} call reuse an already-validated candidate set for
+     * an identical chunk box, instead of each re-querying and re-validating it. The source-amount
+     * check below runs first so a portal with nothing to transfer never pays for the (now bounded,
+     * but still non-free) destination search at all.
+     */
+    private void transferNetherPortal(
+        MinecraftServer server, ServerLevel level, BlockPos pos, int throughput,
+        Map<List<Integer>, Collection<BlockPos>> candidateCache
+    ) {
+        if (ports.state(level, AtmosphereMaterial.NETHER_GAS, pos).map(AtmosphereMaterialState::amount).orElse(0) <= 0) {
+            return;
+        }
         ResourceKey<Level> destinationDimension;
         BlockPos anchor;
         if (level.dimension().equals(Level.NETHER)) {
@@ -230,21 +274,32 @@ public final class PortalTransferSink {
         }
         ServerLevel destinationLevel = server.getLevel(destinationDimension);
         if (destinationLevel == null) return;
-        var candidates = eligibleCandidates(destinationLevel,
-            knownPositions(knownNetherPortals, destinationDimension), state -> state.is(Blocks.NETHER_PORTAL));
+        int[] box = chunkBoxAround(anchor, NETHER_LINK_SEARCH_RADIUS);
+        var cacheKey = List.of(box[0], box[1], box[2], box[3]);
+        var candidates = candidateCache.computeIfAbsent(cacheKey, ignored -> eligibleCandidates(destinationLevel,
+            knownPositionsNear(knownNetherPortals, destinationDimension, box[0], box[1], box[2], box[3]),
+            state -> state.is(Blocks.NETHER_PORTAL)));
         Optional<BlockPos> destination = nearestWithinRadius(anchor, candidates, NETHER_LINK_SEARCH_RADIUS);
         if (destination.isEmpty()) return;
         transfer(level, pos, destinationLevel, destination.get(), AtmosphereMaterial.NETHER_GAS, throughput);
     }
 
+    /** MINECRAFT-435: skips the destination search entirely when nothing at {@code pos} has anything to transfer. */
     private void transferEndPortal(MinecraftServer server, ServerLevel level, BlockPos pos, int throughput) {
         if (level.dimension().equals(Level.END)) return;
+        List<AtmosphereMaterial> withSource = new ArrayList<>();
+        for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
+            if (ports.state(level, material, pos).map(AtmosphereMaterialState::amount).orElse(0) > 0) {
+                withSource.add(material);
+            }
+        }
+        if (withSource.isEmpty()) return;
         ServerLevel endLevel = server.getLevel(Level.END);
         if (endLevel == null) return;
         var candidates = eligibleCandidates(endLevel, knownPositions(knownEndPortals, Level.END), state -> state.is(Blocks.END_PORTAL));
         Optional<BlockPos> destination = any(candidates);
         if (destination.isEmpty()) return;
-        for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
+        for (AtmosphereMaterial material : withSource) {
             transfer(level, pos, endLevel, destination.get(), material, throughput);
         }
     }

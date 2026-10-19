@@ -126,6 +126,14 @@ final class ForgeAtmospherePrototype {
     private final Map<AtmosphereMaterial, List<AtmosphereMaterialProducer>> materialProducerHooks =
         createMaterialProducerHooks();
     private final Map<AtmosphereMaterial, Long> nextMaterialProducerTicks = createMaterialProducerTicks();
+    /**
+     * MINECRAFT-435: at most one {@link PortalChunkScanner} scan per visited chunk per tick,
+     * shared by the OBSIDIAN_POWDER and NETHER_GAS producer hooks below -- both need the same
+     * chunk's Nether portal positions, on the identical global producer cadence, and previously
+     * paid for two independent section/block scans of it. Cleared every tick in {@link #tick};
+     * never read across ticks, so a stale entry left behind by an unvisited chunk is harmless.
+     */
+    private final Map<ChunkKey, PortalChunkScanner.Scan> portalScanCache = new HashMap<>();
 
     ForgeAtmospherePrototype() {
         registerMaterialProducer(AtmosphereMaterial.OBSIDIAN_POWDER, this::sampleObsidianPowderChunk);
@@ -141,7 +149,8 @@ final class ForgeAtmospherePrototype {
         registerMaterialProducer(AtmosphereMaterial.SLIME, slimeGameplay::onLoadedChunkProducerCheck);
         registerMaterialProducer(AtmosphereMaterial.NETHER_GAS, (level, chunk) -> {
             netherGasGameplay.onLoadedChunkProducerCheck(level, chunk);
-            portalTransferSink.onLoadedChunkProducerCheck(level, chunk);
+            var scan = scanPortalsOnce(level, chunk);
+            portalTransferSink.onLoadedChunkProducerCheck(level, chunk, scan.netherPortals(), scan.endPortals());
         });
         registerMaterialProducer(AtmosphereMaterial.GLOW_GAS, this::sampleGlowGasChunk);
         registerMaterialProducer(AtmosphereMaterial.NETHER_FOG, this::sampleNetherFogChunk);
@@ -221,6 +230,7 @@ final class ForgeAtmospherePrototype {
     void tick(MinecraftServer server, boolean runsNormally) {
         if (!runsNormally) return;
         serverTicks++;
+        portalScanCache.clear();
         importsRemaining = tuning().runtime().maxChunkImportsPerTick();
         importPendingChunks(server);
         drainWaterTransitions(server);
@@ -361,6 +371,7 @@ final class ForgeAtmospherePrototype {
         });
         chunks.clear();
         pendingLoads.clear();
+        portalScanCache.clear();
         producerSchedule.clear();
         fanSchedule.clear();
         smokeProducerSchedule.clear();
@@ -654,7 +665,7 @@ final class ForgeAtmospherePrototype {
     }
 
     private void sampleObsidianPowderChunk(ServerLevel level, LevelChunk chunk) {
-        obsidianPowderGameplay.onLoadedChunkProducerCheck(level, chunk);
+        obsidianPowderGameplay.onLoadedChunkProducerCheck(level, scanPortalsOnce(level, chunk).netherPortals());
         int x = chunk.getPos().getMinBlockX() + level.random.nextInt(16);
         int z = chunk.getPos().getMinBlockZ() + level.random.nextInt(16);
         int y = level.getMinBuildHeight()
@@ -2276,6 +2287,15 @@ final class ForgeAtmospherePrototype {
 
     private static ChunkKey chunkKey(ServerLevel level, LevelChunk chunk) {
         return new ChunkKey(level.dimension(), chunk.getPos().x, chunk.getPos().z);
+    }
+
+    /**
+     * MINECRAFT-435: scans {@code chunk} for Nether/End portal blocks at most once this tick,
+     * regardless of how many of the OBSIDIAN_POWDER/NETHER_GAS producer hooks visit it -- see
+     * {@link #portalScanCache}.
+     */
+    private PortalChunkScanner.Scan scanPortalsOnce(ServerLevel level, LevelChunk chunk) {
+        return portalScanCache.computeIfAbsent(chunkKey(level, chunk), ignored -> PortalChunkScanner.scan(chunk));
     }
 
     private record ChunkKey(ResourceKey<Level> dimension, int x, int z) {

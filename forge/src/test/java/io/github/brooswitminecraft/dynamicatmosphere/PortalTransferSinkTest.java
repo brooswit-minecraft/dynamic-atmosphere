@@ -1,10 +1,16 @@
 package io.github.brooswitminecraft.dynamicatmosphere;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.Level;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -119,6 +125,57 @@ class PortalTransferSinkTest {
         var eligible = PortalTransferSink.filterStale(
             List.of(unloaded, loadedAndValid), pos -> pos.equals(loadedAndValid));
         assertEquals(Optional.of(loadedAndValid), PortalTransferSink.any(eligible));
+    }
+
+    @Test
+    void chunkBoxAroundCoversEveryChunkThatCouldContainABlockWithinRadius() {
+        // Anchor at the origin of chunk (0,0); a radius of 128 blocks reaches 8 chunks either way.
+        var box = PortalTransferSink.chunkBoxAround(new BlockPos(5, 64, 5), 128);
+        assertEquals(-8, box[0]);
+        assertEquals(8, box[1]);
+        assertEquals(-8, box[2]);
+        assertEquals(8, box[3]);
+    }
+
+    private static Map<ResourceKey<Level>, Map<Long, Set<BlockPos>>> registryOf(
+        ResourceKey<Level> dimension, Map<ChunkPos, Set<BlockPos>> byChunk
+    ) {
+        var inner = new HashMap<Long, Set<BlockPos>>();
+        byChunk.forEach((chunkPos, positions) -> inner.put(chunkPos.toLong(), positions));
+        var outer = new HashMap<ResourceKey<Level>, Map<Long, Set<BlockPos>>>();
+        outer.put(dimension, inner);
+        return outer;
+    }
+
+    @Test
+    void knownPositionsNearOnlyTouchesChunksInsideTheGivenBox() {
+        var inBox = new BlockPos(10, 64, 10); // chunk (0, 0)
+        var outsideBox = new BlockPos(2000, 64, 2000); // chunk (125, 125)
+        var registry = registryOf(Level.NETHER, Map.of(
+            new ChunkPos(0, 0), Set.of(inBox),
+            new ChunkPos(125, 125), Set.of(outsideBox)));
+        var found = PortalTransferSink.knownPositionsNear(registry, Level.NETHER, -1, 1, -1, 1);
+        assertEquals(Set.of(inBox), Set.copyOf(found));
+    }
+
+    @Test
+    void knownPositionsNearReturnsEmptyForAnUnknownDimensionOrEmptyRegistry() {
+        var registry = registryOf(Level.NETHER, Map.of(new ChunkPos(0, 0), Set.of(new BlockPos(1, 64, 1))));
+        assertTrue(PortalTransferSink.knownPositionsNear(registry, Level.END, -1, 1, -1, 1).isEmpty());
+        assertTrue(PortalTransferSink.knownPositionsNear(Map.of(), Level.NETHER, -1, 1, -1, 1).isEmpty());
+    }
+
+    @Test
+    void knownPositionsNearCombinesEveryChunkInsideTheBoxButNoneOutsideIt() {
+        var west = new BlockPos(-10, 64, 0); // chunk (-1, 0)
+        var east = new BlockPos(10, 64, 0); // chunk (0, 0)
+        var farEast = new BlockPos(2000, 64, 0); // chunk (125, 0)
+        var registry = registryOf(Level.OVERWORLD, Map.of(
+            new ChunkPos(-1, 0), Set.of(west),
+            new ChunkPos(0, 0), Set.of(east),
+            new ChunkPos(125, 0), Set.of(farEast)));
+        var found = Set.copyOf(PortalTransferSink.knownPositionsNear(registry, Level.OVERWORLD, -1, 0, 0, 0));
+        assertEquals(Set.of(west, east), found);
     }
 
     @Test
