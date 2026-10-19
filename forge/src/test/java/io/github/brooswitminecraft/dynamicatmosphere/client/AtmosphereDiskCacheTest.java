@@ -37,6 +37,26 @@ class AtmosphereDiskCacheTest {
         assertFalse(Files.exists(chunk));
     }
 
+    @Test void saveDeltaWritesOnlyNamedChunksAndRemovesExplicitlyEmptyOnes() throws Exception {
+        var disk = new AtmosphereDiskCache(root);
+        String key = disk.namespace("server", UUID.randomUUID(), "overworld");
+        var untouched = new AtmosphereClientCache.Update(new AtmosphereClientCache.Cell(0, 12, 0), 500, 500);
+        disk.save(key, List.of(untouched));
+        Path untouchedFile = root.resolve(key).resolve("0_0.bin");
+        var marker = java.nio.file.attribute.FileTime.fromMillis(123456);
+        Files.setLastModifiedTime(untouchedFile, marker);
+
+        var newCell = new AtmosphereClientCache.Cell(16, 12, 0);
+        var newUpdate = new AtmosphereClientCache.Update(newCell, 700, 500);
+        disk.saveDelta(key, Map.of(AtmosphereDiskCache.chunkOf(newCell), List.of(newUpdate)));
+
+        assertEquals(marker, Files.getLastModifiedTime(untouchedFile)); // Never re-serialized/rewritten.
+        assertEquals(new java.util.HashSet<>(List.of(untouched, newUpdate)), new java.util.HashSet<>(disk.load(key)));
+
+        disk.saveDelta(key, Map.of(AtmosphereDiskCache.chunkOf(newCell), List.of()));
+        assertEquals(List.of(untouched), disk.load(key));
+    }
+
     @Test void corruptChunksDoNotPreventLoadingGoodChunks() throws Exception {
         var disk = new AtmosphereDiskCache(root);
         String key = disk.namespace("server", UUID.randomUUID(), "overworld");

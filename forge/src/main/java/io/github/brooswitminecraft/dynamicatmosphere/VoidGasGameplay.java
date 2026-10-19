@@ -1,6 +1,11 @@
 package io.github.brooswitminecraft.dynamicatmosphere;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.function.BiFunction;
+import java.util.function.Consumer;
+import java.util.function.IntPredicate;
+import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.MobCategory;
@@ -10,6 +15,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.entity.EntityTypeTest;
 import net.minecraft.world.phys.AABB;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 
@@ -39,7 +45,9 @@ public final class VoidGasGameplay {
     static final int NETHERRACK_AMOUNT = 16;
     static final int BOTTOM_AMOUNT = 64;
     static final int BOTTOM_CHANCE_DENOMINATOR = 1;
-    static final int MAX_VILLAGER_CANDIDATES = 64;
+    /** Only the first eligible villager is ever rewarded, so the bounded query only ever needs
+     * to ask for one successful match -- not a larger pool that would go unused. */
+    static final int VILLAGER_SELECTION_LIMIT = 1;
     static final int BREEDING_BREAD = 3;
 
     record CellEffect(boolean villagerBand, int cost) {
@@ -105,17 +113,77 @@ public final class VoidGasGameplay {
         });
     }
 
+    /**
+     * Seam {@code candidates} is expected to already be eligibility-filtered and bounded (see
+     * {@link #readyOneVillagerVia}). Only the first candidate is ever tried, {@code consume} is
+     * invoked at most once (with {@code cost}), and a refused consumption grants no reward and
+     * tries no further candidate -- matching the original loop, whose per-iteration cap was
+     * unreachable dead code since every body path already returned on iteration 1.
+     */
+    static <T> boolean readyFirstEligible(int cost, IntPredicate consume, Iterable<? extends T> candidates, Consumer<? super T> reward) {
+        for (T candidate : candidates) {
+            if (!consume.test(cost)) return false;
+            reward.accept(candidate);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Shared orchestration {@link #readyOneVillager} delegates to -- the exact same method a
+     * test exercises -- so a regression in the real selection limit or eligibility predicate is
+     * caught here rather than only in a disconnected test mirror. {@code boundedQuery} is the one
+     * injected part (production wires the real {@code Level#getEntities} bounded call; a test
+     * wires a deterministic in-memory stand-in with the same bound-matches-not-candidates
+     * semantics), but the limit passed to it is always {@link #VILLAGER_SELECTION_LIMIT} -- never
+     * independently chosen by the caller -- so this method, not the caller, is the single source
+     * of truth for how many successful results are ever requested.
+     */
+    static <T> boolean readyOneVillagerVia(
+        int cost, IntPredicate consume, Predicate<? super T> eligible, Consumer<? super T> reward,
+        BiFunction<Predicate<? super T>, Integer, List<T>> boundedQuery
+    ) {
+        List<T> matches = boundedQuery.apply(eligible, VILLAGER_SELECTION_LIMIT);
+        return readyFirstEligible(cost, consume, matches, reward);
+    }
+
+    /**
+     * Test-only mirror of {@code Level#getEntities(type, bounds, predicate, output, maxResults)}'s
+     * documented semantics (verified against its decompiled source): {@code maxResults} bounds
+     * the number of candidates that PASS {@code predicate}, not the number of candidates visited
+     * -- a run of non-matching candidates never consumes a result slot. Production never calls
+     * this; it calls the real {@code Level#getEntities} inside {@link #readyOneVillager}. Used as
+     * a test's {@code boundedQuery} implementation for {@link #readyOneVillagerVia} so a test can
+     * inject more than {@link #VILLAGER_SELECTION_LIMIT} worth of ineligible candidates ahead of
+     * an eligible one and prove the eligible one is still found.
+     */
+    static <T> List<T> boundedMatchesForTesting(Iterable<? extends T> candidates, Predicate<? super T> predicate, int maxResults) {
+        List<T> output = new ArrayList<>();
+        for (T candidate : candidates) {
+            if (predicate.test(candidate)) {
+                output.add(candidate);
+                if (output.size() >= maxResults) break;
+            }
+        }
+        return output;
+    }
+
     private static void readyOneVillager(ServerLevel level, BlockPos cellOrigin, int cost, int breedingBread) {
         AABB bounds = cellBounds(cellOrigin, AtmosphereMaterial.VOID_GAS.cellSize());
-        List<Villager> villagers = level.getEntitiesOfClass(Villager.class, bounds,
-            candidate -> bounds.contains(candidate.position()) && eligibleVillager(candidate, breedingBread));
-        int checked = 0;
-        for (Villager villager : villagers) {
-            if (checked++ >= MAX_VILLAGER_CANDIDATES) break;
-            if (!DynamicAtmosphereMod.consumeMaterial(level, AtmosphereMaterial.VOID_GAS, cellOrigin, cost)) return;
-            villager.getInventory().addItem(new ItemStack(Items.BREAD, breedingBread));
-            return;
-        }
+        VoidGasGameplay.<Villager>readyOneVillagerVia(cost,
+            candidateCost -> DynamicAtmosphereMod.consumeMaterial(level, AtmosphereMaterial.VOID_GAS, cellOrigin, candidateCost),
+            villager -> eligibleVillager(villager, breedingBread),
+            villager -> villager.getInventory().addItem(new ItemStack(Items.BREAD, breedingBread)),
+            (eligible, limit) -> {
+                // eligibleVillager is baked into the native predicate (not applied afterward) so
+                // the limit bounds the count of ELIGIBLE matches, matching Level#getEntities' own
+                // maxResults semantics -- bounding arbitrary in-bounds candidates instead could
+                // exhaust the limit on ineligible villagers and miss an eligible one.
+                List<Villager> villagers = new ArrayList<>(limit);
+                level.getEntities(EntityTypeTest.forClass(Villager.class), bounds,
+                    candidate -> bounds.contains(candidate.position()) && eligible.test(candidate), villagers, limit);
+                return villagers;
+            });
     }
 
     static boolean eligibleVillager(Villager villager) {

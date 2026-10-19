@@ -22,6 +22,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.levelgen.Heightmap;
@@ -34,6 +35,7 @@ import net.neoforged.neoforge.network.PacketDistributor;
 
 import java.util.Comparator;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -47,7 +49,9 @@ import java.util.UUID;
 import java.util.Optional;
 import java.util.Objects;
 import java.util.function.BiPredicate;
+import java.util.function.Function;
 import java.util.function.IntUnaryOperator;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.function.ToIntFunction;
 import org.slf4j.Logger;
@@ -449,7 +453,7 @@ final class ForgeAtmospherePrototype {
                     for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
                         state.materialCells.get(material).keySet().forEach(materialGrids.get(material)::remove);
                     }
-                    evictChunkCellCaches(key);
+                    invalidateChunkCellCaches(key);
                 }
             };
             if (level.getServer().isSameThread()) {
@@ -1290,14 +1294,14 @@ final class ForgeAtmospherePrototype {
                 if (material == AtmosphereMaterial.NETHER_GAS) {
                     int size = material.cellSize();
                     netherGasGameplay.processTurn(cellLevel, origin,
-                        cellLevel.getEntitiesOfClass(net.minecraft.world.entity.LivingEntity.class,
+                        () -> cellLevel.getEntitiesOfClass(net.minecraft.world.entity.LivingEntity.class,
                             new net.minecraft.world.phys.AABB(origin).expandTowards(size - 1, size - 1, size - 1)));
                     dissipateHeavyGas(cellLevel, materialGrid, key, capacityAt);
                 }
                 if (material == AtmosphereMaterial.EXHAUST) {
                     int size = material.cellSize();
                     exhaustGameplay.processTurn(cellLevel, origin,
-                        cellLevel.getEntitiesOfClass(net.minecraft.world.entity.LivingEntity.class,
+                        () -> cellLevel.getEntitiesOfClass(net.minecraft.world.entity.LivingEntity.class,
                             new net.minecraft.world.phys.AABB(origin).expandTowards(size - 1, size - 1, size - 1)));
                     growPlants(cellLevel, materialGrid, key, size, capacityAt);
                     capacities.clear();
@@ -2513,26 +2517,26 @@ final class ForgeAtmospherePrototype {
             flushMaterialDirtyChunks();
             previous.cells.keySet().forEach(grid::remove);
             previous.smokeCells.keySet().forEach(smokeGrid::remove);
-            for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
-                previous.materialCells.get(material).keySet().forEach(materialGrids.get(material)::remove);
-            }
+            // Material eviction is folded into reimportMaterialCells below so the old
+            // incarnation's eviction and the new incarnation's import for the same material run
+            // back-to-back as one seam -- see that method's Javadoc.
             // MINECRAFT-436 review: a replacement LevelChunk at the same key is a new
             // incarnation with its own fresh ForgeTerrainFacts attachment (generation restarts),
             // and its persisted cells are restored directly into the new ChunkState.cells -- so
             // the very next flushDirtyChunks sees persisted == live and never bumps
             // amountRevision for this key either. Equal (amountRevision, terrainGeneration)
             // across two different incarnations could otherwise reuse a stale cached cell list,
-            // including for a periodic full snapshot -- and (fourth round) merely clearing the
-            // revision back to its implicit default is not enough on its own, since a per-player
-            // planner entry already retained at that same default would then see no change at
-            // all. invalidateChunkCellCachesForReplacement bumps the revision (guaranteed
-            // different from before) rather than just clearing it, so every consumer -- the
-            // shared cache here AND each subscribed player's own retained planner state --
-            // detects the incarnation swap, not just this cache. (A later unload of the
-            // now-replaced OLD ChunkState never reaches this path at all -- chunks.get(key) is
-            // already the NEW state by then and fails state.chunk == chunk -- so this is the only
-            // place that can catch a replacement; it is not optional/best-effort.)
-            invalidateChunkCellCachesForReplacement(key);
+            // including for a periodic full snapshot -- and merely clearing the revision back to
+            // its implicit default is not enough on its own, since a per-player planner entry
+            // already retained at that same default would then see no change at all.
+            // invalidateChunkCellCaches bumps the revision (guaranteed different from before)
+            // rather than clearing it, so every consumer -- the shared cache here AND each
+            // subscribed player's own retained planner state -- detects the swap, not just this
+            // cache. (A later unload of the now-replaced OLD ChunkState never reaches this path
+            // at all -- chunks.get(key) is already the NEW state by then and fails state.chunk ==
+            // chunk -- so this is the only place that can catch a replacement specifically; it is
+            // not optional/best-effort.)
+            invalidateChunkCellCaches(key);
         }
         ChunkState state = new ChunkState(chunk);
         chunks.put(key, state);
@@ -2561,13 +2565,11 @@ final class ForgeAtmospherePrototype {
                 level.dimension().location(), exception.getMessage());
         }
         for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
+            Map<AtmosphereGrid.CellKey<ResourceKey<Level>>, MaterialChunkData.Cell> previousMaterialCells =
+                previous == null ? null : previous.materialCells.get(material);
             try {
-                for (MaterialChunkData.Cell cell : ForgeMaterialStorage.read(chunk, material)) {
-                    var cellKey = new AtmosphereGrid.CellKey<>(level.dimension(), cell.x(), cell.y(), cell.z());
-                    state.materialCells.get(material).put(cellKey, cell);
-                    materialGrids.get(material).restore(new AtmosphereGrid.Cell<>(
-                        cellKey, cell.amount(), 0, Long.MIN_VALUE, serverTicks), serverTicks);
-                }
+                reimportMaterialCells(materialGrids.get(material), level.dimension(), chunk, material,
+                    previousMaterialCells, state.materialCells.get(material), serverTicks);
             } catch (IllegalStateException exception) {
                 state.materialReadable.remove(material);
                 LOGGER.warn("Skipping {} simulation for chunk {} in {}: {}", material.id(), chunk.getPos(),
@@ -2575,6 +2577,49 @@ final class ForgeAtmospherePrototype {
             }
         }
         return state;
+    }
+
+    /**
+     * MINECRAFT-437 review follow-up: the material-persistence half of {@link #ensureImported}'s
+     * old-incarnation-swap sequence for one material -- evict the old incarnation's cells (if any)
+     * from the live grid, then import the new incarnation's own stored cells via
+     * {@link ForgeMaterialStorage#read} and restore them into the grid. Extracted as a standalone
+     * method operating on real production types ({@link AtmosphereGrid}, {@link ChunkAccess},
+     * {@link ForgeMaterialStorage}) with no {@code ChunkState}/{@code LevelChunk}/
+     * {@code ServerLevel} dependency, so {@code MaterialIncarnationSwapSeamTest} can call it
+     * directly with two {@code ProtoChunk}-backed incarnations at the same coordinates -- this
+     * repo's test suite has no {@code ServerLevel} stand-in to drive {@link #ensureImported} itself
+     * end to end (see {@code ForgeAtmospherePrototypeFreezeGateTest}'s class Javadoc), so the global
+     * {@link #flushDirtyChunks}/{@link #flushSmokeDirtyChunks}/{@link #flushMaterialDirtyChunks}
+     * calls that precede this swap in {@code ensureImported} (and already persist a dirty old
+     * incarnation before it is evicted) remain covered separately: by this method's caller for
+     * wiring, and by {@code MaterialDirtyChunkCollectorTest}/
+     * {@code ForgeMaterialStorageProductionChunkTest} for the real collector and
+     * {@code writeBatch} pieces that compose them.
+     *
+     * @param previousMaterialCells the old incarnation's persisted-cells map for this material, or
+     *     {@code null} if there was no old incarnation at these coordinates (a first import)
+     * @param newMaterialCells the new incarnation's (initially empty) persisted-cells map for this
+     *     material, mutated in place exactly as production's inline import loop previously did
+     */
+    static void reimportMaterialCells(
+        AtmosphereGrid<ResourceKey<Level>> materialGrid,
+        ResourceKey<Level> dimension,
+        ChunkAccess newChunk,
+        AtmosphereMaterial material,
+        Map<AtmosphereGrid.CellKey<ResourceKey<Level>>, MaterialChunkData.Cell> previousMaterialCells,
+        Map<AtmosphereGrid.CellKey<ResourceKey<Level>>, MaterialChunkData.Cell> newMaterialCells,
+        long serverTicks
+    ) {
+        if (previousMaterialCells != null) {
+            previousMaterialCells.keySet().forEach(materialGrid::remove);
+        }
+        for (MaterialChunkData.Cell cell : ForgeMaterialStorage.read(newChunk, material)) {
+            var cellKey = new AtmosphereGrid.CellKey<>(dimension, cell.x(), cell.y(), cell.z());
+            newMaterialCells.put(cellKey, cell);
+            materialGrid.restore(new AtmosphereGrid.Cell<>(cellKey, cell.amount(), 0, Long.MIN_VALUE, serverTicks),
+                serverTicks);
+        }
     }
 
     private void flushDirtyChunks() {
@@ -2641,42 +2686,110 @@ final class ForgeAtmospherePrototype {
         }
     }
 
+    /**
+     * MINECRAFT-437: collects every dirty material across all materials' grids first, grouped by
+     * chunk, so a chunk with several materials dirty in the same flush gets exactly one batched
+     * {@link ForgeMaterialStorage#writeBatch} publish instead of one {@code write} per material.
+     *
+     * <p>Per material, the actual drain-and-materialize work is delegated to
+     * {@link #collectMaterialDirtyChunkUpdates}, which is the piece
+     * {@code MaterialDirtyChunkCollectorTest} pins directly: exactly one {@link List#copyOf} per
+     * (chunk, material) pair that had at least one dirty cell in this flush, not one per dirty
+     * cell -- mirroring the pre-batching behavior, which collected a per-material
+     * {@code dirtyChunks} set before copying once per changed chunk/material.
+     */
     private void flushMaterialDirtyChunks() {
+        Map<ChunkKey, Map<AtmosphereMaterial, List<MaterialChunkData.Cell>>> perChunkUpdates = new LinkedHashMap<>();
         for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
             AtmosphereGrid<ResourceKey<Level>> materialGrid = materialGrids.get(material);
-            Set<ChunkKey> dirtyChunks = new LinkedHashSet<>();
-            for (var key : materialGrid.drainDirtyKeys()) {
-                ChunkKey chunkKey = new ChunkKey(key.dimension(), material.chunkCoordinate(key.x()),
-                    material.chunkCoordinate(key.z()));
-                ChunkState state = chunks.get(chunkKey);
-                if (state == null || !state.materialReadable.contains(material)) continue;
-                var persistedCells = state.materialCells.get(material);
-                var cell = materialGrid.get(key);
-                if (cell == null) {
-                    if (persistedCells.remove(key) == null) continue;
-                } else {
-                    var persisted = persistedCells.get(key);
-                    if (persisted != null && persisted.amount() == cell.amount()) continue;
-                    persistedCells.put(key,
-                        new MaterialChunkData.Cell(key.x(), key.y(), key.z(), cell.amount()));
-                }
-                dirtyChunks.add(chunkKey);
-            }
+            Map<ChunkKey, List<MaterialChunkData.Cell>> updates = collectMaterialDirtyChunkUpdates(
+                materialGrid.drainDirtyKeys(),
+                key -> new ChunkKey(key.dimension(), material.chunkCoordinate(key.x()),
+                    material.chunkCoordinate(key.z())),
+                chunkKey -> {
+                    ChunkState state = chunks.get(chunkKey);
+                    return state != null && state.materialReadable.contains(material);
+                },
+                key -> {
+                    var cell = materialGrid.get(key);
+                    return cell == null ? null : cell.amount();
+                },
+                chunkKey -> chunks.get(chunkKey).materialCells.get(material),
+                List::copyOf);
+            // MINECRAFT-436: bump this material's per-chunk amount revision for every chunk this
+            // batch actually touched (same signal the main/smoke flushes bump; reused here, not
+            // duplicated -- see #amountRevision's doc).
             Map<ChunkKey, Long> revisionForMaterial = materialAmountRevision.get(material);
-            for (ChunkKey key : dirtyChunks) {
-                revisionForMaterial.merge(key, 1L, Long::sum);
-                ChunkState state = chunks.get(key);
-                try {
-                    ForgeMaterialStorage.write(state.chunk, material,
-                        List.copyOf(state.materialCells.get(material).values()));
-                } catch (IllegalStateException exception) {
-                    state.materialReadable.remove(material);
-                    state.materialCells.get(material).keySet().forEach(materialGrid::remove);
-                    LOGGER.warn("Preserving unreadable {} data for chunk {} in {}: {}", material.id(),
-                        state.chunk.getPos(), key.dimension().location(), exception.getMessage());
-                }
+            for (ChunkKey touchedKey : updates.keySet()) {
+                revisionForMaterial.merge(touchedKey, 1L, Long::sum);
+            }
+            for (var entry : updates.entrySet()) {
+                perChunkUpdates.computeIfAbsent(entry.getKey(), unused -> new EnumMap<>(AtmosphereMaterial.class))
+                    .put(material, entry.getValue());
             }
         }
+        for (var entry : perChunkUpdates.entrySet()) {
+            ChunkKey key = entry.getKey();
+            ChunkState state = chunks.get(key);
+            Map<AtmosphereMaterial, IllegalStateException> failures =
+                ForgeMaterialStorage.writeBatch(state.chunk, entry.getValue());
+            for (var failure : failures.entrySet()) {
+                AtmosphereMaterial material = failure.getKey();
+                state.materialReadable.remove(material);
+                state.materialCells.get(material).keySet().forEach(materialGrids.get(material)::remove);
+                LOGGER.warn("Preserving unreadable {} data for chunk {} in {}: {}", material.id(),
+                    state.chunk.getPos(), key.dimension().location(), failure.getValue().getMessage());
+            }
+        }
+    }
+
+    /**
+     * MINECRAFT-437: the per-material dirty-key drain and per-touched-chunk materialization at
+     * the heart of {@link #flushMaterialDirtyChunks()}, extracted as a standalone, dimension-type-
+     * agnostic method so {@code MaterialDirtyChunkCollectorTest} can pin its {@code materialize}
+     * (production: {@link List#copyOf}) call cardinality with plain maps -- no {@code ChunkState},
+     * {@code AtmosphereGrid}, or {@code LevelChunk} required.
+     *
+     * <p>For each key in {@code dirtyKeys}: resolves its chunk via {@code toChunkKey}, skips it if
+     * {@code isTrackedAndReadable} rejects that chunk, then updates the chunk's persisted-cells map
+     * (obtained via {@code persistedCellsFor}, which must return a stable, mutable, non-null map
+     * for any accepted chunk key) exactly as the inline loop previously did: remove the key if
+     * {@code currentAmount} returns {@code null}, skip if the stored amount is already equal to the
+     * live amount, otherwise upsert it. Only the <em>chunk key</em> of each touched dirty key is
+     * recorded while draining -- never the persisted-cells snapshot itself. Once every dirty key has
+     * been drained, each distinct touched chunk is visited exactly once to call
+     * {@code materialize} on its persisted-cells map and record the result -- so {@code materialize}
+     * runs exactly once per (chunk) that had at least one net change from this batch of dirty keys,
+     * regardless of how many of that chunk's keys were dirty.
+     */
+    static <D> Map<ChunkKey, List<MaterialChunkData.Cell>> collectMaterialDirtyChunkUpdates(
+        Iterable<AtmosphereGrid.CellKey<D>> dirtyKeys,
+        Function<AtmosphereGrid.CellKey<D>, ChunkKey> toChunkKey,
+        Predicate<ChunkKey> isTrackedAndReadable,
+        Function<AtmosphereGrid.CellKey<D>, Integer> currentAmount,
+        Function<ChunkKey, Map<AtmosphereGrid.CellKey<D>, MaterialChunkData.Cell>> persistedCellsFor,
+        Function<Collection<MaterialChunkData.Cell>, List<MaterialChunkData.Cell>> materialize
+    ) {
+        Set<ChunkKey> touchedChunks = new LinkedHashSet<>();
+        for (AtmosphereGrid.CellKey<D> key : dirtyKeys) {
+            ChunkKey chunkKey = toChunkKey.apply(key);
+            if (!isTrackedAndReadable.test(chunkKey)) continue;
+            Map<AtmosphereGrid.CellKey<D>, MaterialChunkData.Cell> persistedCells = persistedCellsFor.apply(chunkKey);
+            Integer amount = currentAmount.apply(key);
+            if (amount == null) {
+                if (persistedCells.remove(key) == null) continue;
+            } else {
+                var persisted = persistedCells.get(key);
+                if (persisted != null && persisted.amount() == amount) continue;
+                persistedCells.put(key, new MaterialChunkData.Cell(key.x(), key.y(), key.z(), amount));
+            }
+            touchedChunks.add(chunkKey);
+        }
+        Map<ChunkKey, List<MaterialChunkData.Cell>> result = new LinkedHashMap<>();
+        for (ChunkKey chunkKey : touchedChunks) {
+            result.put(chunkKey, materialize.apply(persistedCellsFor.apply(chunkKey).values()));
+        }
+        return result;
     }
 
     private static ChunkKey chunkKey(ServerLevel level, LevelChunk chunk) {
@@ -2684,42 +2797,37 @@ final class ForgeAtmospherePrototype {
     }
 
     /**
-     * MINECRAFT-436 review: drops {@code key}'s entry from every channel's shared cross-tick cell
-     * cache and revision map entirely. Safe for a normal chunk unload: nothing can still be
-     * comparing against a retained revision for a chunk no player can be subscribed to any more
-     * (an unload only happens once nothing references the chunk), and dropping the map entries
-     * (rather than leaving them forever) keeps these maps from growing unboundedly over a long
-     * server session as players explore. NOT used for a chunk-incarnation replacement -- see
-     * {@link #invalidateChunkCellCachesForReplacement}, which that path needs instead.
+     * MINECRAFT-436 review (fifth round): drops {@code key}'s entry from every channel's shared
+     * cross-tick cell-list cache, and BUMPS (never clears to the implicit default) every channel's
+     * per-chunk amount-revision counter for that key. Used both on a normal chunk unload and on
+     * {@code ensureImported} replacing a different {@code LevelChunk} incarnation at the same key.
+     *
+     * <p>Earlier revisions of this fix used plain removal for unload (reasoning that nothing
+     * could still be comparing against a retained revision for a chunk no player is subscribed to
+     * any more) and only bumped on replacement. That missed a real sequence the review found: a
+     * busy paced channel can still hold a player's OLD retained planner entry for this chunk when
+     * it unloads (the exit was never yet observed, since planning only runs while idle or on a
+     * genuine change); if the chunk later reloads, {@code ensureImported} takes the {@code
+     * previous == null} branch (not the replacement branch, since unload already removed the
+     * {@code chunks} entry) and the reload's gather reads whatever this method leaves behind. A
+     * plain {@code remove} leaves the next read at the implicit default (0), which can
+     * coincidentally equal that player's still-retained revision, wrongly suppressing the
+     * ordinary delta/tombstones that should fire once the channel finally replans. Always bumping
+     * instead of clearing closes this regardless of which path (replacement or unload+reload)
+     * produced the new incarnation.
+     *
+     * <p>Removing the shared cell-list CACHE entry (as opposed to the revision counter) stays
+     * correct and unchanged: it is always safe to drop and rebuild on demand, and the bumped
+     * revision alone already guarantees the next build is used instead of a stale one. Trade-off,
+     * stated plainly: unlike the cache entries, the revision counters themselves are never
+     * removed, so these maps grow by one entry per distinct chunk ever unloaded or replaced over
+     * a server's lifetime rather than staying bounded to currently-loaded chunks -- accepted
+     * deliberately so correctness does not depend on globally invalidating every subscribed
+     * player's retained planner state on every unload, which this codebase has no efficient way
+     * to do. Each entry is a small, fixed-size (dimension, x, z) key mapped to a boxed long; the
+     * growth is bounded in practice by a server's total ever-explored area, not by play time.
      */
-    private void evictChunkCellCaches(ChunkKey key) {
-        amountRevision.remove(key);
-        chunkCellCache.remove(key);
-        smokeAmountRevision.remove(key);
-        smokeChunkCellCache.remove(key);
-        for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
-            materialAmountRevision.get(material).remove(key);
-            materialChunkCellCaches.get(material).remove(key);
-        }
-    }
-
-    /**
-     * MINECRAFT-436 review (fourth round): a chunk-incarnation replacement must guarantee a
-     * revision DIFFERENT from whatever it was before -- never merely cleared back to the same
-     * implicit default (0) a value could already coincidentally be at, and never merely evicted
-     * from the shared cell cache alone. Removing (not bumping) the revision only fixes the
-     * shared cache's own freshness check; each subscribed player's own retained planner entry
-     * (in {@code AtmosphereSyncPlanner}/{@code SmokeSyncPlanner}) is compared against whatever
-     * revision this method feeds into the NEXT {@code planChunks} call for that chunk, and a
-     * revision that happens to read back as the SAME value the player's retained entry already
-     * has (e.g. both 0, if this chunk was never previously found amount-dirty) would cause that
-     * player's planner to wrongly skip the chunk, leaving it stale until some unrelated later
-     * change or a full reset. Monotonically incrementing (never resetting) the revision instead
-     * guarantees every consumer -- the shared cache here, and every subscribed player's planner
-     * state, however many ticks it has been since they last synced -- detects the incarnation
-     * swap and re-diffs.
-     */
-    private void invalidateChunkCellCachesForReplacement(ChunkKey key) {
+    private void invalidateChunkCellCaches(ChunkKey key) {
         amountRevision.merge(key, 1L, Long::sum);
         chunkCellCache.remove(key);
         smokeAmountRevision.merge(key, 1L, Long::sum);
@@ -2730,7 +2838,9 @@ final class ForgeAtmospherePrototype {
         }
     }
 
-    private record ChunkKey(ResourceKey<Level> dimension, int x, int z) {
+    // Package-visible (not private) solely so MaterialDirtyChunkCollectorTest -- which pins the
+    // List.copyOf cardinality of collectMaterialDirtyChunkUpdates below -- can name this type.
+    record ChunkKey(ResourceKey<Level> dimension, int x, int z) {
     }
 
     static final class DumpReport {

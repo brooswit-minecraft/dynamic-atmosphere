@@ -19,7 +19,6 @@ import net.neoforged.neoforge.event.level.LevelEvent;
 
 import java.lang.ref.WeakReference;
 import java.util.EnumMap;
-import com.mojang.logging.LogUtils;
 
 @EventBusSubscriber(modid = DynamicAtmosphereMod.MODID, value = Dist.CLIENT)
 public final class AtmosphereClient {
@@ -39,9 +38,10 @@ public final class AtmosphereClient {
     private static final AtmosphereDiskCache DISK = new AtmosphereDiskCache(
         Minecraft.getInstance().gameDirectory.toPath().resolve("dynamicatmosphere-cache"));
     private static final AtmosphereCacheWriter SAVER = new AtmosphereCacheWriter(DISK);
+    /** Bounded, incrementally-applied historical restore; guarded against stale namespace/dimension. */
+    private static final AtmosphereRestoreCoordinator RESTORE = new AtmosphereRestoreCoordinator(SAVER);
     private static String cacheNamespace;
     private static String cacheDimension;
-    private static boolean cacheDirty;
     private static int saveTicks;
 
     static {
@@ -104,21 +104,26 @@ public final class AtmosphereClient {
             if (observedLevel != null) SESSION.world(payload.dimension().toString());
             cacheNamespace = namespace;
             cacheDimension = payload.dimension().toString();
-            try { SESSION.restore(cacheDimension, SAVER.load(namespace)); }
-            catch (java.io.IOException failure) { LogUtils.getLogger().warn("Cannot load disposable atmosphere cache", failure); }
+            RESTORE.beginRestore(namespace, cacheDimension);
         }
         SESSION.receive(payload.dimension().toString(), payload.reset(), payload.snapshotEnd(), payload.authoritativeChunks().stream()
             .map(chunk -> new AtmosphereClientCache.Chunk(chunk.x(), chunk.z())).toList(), payload.cells().stream()
             .map(cell -> new AtmosphereClientCache.Update(
                 new AtmosphereClientCache.Cell(cell.x(), cell.y(), cell.z()), cell.amount(), cell.capacity()))
             .toList());
-        cacheDirty = true;
+    }
+
+    /** Applies at most one bounded batch per tick, on the client thread, like every other cache mutation. */
+    private static void drainRestoreBatch() {
+        var drained = RESTORE.drainBatch(cacheNamespace);
+        if (drained != null) SESSION.restore(drained.dimension(), drained.updates());
     }
 
     @SubscribeEvent
     public static void tick(ClientTickEvent.Post event) {
         syncWorld();
         if (observedLevel != null && !Minecraft.getInstance().isPaused()) {
+            drainRestoreBatch();
             SESSION.cache().advance();
             MATERIALS.values().forEach(session -> session.cache().advance());
             if (++saveTicks >= 200) {
@@ -163,7 +168,9 @@ public final class AtmosphereClient {
             unloadedLevel = null;
         }
         if (current != observedLevel) {
-            if (current == null || !current.dimension().location().toString().equals(cacheDimension)) {
+            String currentDimension = current == null ? null : current.dimension().location().toString();
+            var change = RESTORE.syncLevel(observedLevel, current, currentDimension, cacheNamespace, cacheDimension);
+            if (change == AtmosphereRestoreCoordinator.LevelChange.NAMESPACE_RESET) {
                 checkpoint();
                 cacheNamespace = null;
                 cacheDimension = null;
@@ -174,9 +181,8 @@ public final class AtmosphereClient {
             }
             AtmosphereVolumeRenderer.close();
             observedLevel = current;
-            SESSION.world(current == null ? null : current.dimension().location().toString());
-            String dimension = current == null ? null : current.dimension().location().toString();
-            MATERIALS.values().forEach(session -> session.world(dimension));
+            SESSION.world(currentDimension);
+            MATERIALS.values().forEach(session -> session.world(currentDimension));
         }
     }
 
@@ -184,6 +190,7 @@ public final class AtmosphereClient {
         checkpoint();
         cacheNamespace = null;
         cacheDimension = null;
+        RESTORE.cancelRestore();
         observedLevel = null;
         unloadedLevel = null;
         SESSION.clear();
@@ -192,11 +199,9 @@ public final class AtmosphereClient {
     }
 
     private static void checkpoint() {
-        if (cacheNamespace == null || !cacheDirty) return;
-        String namespace = cacheNamespace;
-        var cells = SESSION.cache().exportUpdates();
-        cacheDirty = false;
-        SAVER.submit(namespace, cells);
+        if (cacheNamespace == null) return;
+        var deltas = SESSION.cache().exportDirty();
+        if (!deltas.isEmpty()) SAVER.submit(cacheNamespace, deltas);
     }
 
     public static int cachedCellCount() {

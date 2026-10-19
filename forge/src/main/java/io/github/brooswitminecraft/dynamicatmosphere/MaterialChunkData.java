@@ -5,8 +5,10 @@ import net.minecraft.nbt.Tag;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 
 /** Pure sparse chunk format shared by post-Smoke atmospheric materials. */
 public final class MaterialChunkData {
@@ -66,6 +68,63 @@ public final class MaterialChunkData {
         }
         result.sort(Comparator.comparingInt(Cell::x).thenComparingInt(Cell::y).thenComparingInt(Cell::z));
         return List.copyOf(result);
+    }
+
+    /**
+     * MINECRAFT-437: the outcome of merging several materials' pending cell updates for one chunk
+     * into a single previous-materials snapshot in one pass.
+     *
+     * <p>{@code materials} is the new snapshot to publish when {@code changed} is true, or simply
+     * {@code previous} (unmodified, zero-copy) when nothing actually changed and nothing should be
+     * published. {@code failures} holds one entry per material whose previous stored entry was
+     * already retained as unreadable/corrupt (so its update was skipped, not applied) — callers
+     * should treat each failed material exactly as the single-material write path does: mark it
+     * unreadable and stop simulating it, without disturbing any other, unrelated material.
+     */
+    public record BatchMerge(Map<AtmosphereMaterial, StoredMaterial> materials, boolean changed,
+                              Map<AtmosphereMaterial, IllegalStateException> failures) { }
+
+    /**
+     * Merges {@code updates} (one pending cell list per dirty material) into {@code previous} with
+     * exactly one {@link EnumMap} copy for the whole batch, reusing every untouched material's
+     * {@link StoredMaterial} by reference. A material whose validated cells are byte-for-byte equal
+     * to what is already stored is treated as unchanged and left untouched (not just zero-copy, but
+     * not even considered for inclusion in a new map). A material whose previous entry is already
+     * {@linkplain StoredMaterial#unreadable() unreadable} is skipped and reported in
+     * {@link BatchMerge#failures()} instead of being applied, so one corrupt/retained material never
+     * blocks or corrupts the batch's other, readable materials.
+     */
+    public static BatchMerge mergeBatch(Map<AtmosphereMaterial, StoredMaterial> previous,
+                                         Map<AtmosphereMaterial, List<Cell>> updates,
+                                         int chunkX, int chunkZ, int minBlockY, int maxBlockY) {
+        EnumMap<AtmosphereMaterial, StoredMaterial> materials = null;
+        Map<AtmosphereMaterial, IllegalStateException> failures = null;
+        boolean changed = false;
+        for (var entry : updates.entrySet()) {
+            AtmosphereMaterial material = entry.getKey();
+            StoredMaterial oldMaterial = previous.get(material);
+            if (oldMaterial != null && oldMaterial.unreadable() != null) {
+                if (failures == null) failures = new EnumMap<>(AtmosphereMaterial.class);
+                failures.put(material, new IllegalStateException("Unsupported/corrupt " + material.id()
+                    + " data retained; skip this chunk without overwriting it"));
+                continue;
+            }
+            List<Cell> validated = validate(material, chunkX, chunkZ, minBlockY, maxBlockY, entry.getValue());
+            boolean unchanged = (oldMaterial == null && validated.isEmpty())
+                || (oldMaterial != null && oldMaterial.cells().equals(validated));
+            if (unchanged) continue;
+            if (materials == null) {
+                // EnumMap's Map constructor throws IllegalArgumentException on an empty map (it
+                // cannot infer the key type from no entries), so seed the key type explicitly.
+                materials = new EnumMap<>(AtmosphereMaterial.class);
+                materials.putAll(previous);
+            }
+            if (validated.isEmpty()) materials.remove(material);
+            else materials.put(material, new StoredMaterial(validated, null));
+            changed = true;
+        }
+        Map<AtmosphereMaterial, StoredMaterial> result = changed ? Map.copyOf(materials) : previous;
+        return new BatchMerge(result, changed, failures == null ? Map.of() : Map.copyOf(failures));
     }
 
     public static int[] encode(List<Cell> cells) {

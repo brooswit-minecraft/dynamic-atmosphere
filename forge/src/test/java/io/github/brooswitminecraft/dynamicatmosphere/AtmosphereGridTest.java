@@ -321,6 +321,51 @@ class AtmosphereGridTest {
         assertEquals(750, total(grid));
     }
 
+    /**
+     * MINECRAFT-439 review fix: spreadOneHop's scratch buffers are pooled per-grid, and a nested
+     * spread call (here, triggered from inside capacityAt, exactly the seam the review flagged)
+     * must check out an independent frame instead of reusing the outer call's live one. Against
+     * the single-shared-fields implementation this review caught, the nested call's
+     * {@code localKeys.clear()} would clear the very Set the outer call's capacitySnapshot loop
+     * is still iterating over, throwing ConcurrentModificationException. This proves both the
+     * nested and outer spreads complete and each produces its own exact, uncorrupted result.
+     */
+    @Test
+    void nestedSpreadFromCapacityAtChecksOutAnIndependentFrameAndBothProduceExactState() {
+        // Identity cadence: a cell set() at tick T becomes due at that same tick T, so the
+        // nested spread below can discover and process a newly-set source within one tick.
+        AtmosphereGrid<String> grid = new AtmosphereGrid<>(tick -> tick);
+        AtmosphereGrid.CellKey<String> outerFull = key(0, 0, 0);
+        AtmosphereGrid.CellKey<String> outerHalf = key(1, 0, 0);
+        AtmosphereGrid.CellKey<String> nestedFull = key(10, 0, 0);
+        AtmosphereGrid.CellKey<String> nestedHalf = key(11, 0, 0);
+        long tick = 0;
+        grid.set(outerFull, 750, tick, 1000);
+
+        boolean[] nestedTriggered = {false};
+        ToIntFunction<AtmosphereGrid.CellKey<String>> capacityAt = k -> {
+            if (!nestedTriggered[0] && k.equals(outerFull)) {
+                nestedTriggered[0] = true;
+                grid.set(nestedFull, 750, tick, 1000);
+                var nestedResult = grid.spread(tick, capacities(Map.of(nestedFull, 1000, nestedHalf, 500)));
+                assertEquals(1, nestedResult.sourcesProcessed(), "the nested call must process exactly its own source");
+                assertEquals(250, nestedResult.moved());
+                assertEquals(500, amount(grid, nestedFull));
+                assertEquals(250, amount(grid, nestedHalf));
+            }
+            return Map.of(outerFull, 1000, outerHalf, 500).getOrDefault(k, 0);
+        };
+
+        var outerResult = grid.spread(tick, capacityAt);
+
+        assertTrue(nestedTriggered[0], "the nested spread must actually have run");
+        assertEquals(1, outerResult.sourcesProcessed(), "the outer call must still process exactly its own source");
+        assertEquals(250, outerResult.moved());
+        assertEquals(500, amount(grid, outerFull), "the outer call's own result must not be corrupted by the nested one");
+        assertEquals(250, amount(grid, outerHalf));
+        assertEquals(1500, total(grid), "both pairs' material (750 + 750) must be fully conserved");
+    }
+
     @Test
     void insertionOnCadenceBoundaryWaitsForNextGlobalBoundary() {
         AtmosphereGrid<String> grid = new AtmosphereGrid<>();
