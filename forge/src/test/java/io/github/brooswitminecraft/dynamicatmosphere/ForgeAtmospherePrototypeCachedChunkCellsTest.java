@@ -109,9 +109,9 @@ class ForgeAtmospherePrototypeCachedChunkCellsTest {
      * underlying data is for a completely different chunk instance with different cells. This
      * proves eviction forces THIS shared cache to rebuild; it does not by itself prove an
      * already-subscribed player's own retained planner entry is also invalidated -- that needs
-     * the revision to actually change value, not just be cleared/evicted, which is why production
-     * uses {@code invalidateChunkCellCachesForReplacement} (bumps the revision) rather than {@code
-     * evictChunkCellCaches} (clears it) for a replacement. See {@code
+     * the revision to actually change value, not just be cleared/evicted, which is why
+     * production's {@code invalidateChunkCellCaches} bumps the revision rather than merely
+     * clearing it, for both a chunk-incarnation replacement and a normal unload. See {@code
      * ChunkIncarnationInvalidationTest} for the full shared-cache-plus-planner story, including
      * the exact case where clearing alone is insufficient.
      */
@@ -130,7 +130,7 @@ class ForgeAtmospherePrototypeCachedChunkCellsTest {
         // directly into the new ChunkState, so the very next flushDirtyChunks sees persisted ==
         // live and never bumps the revision either: both signals coincidentally match the old
         // incarnation's. Without eviction, the stale "old-incarnation-cell" would be reused here.
-        cache.remove("chunk-0-0"); // what evictChunkCellCaches does on replacement
+        cache.remove("chunk-0-0"); // the cache-eviction half of what invalidateChunkCellCaches does
         var newChunkCells = ForgeAtmospherePrototype.cachedChunkCells(
             cache, revisions, "chunk-0-0", 1L, () -> build(builds, "new-incarnation-cell"));
 

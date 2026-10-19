@@ -14,7 +14,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * MINECRAFT-436 review (fourth round): "the player's retained planner entry is not invalidated
  * when the shared cache is evicted. A replacement/reloaded chunk with the same revision and
  * terrain-generation pair is skipped even when its rebuilt cells differ, leaving ordinary sync
- * stale until another change or full reset."
+ * stale until another change or full reset." Review (fifth round), the same finding's remaining
+ * continuation: "normal unload removes revision/cache entries but does not remove retained
+ * player/planner entries... A player can leave, allow unload/reload, and return before the
+ * channel next plans... The retained entry then suppresses the ordinary delta/tombstones."
  *
  * <p>Composes the REAL {@link ForgeAtmospherePrototype#cachedChunkCells} (the shared cross-tick
  * cache) with the REAL {@link AtmosphereSyncPlanner#planChunks} (a subscribed player's own
@@ -24,7 +27,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * that same default and would wrongly see no change), but bumping the revision -- guaranteed
  * different from whatever it was before -- fixes both the shared cache and the player's own
  * planner state with the one signal, since both compare against the same revision value fed into
- * {@code planChunks}.
+ * {@code planChunks}. Production applies this same bump via one unified method, {@code
+ * invalidateChunkCellCaches}, from both the chunk-incarnation-replacement path AND the normal
+ * chunk-unload path (the fifth round's finding), so the sequence tested here -- a player's
+ * planner entry surviving an unload+reload untouched, never told of an exit -- is covered the
+ * same way as an in-place replacement.
  */
 class ChunkIncarnationInvalidationTest {
 
@@ -89,8 +96,8 @@ class ChunkIncarnationInvalidationTest {
         assertFalse(syncOnce(sharedCache, revisions, planner, chunkKey, chunk, 1L, 100).size() > 0,
             "sanity: an unchanged, still-subscribed chunk produces no update");
 
-        // The real fix: invalidateChunkCellCachesForReplacement bumps the revision (never clears
-        // it) in addition to evicting the shared cache entry.
+        // The real fix: invalidateChunkCellCaches bumps the revision (never clears it) in
+        // addition to evicting the shared cache entry.
         revisions.merge(chunkKey, 1L, Long::sum);
         sharedCache.remove(chunkKey);
 
@@ -125,6 +132,56 @@ class ChunkIncarnationInvalidationTest {
             assertEquals(1, updates.size(), "replacement #" + replacement + " must be detected");
             assertEquals(List.of(new AtmosphereSyncPlanner.Cell(0, 0, 0, amount, 1000)), updates.getFirst().cells());
         }
+    }
+
+    /**
+     * MINECRAFT-436 review (fifth round): "normal unload removes revision/cache entries but does
+     * not remove retained player/planner entries. Busy paced channels can miss the subscription-
+     * exit interval. A player can leave, allow unload/reload, and return before the channel next
+     * plans; reload takes previous == null and may supply old revision/generation values despite
+     * persisted amount changes made during the earlier drain. The retained entry then suppresses
+     * the ordinary delta/tombstones."
+     *
+     * <p>Models the full sequence: the player's planner entry is established while the chunk is
+     * loaded; the chunk then unloads (production: {@code onChunkUnload} calls {@code
+     * invalidateChunkCellCaches}, bumping the revision -- the fix for THIS finding, replacing the
+     * earlier plain-removal eviction that only handled the in-place-replacement case) and later
+     * reloads with genuinely different persisted data. The player's planner entry was never told
+     * about an exit (a busy channel can miss it, exactly as the review describes), so it is still
+     * the SAME entry from before the unload -- proving the fix works even when the planner-side
+     * state was never invalidated via the ordinary exited-chunk path at all.
+     */
+    @Test
+    void unloadThenReloadWhilePlayerPlannerEntryWasNeverToldOfAnExitIsStillDetectedCorrectly() {
+        Map<String, ForgeAtmospherePrototype.CachedChunkCells<AtmosphereSyncPlanner.Cell>> sharedCache =
+            new HashMap<>();
+        Map<String, Long> revisions = new HashMap<>();
+        var planner = new AtmosphereSyncPlanner<String, String>(512);
+        var chunk = new AtmosphereSyncPlanner.Chunk(0, 0);
+        String chunkKey = "overworld:0:0";
+
+        // Chunk loaded, player subscribed, never found amount-dirty (revision stays at the
+        // implicit default, 0) before it unloads.
+        syncOnce(sharedCache, revisions, planner, chunkKey, chunk, 1L, 100);
+
+        // Chunk unloads. Production's onChunkUnload calls invalidateChunkCellCaches: bumps the
+        // revision (the fifth-round fix) and drops the shared cache entry. The player's own
+        // planner entry is untouched -- it was never told the player exited this chunk (the
+        // channel was busy, or simply hasn't replanned yet), so it still holds the pre-unload data.
+        revisions.merge(chunkKey, 1L, Long::sum);
+        sharedCache.remove(chunkKey);
+
+        // Chunk reloads with genuinely different persisted data (e.g. changed while unloaded) and
+        // its own fresh terrain-facts generation, which could just as easily coincidentally read
+        // back as the same value as before -- irrelevant here, since the bumped revision alone
+        // already guarantees detection regardless of what the generation happens to be.
+        var updates = syncOnce(sharedCache, revisions, planner, chunkKey, chunk, 1L, 777);
+
+        assertEquals(1, updates.size(), "the reload must be detected as a change by the player's "
+            + "planner entry even though that entry was never told about an exit in between");
+        assertFalse(updates.getFirst().reset());
+        assertEquals(List.of(new AtmosphereSyncPlanner.Cell(0, 0, 0, 777, 1000)), updates.getFirst().cells(),
+            "the reloaded chunk's true current data must be delivered, not the stale pre-unload value");
     }
 
     @Test
