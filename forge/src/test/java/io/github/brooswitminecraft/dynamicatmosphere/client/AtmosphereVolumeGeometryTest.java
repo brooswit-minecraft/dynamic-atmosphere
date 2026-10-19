@@ -65,6 +65,28 @@ class AtmosphereVolumeGeometryTest {
             }
         }
     }
+
+    /**
+     * MINECRAFT-432: pins {@code coarseSlices}' pre-existing (if asymmetric) alpha formula --
+     * {@code baseCellSize} is {@link AtmosphereVolumeGeometry#CELL_SIZE} (4), NOT the 16-block
+     * box size/spacing this method otherwise uses for its geometry. A refactor regression that
+     * passed 16 as baseCellSize instead (caught in review) would quarter the computed optical
+     * depth below for identical amount/thickness inputs, since {@code sliceAlpha}'s exponent is
+     * proportional to {@code thickness / baseCellSize}.
+     */
+    @Test
+    void coarseGeometryAlphaUsesCellSizeNotTheSixteenBlockBoxSizeAsBaseCellSize() {
+        // Camera placed so the box's near/far depths (16, 32) land exactly on 16-block grid
+        // planes: one full-thickness (16) slice, with no partial end-slab fraction to account for.
+        var camera = new AtmosphereVolumeGeometry.Point(8, 8, -16);
+        var slices = AtmosphereVolumeGeometry.coarseSlices(0, 0, 0, 500, camera,
+            new AtmosphereVolumeGeometry.Point(0, 0, 1));
+        assertEquals(1, slices.size(),
+            "a camera-aligned 16-block box with 16-block spacing must yield exactly one full-thickness slice");
+        assertEquals(AtmosphereVolumeGeometry.sliceAlpha(500, 16, AtmosphereVolumeGeometry.CELL_SIZE),
+            slices.getFirst().alpha(), 1.0e-6f,
+            "coarse alpha must integrate against CELL_SIZE, not the 16-block box size, as baseCellSize");
+    }
     private static final AtmosphereClientCache.Cell CELL = new AtmosphereClientCache.Cell(0, 0, 0);
     private static final AtmosphereVolumeGeometry.Point FORWARD = new AtmosphereVolumeGeometry.Point(0, 0, 1);
 

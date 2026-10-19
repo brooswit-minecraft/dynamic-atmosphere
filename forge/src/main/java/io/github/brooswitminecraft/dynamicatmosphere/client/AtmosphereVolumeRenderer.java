@@ -225,6 +225,18 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
      */
     private record CelestialFrame(double sunWeight, double moonWeight, float[] sunColor, float[] moonColor) {
         float[] apply(float[] base) {
+            // MINECRAFT-432: this is the only safe place to "skip tint calculations when
+            // configured strength is zero" (celestialTintMaxStrength <= 0 forces both weights to
+            // 0 via CelestialTint#weight's clampedStrength factor, so blend() would be a provable
+            // no-op) -- NOT by short-circuiting celestialFrame's own sampling/smoothing above.
+            // Skipping the sampling/state update there instead would freeze
+            // sunVisibilityState/moonVisibilityState while disabled; a changed occlusion/weather
+            // during that freeze is lost, so re-enabling replays stale visibility through
+            // VISIBILITY_SMOOTHING_STEP instead of tracking what actually changed (caught in
+            // review). Skipping only the blend here, after sampling/state always ran, has no such
+            // risk: it changes nothing about what gets stored, only avoids recomputing a result
+            // already known to equal base.
+            if (sunWeight <= 0 && moonWeight <= 0) return base;
             return CelestialTint.blend(base, sunColor, sunWeight, moonColor, moonWeight);
         }
     }
@@ -297,17 +309,12 @@ public final class AtmosphereVolumeRenderer extends RenderStateShard {
         double maxStrength = config.celestialTintMaxStrength();
         float[] sunColor = unpack(config.sunTintColor());
         float[] moonColor = unpack(config.moonTintColor());
-        if (maxStrength <= 0) {
-            // MINECRAFT-432: strength 0 makes CelestialTint#weight collapse to 0 regardless of
-            // angle/visibility (see its clampedStrength factor), so every ray-casting/horizon/
-            // rain computation below would only ever feed a weight that gets thrown away --
-            // skip all of it. Crucially, this also skips the smoothTowards update: FREEZING
-            // sunVisibilityState/moonVisibilityState here (rather than smoothing them toward a
-            // forced-0 raw sample) means re-enabling a nonzero strength later resumes smoothing
-            // from wherever visibility actually last was, instead of from a state that quietly
-            // decayed to 0 while the tint was configured off.
-            return new CelestialFrame(0, 0, sunColor, moonColor);
-        }
+        // MINECRAFT-432: sampling/smoothing below runs EVERY frame, strength 0 included -- see
+        // CelestialFrame#apply for where strength-0 tint math is actually (and safely) skipped,
+        // and why skipping it HERE instead would corrupt resumed visibility state (caught in
+        // review): an occlusion/weather change while strength is 0 would otherwise go unsampled
+        // and be lost, so re-enabling the tint would replay stale brightness/darkness through
+        // VISIBILITY_SMOOTHING_STEP instead of reflecting what actually changed while disabled.
         double len = Math.sqrt(forward.dot(forward));
         var look = len > 0 && Double.isFinite(len)
             ? new CelestialTint.Vector(forward.x() / len, forward.y() / len, forward.z() / len)

@@ -142,8 +142,16 @@ public final class AtmosphereVolumeGeometry {
 
     public static List<Slice> coarseSlices(int sectionX, int sectionY, int sectionZ, float amount, Point camera,
                                            Point look) {
+        // MINECRAFT-432: baseCellSize is CELL_SIZE here, NOT the 16-block box size/spacing above
+        // -- preserving the pre-existing (if asymmetric) behavior the old nested-overload chain
+        // produced: the removed `boxSlices(x,y,z,size,spacing,amount,camera,look)` 8-arg overload
+        // this called always forwarded CELL_SIZE as baseCellSize regardless of box size, for both
+        // this method and slices() alike. Passing 16 here instead would quarter the computed
+        // optical depth (sliceAlpha's thickness/baseCellSize term) for identical amount/thickness
+        // inputs -- caught in review, since lodSlices (the actual production volume path) never
+        // went through this method and so could not have surfaced the regression itself.
         return boxSlices((double) sectionX * 16, (double) sectionY * 16, (double) sectionZ * 16,
-            16, 16, amount, camera, Basis.of(look), 16, 1, IDENTITY_ALPHA_ADJUST);
+            16, 16, amount, camera, Basis.of(look), CELL_SIZE, 1, IDENTITY_ALPHA_ADJUST);
     }
 
     static List<Slice> lodSlices(AtmosphereLodHierarchy.Volume volume, float amount, Point camera, Point look) {
