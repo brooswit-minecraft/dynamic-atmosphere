@@ -34,6 +34,7 @@ import net.neoforged.neoforge.network.PacketDistributor;
 
 import java.util.Comparator;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -47,6 +48,8 @@ import java.util.UUID;
 import java.util.Optional;
 import java.util.Objects;
 import java.util.function.BiPredicate;
+import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.ToIntFunction;
 import org.slf4j.Logger;
 
@@ -2242,28 +2245,35 @@ final class ForgeAtmospherePrototype {
      * MINECRAFT-437: collects every dirty material across all materials' grids first, grouped by
      * chunk, so a chunk with several materials dirty in the same flush gets exactly one batched
      * {@link ForgeMaterialStorage#writeBatch} publish instead of one {@code write} per material.
+     *
+     * <p>Per material, the actual drain-and-materialize work is delegated to
+     * {@link #collectMaterialDirtyChunkUpdates}, which is the piece
+     * {@code MaterialDirtyChunkCollectorTest} pins directly: exactly one {@link List#copyOf} per
+     * (chunk, material) pair that had at least one dirty cell in this flush, not one per dirty
+     * cell -- mirroring the pre-batching behavior, which collected a per-material
+     * {@code dirtyChunks} set before copying once per changed chunk/material.
      */
     private void flushMaterialDirtyChunks() {
         Map<ChunkKey, Map<AtmosphereMaterial, List<MaterialChunkData.Cell>>> perChunkUpdates = new LinkedHashMap<>();
         for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
             AtmosphereGrid<ResourceKey<Level>> materialGrid = materialGrids.get(material);
-            for (var key : materialGrid.drainDirtyKeys()) {
-                ChunkKey chunkKey = new ChunkKey(key.dimension(), material.chunkCoordinate(key.x()),
-                    material.chunkCoordinate(key.z()));
-                ChunkState state = chunks.get(chunkKey);
-                if (state == null || !state.materialReadable.contains(material)) continue;
-                var persistedCells = state.materialCells.get(material);
-                var cell = materialGrid.get(key);
-                if (cell == null) {
-                    if (persistedCells.remove(key) == null) continue;
-                } else {
-                    var persisted = persistedCells.get(key);
-                    if (persisted != null && persisted.amount() == cell.amount()) continue;
-                    persistedCells.put(key,
-                        new MaterialChunkData.Cell(key.x(), key.y(), key.z(), cell.amount()));
-                }
-                perChunkUpdates.computeIfAbsent(chunkKey, unused -> new EnumMap<>(AtmosphereMaterial.class))
-                    .put(material, List.copyOf(persistedCells.values()));
+            Map<ChunkKey, List<MaterialChunkData.Cell>> updates = collectMaterialDirtyChunkUpdates(
+                materialGrid.drainDirtyKeys(),
+                key -> new ChunkKey(key.dimension(), material.chunkCoordinate(key.x()),
+                    material.chunkCoordinate(key.z())),
+                chunkKey -> {
+                    ChunkState state = chunks.get(chunkKey);
+                    return state != null && state.materialReadable.contains(material);
+                },
+                key -> {
+                    var cell = materialGrid.get(key);
+                    return cell == null ? null : cell.amount();
+                },
+                chunkKey -> chunks.get(chunkKey).materialCells.get(material),
+                List::copyOf);
+            for (var entry : updates.entrySet()) {
+                perChunkUpdates.computeIfAbsent(entry.getKey(), unused -> new EnumMap<>(AtmosphereMaterial.class))
+                    .put(material, entry.getValue());
             }
         }
         for (var entry : perChunkUpdates.entrySet()) {
@@ -2281,11 +2291,62 @@ final class ForgeAtmospherePrototype {
         }
     }
 
+    /**
+     * MINECRAFT-437: the per-material dirty-key drain and per-touched-chunk materialization at
+     * the heart of {@link #flushMaterialDirtyChunks()}, extracted as a standalone, dimension-type-
+     * agnostic method so {@code MaterialDirtyChunkCollectorTest} can pin its {@code materialize}
+     * (production: {@link List#copyOf}) call cardinality with plain maps -- no {@code ChunkState},
+     * {@code AtmosphereGrid}, or {@code LevelChunk} required.
+     *
+     * <p>For each key in {@code dirtyKeys}: resolves its chunk via {@code toChunkKey}, skips it if
+     * {@code isTrackedAndReadable} rejects that chunk, then updates the chunk's persisted-cells map
+     * (obtained via {@code persistedCellsFor}, which must return a stable, mutable, non-null map
+     * for any accepted chunk key) exactly as the inline loop previously did: remove the key if
+     * {@code currentAmount} returns {@code null}, skip if the stored amount is already equal to the
+     * live amount, otherwise upsert it. Only the <em>chunk key</em> of each touched dirty key is
+     * recorded while draining -- never the persisted-cells snapshot itself. Once every dirty key has
+     * been drained, each distinct touched chunk is visited exactly once to call
+     * {@code materialize} on its persisted-cells map and record the result -- so {@code materialize}
+     * runs exactly once per (chunk) that had at least one net change from this batch of dirty keys,
+     * regardless of how many of that chunk's keys were dirty.
+     */
+    static <D> Map<ChunkKey, List<MaterialChunkData.Cell>> collectMaterialDirtyChunkUpdates(
+        Iterable<AtmosphereGrid.CellKey<D>> dirtyKeys,
+        Function<AtmosphereGrid.CellKey<D>, ChunkKey> toChunkKey,
+        Predicate<ChunkKey> isTrackedAndReadable,
+        Function<AtmosphereGrid.CellKey<D>, Integer> currentAmount,
+        Function<ChunkKey, Map<AtmosphereGrid.CellKey<D>, MaterialChunkData.Cell>> persistedCellsFor,
+        Function<Collection<MaterialChunkData.Cell>, List<MaterialChunkData.Cell>> materialize
+    ) {
+        Set<ChunkKey> touchedChunks = new LinkedHashSet<>();
+        for (AtmosphereGrid.CellKey<D> key : dirtyKeys) {
+            ChunkKey chunkKey = toChunkKey.apply(key);
+            if (!isTrackedAndReadable.test(chunkKey)) continue;
+            Map<AtmosphereGrid.CellKey<D>, MaterialChunkData.Cell> persistedCells = persistedCellsFor.apply(chunkKey);
+            Integer amount = currentAmount.apply(key);
+            if (amount == null) {
+                if (persistedCells.remove(key) == null) continue;
+            } else {
+                var persisted = persistedCells.get(key);
+                if (persisted != null && persisted.amount() == amount) continue;
+                persistedCells.put(key, new MaterialChunkData.Cell(key.x(), key.y(), key.z(), amount));
+            }
+            touchedChunks.add(chunkKey);
+        }
+        Map<ChunkKey, List<MaterialChunkData.Cell>> result = new LinkedHashMap<>();
+        for (ChunkKey chunkKey : touchedChunks) {
+            result.put(chunkKey, materialize.apply(persistedCellsFor.apply(chunkKey).values()));
+        }
+        return result;
+    }
+
     private static ChunkKey chunkKey(ServerLevel level, LevelChunk chunk) {
         return new ChunkKey(level.dimension(), chunk.getPos().x, chunk.getPos().z);
     }
 
-    private record ChunkKey(ResourceKey<Level> dimension, int x, int z) {
+    // Package-visible (not private) solely so MaterialDirtyChunkCollectorTest -- which pins the
+    // List.copyOf cardinality of collectMaterialDirtyChunkUpdates below -- can name this type.
+    record ChunkKey(ResourceKey<Level> dimension, int x, int z) {
     }
 
     static final class DumpReport {

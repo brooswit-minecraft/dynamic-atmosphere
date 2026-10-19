@@ -1,10 +1,16 @@
 package io.github.brooswitminecraft.dynamicatmosphere;
 
 import net.minecraft.core.HolderLookup;
+import net.minecraft.core.MappedRegistry;
+import net.minecraft.core.RegistrationInfo;
+import net.minecraft.core.Registry;
+import net.minecraft.core.WritableRegistry;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.chunk.ChunkAccess;
-import net.minecraft.world.level.chunk.LevelChunk;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.attachment.AttachmentType;
 import net.neoforged.neoforge.attachment.IAttachmentHolder;
@@ -21,10 +27,14 @@ import java.util.function.Supplier;
 public final class ForgeMaterialStorage {
     private record Snapshot(Map<AtmosphereMaterial, MaterialChunkData.StoredMaterial> materials) { }
 
+    private static final String ATTACHMENT_NAME = "materials";
     private static final DeferredRegister<AttachmentType<?>> TYPES =
         DeferredRegister.create(NeoForgeRegistries.ATTACHMENT_TYPES, DynamicAtmosphereMod.MODID);
-    private static final Supplier<AttachmentType<Snapshot>> DATA = TYPES.register("materials", () ->
-        AttachmentType.builder(() -> new Snapshot(Map.of()))
+    private static final Supplier<AttachmentType<Snapshot>> DATA =
+        TYPES.register(ATTACHMENT_NAME, ForgeMaterialStorage::buildAttachmentType);
+
+    private static AttachmentType<Snapshot> buildAttachmentType() {
+        return AttachmentType.builder(() -> new Snapshot(Map.of()))
             .serialize(new IAttachmentSerializer<CompoundTag, Snapshot>() {
                 @Override
                 public Snapshot read(IAttachmentHolder holder, CompoundTag tag, HolderLookup.Provider provider) {
@@ -60,18 +70,59 @@ public final class ForgeMaterialStorage {
                     }
                     return root;
                 }
-            }).build());
+            }).build();
+    }
 
     public static void register(IEventBus bus) { TYPES.register(bus); }
 
-    public static List<MaterialChunkData.Cell> read(LevelChunk chunk, AtmosphereMaterial material) {
+    /**
+     * Test-only. A plain unit test never fires NeoForge's mod-loading {@code RegisterEvent}, so
+     * {@link #DATA}'s backing entry in {@code NeoForgeRegistries.ATTACHMENT_TYPES} is never
+     * populated the way {@link #register} (wired to the real mod event bus) would populate it in
+     * production -- without an entry there, NeoForge's dev-only attachment-type validation throws
+     * before {@link #read}/{@link #write}/{@link #writeBatch} can run against a real chunk. This
+     * directly inserts the exact same attachment type {@link #buildAttachmentType} builds (the
+     * genuine default/serializer logic production uses) at the identical resource key production
+     * registers it under, so {@code DATA.get()} resolves to it exactly as it would after a real
+     * {@code register(bus)} call. {@code DeferredHolder.get()} additionally looks its backing
+     * registry up by name inside {@code BuiltInRegistries.REGISTRY} (the registry-of-registries);
+     * a full server normally populates that entry via a {@code NewRegistryEvent} this test never
+     * fires either, so that entry is seeded too. Idempotent; production code never calls this.
+     */
+    static void registerForTesting() {
+        registerRegistryOfRegistriesEntryIfAbsent();
+        ResourceLocation id = ResourceLocation.fromNamespaceAndPath(DynamicAtmosphereMod.MODID, ATTACHMENT_NAME);
+        ResourceKey<AttachmentType<?>> key = ResourceKey.create(NeoForgeRegistries.Keys.ATTACHMENT_TYPES, id);
+        if (NeoForgeRegistries.ATTACHMENT_TYPES.containsKey(id)) return;
+        @SuppressWarnings("unchecked")
+        var registry = (WritableRegistry<AttachmentType<?>>) (Registry<?>) NeoForgeRegistries.ATTACHMENT_TYPES;
+        registry.register(key, buildAttachmentType(), RegistrationInfo.BUILT_IN);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void registerRegistryOfRegistriesEntryIfAbsent() {
+        ResourceLocation registryId = NeoForgeRegistries.Keys.ATTACHMENT_TYPES.location();
+        if (BuiltInRegistries.REGISTRY.containsKey(registryId)) return;
+        // BuiltInRegistries.REGISTRY itself is frozen by the time Bootstrap.bootStrap() returns
+        // (the same bootstrap this test suite's @BeforeAll already relies on, mirroring
+        // ForgeCapacityBlockClassifierTest), so a plain register() throws; briefly unfreeze it
+        // to seed this one entry, then restore its frozen state.
+        var rootRegistry = (MappedRegistry<Registry<?>>) (Registry<?>) BuiltInRegistries.REGISTRY;
+        ResourceKey<Registry<?>> registryKey = (ResourceKey<Registry<?>>) (ResourceKey<?>)
+            ResourceKey.create(BuiltInRegistries.REGISTRY.key(), registryId);
+        rootRegistry.unfreeze();
+        rootRegistry.register(registryKey, NeoForgeRegistries.ATTACHMENT_TYPES, RegistrationInfo.BUILT_IN);
+        rootRegistry.freeze();
+    }
+
+    public static List<MaterialChunkData.Cell> read(ChunkAccess chunk, AtmosphereMaterial material) {
         Snapshot snapshot = chunk.getExistingDataOrNull(DATA.get());
         MaterialChunkData.StoredMaterial stored = snapshot == null ? null : snapshot.materials().get(material);
         requireReadable(material, stored);
         return stored == null ? List.of() : stored.cells();
     }
 
-    public static void write(LevelChunk chunk, AtmosphereMaterial material, List<MaterialChunkData.Cell> cells) {
+    public static void write(ChunkAccess chunk, AtmosphereMaterial material, List<MaterialChunkData.Cell> cells) {
         Snapshot previous = chunk.getExistingDataOrNull(DATA.get());
         MaterialChunkData.StoredMaterial oldMaterial = previous == null ? null : previous.materials().get(material);
         requireReadable(material, oldMaterial);
@@ -101,7 +152,7 @@ public final class ForgeMaterialStorage {
      *     required — without that failure disturbing any other material in the same batch.
      */
     public static Map<AtmosphereMaterial, IllegalStateException> writeBatch(
-            LevelChunk chunk, Map<AtmosphereMaterial, List<MaterialChunkData.Cell>> updates) {
+            ChunkAccess chunk, Map<AtmosphereMaterial, List<MaterialChunkData.Cell>> updates) {
         if (updates.isEmpty()) return Map.of();
         Snapshot previous = chunk.getExistingDataOrNull(DATA.get());
         Map<AtmosphereMaterial, MaterialChunkData.StoredMaterial> previousMaterials =
