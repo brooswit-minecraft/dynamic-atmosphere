@@ -106,11 +106,14 @@ class ForgeAtmospherePrototypeCachedChunkCellsTest {
      * MINECRAFT-436 review: models the exact bug a chunk-replacement incarnation can produce --
      * a stale cached entry remains reachable under a (revision, generation) pair that
      * coincidentally matches the NEW incarnation's own starting values, even though the
-     * underlying data is for a completely different chunk instance with different cells. This is
-     * exactly why {@code ensureImported}'s replacement branch unconditionally evicts the cache
-     * entry (via {@code evictChunkCellCaches}) instead of trusting revision/generation alone to
-     * detect the swap: removal forces a rebuild regardless of what the (possibly coincidentally
-     * matching) revision and generation values are.
+     * underlying data is for a completely different chunk instance with different cells. This
+     * proves eviction forces THIS shared cache to rebuild; it does not by itself prove an
+     * already-subscribed player's own retained planner entry is also invalidated -- that needs
+     * the revision to actually change value, not just be cleared/evicted, which is why production
+     * uses {@code invalidateChunkCellCachesForReplacement} (bumps the revision) rather than {@code
+     * evictChunkCellCaches} (clears it) for a replacement. See {@code
+     * ChunkIncarnationInvalidationTest} for the full shared-cache-plus-planner story, including
+     * the exact case where clearing alone is insufficient.
      */
     @Test
     void evictingAnEntryForcesARebuildEvenWithIdenticalRevisionAndGenerationAsBefore() {

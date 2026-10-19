@@ -2520,15 +2520,19 @@ final class ForgeAtmospherePrototype {
             // incarnation with its own fresh ForgeTerrainFacts attachment (generation restarts),
             // and its persisted cells are restored directly into the new ChunkState.cells -- so
             // the very next flushDirtyChunks sees persisted == live and never bumps
-            // amountRevision for this key. Equal (amountRevision, terrainGeneration) across two
-            // different incarnations could otherwise reuse a stale cached cell list, including
-            // for a periodic full snapshot. Evict unconditionally on replacement so the next
-            // access always rebuilds against the new incarnation, never relying on revision/
-            // generation coincidentally differing. (A later unload of the now-replaced OLD
-            // ChunkState never reaches this path at all -- chunks.get(key) is already the NEW
-            // state by then and fails state.chunk == chunk -- so this is the only place that can
-            // catch a replacement; it is not optional/best-effort.)
-            evictChunkCellCaches(key);
+            // amountRevision for this key either. Equal (amountRevision, terrainGeneration)
+            // across two different incarnations could otherwise reuse a stale cached cell list,
+            // including for a periodic full snapshot -- and (fourth round) merely clearing the
+            // revision back to its implicit default is not enough on its own, since a per-player
+            // planner entry already retained at that same default would then see no change at
+            // all. invalidateChunkCellCachesForReplacement bumps the revision (guaranteed
+            // different from before) rather than just clearing it, so every consumer -- the
+            // shared cache here AND each subscribed player's own retained planner state --
+            // detects the incarnation swap, not just this cache. (A later unload of the
+            // now-replaced OLD ChunkState never reaches this path at all -- chunks.get(key) is
+            // already the NEW state by then and fails state.chunk == chunk -- so this is the only
+            // place that can catch a replacement; it is not optional/best-effort.)
+            invalidateChunkCellCachesForReplacement(key);
         }
         ChunkState state = new ChunkState(chunk);
         chunks.put(key, state);
@@ -2680,12 +2684,13 @@ final class ForgeAtmospherePrototype {
     }
 
     /**
-     * MINECRAFT-436 review: drops {@code key}'s entry from every channel's cross-tick cell cache
-     * and revision map. Called both on a normal chunk unload and on {@code ensureImported}
-     * replacing a different {@code LevelChunk} incarnation at the same key -- the latter can
-     * otherwise leave a stale cached cell list reachable under a coincidentally-matching
-     * (amountRevision, terrainGeneration) pair from the old incarnation (see {@code
-     * ensureImported}'s doc at its replacement branch).
+     * MINECRAFT-436 review: drops {@code key}'s entry from every channel's shared cross-tick cell
+     * cache and revision map entirely. Safe for a normal chunk unload: nothing can still be
+     * comparing against a retained revision for a chunk no player can be subscribed to any more
+     * (an unload only happens once nothing references the chunk), and dropping the map entries
+     * (rather than leaving them forever) keeps these maps from growing unboundedly over a long
+     * server session as players explore. NOT used for a chunk-incarnation replacement -- see
+     * {@link #invalidateChunkCellCachesForReplacement}, which that path needs instead.
      */
     private void evictChunkCellCaches(ChunkKey key) {
         amountRevision.remove(key);
@@ -2694,6 +2699,33 @@ final class ForgeAtmospherePrototype {
         smokeChunkCellCache.remove(key);
         for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
             materialAmountRevision.get(material).remove(key);
+            materialChunkCellCaches.get(material).remove(key);
+        }
+    }
+
+    /**
+     * MINECRAFT-436 review (fourth round): a chunk-incarnation replacement must guarantee a
+     * revision DIFFERENT from whatever it was before -- never merely cleared back to the same
+     * implicit default (0) a value could already coincidentally be at, and never merely evicted
+     * from the shared cell cache alone. Removing (not bumping) the revision only fixes the
+     * shared cache's own freshness check; each subscribed player's own retained planner entry
+     * (in {@code AtmosphereSyncPlanner}/{@code SmokeSyncPlanner}) is compared against whatever
+     * revision this method feeds into the NEXT {@code planChunks} call for that chunk, and a
+     * revision that happens to read back as the SAME value the player's retained entry already
+     * has (e.g. both 0, if this chunk was never previously found amount-dirty) would cause that
+     * player's planner to wrongly skip the chunk, leaving it stale until some unrelated later
+     * change or a full reset. Monotonically incrementing (never resetting) the revision instead
+     * guarantees every consumer -- the shared cache here, and every subscribed player's planner
+     * state, however many ticks it has been since they last synced -- detects the incarnation
+     * swap and re-diffs.
+     */
+    private void invalidateChunkCellCachesForReplacement(ChunkKey key) {
+        amountRevision.merge(key, 1L, Long::sum);
+        chunkCellCache.remove(key);
+        smokeAmountRevision.merge(key, 1L, Long::sum);
+        smokeChunkCellCache.remove(key);
+        for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
+            materialAmountRevision.get(material).merge(key, 1L, Long::sum);
             materialChunkCellCaches.get(material).remove(key);
         }
     }
