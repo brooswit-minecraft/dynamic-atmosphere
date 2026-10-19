@@ -149,6 +149,54 @@ class TerrainFactsCacheTest {
         assertThrows(IllegalArgumentException.class, () -> cache.put(0, 0, 0, 65, false));
     }
 
+    /**
+     * MINECRAFT-436: {@code generation()} is the cheap, chunk-wide "did capacity possibly
+     * change" signal a cross-tick cell-snapshot cache (outside this class) relies on instead of
+     * re-deriving capacity for every cell to find out. It must bump on every invalidating block
+     * change and on {@code clear()}, and must NOT bump on a `put` (a scan result being recorded,
+     * not a change) or on a block change that doesn't actually alter classification -- otherwise
+     * that outside cache would invalidate far more often than genuinely needed.
+     */
+    @Test
+    void generationBumpsOnlyOnActualInvalidationOrClear() {
+        var cache = new TerrainFactsCache(-64, 320);
+        long initial = cache.generation();
+
+        // Recording a scan result is not itself a change; must not bump.
+        cache.put(0, 0, 0, 64, false);
+        assertEquals(initial, cache.generation(), "put() records a scan result, not an invalidation");
+
+        // A block change that doesn't alter either classification must not bump.
+        cache.blockChanged(0, 0, 0, true, true, false, false);
+        assertEquals(initial, cache.generation(), "a no-op block change must not bump generation");
+
+        // A real invalidating change must bump exactly once.
+        cache.blockChanged(0, 0, 0, true, false, false, false);
+        long afterFirstChange = cache.generation();
+        assertTrue(afterFirstChange > initial, "a real invalidating block change must bump generation");
+
+        // Another real change bumps again.
+        cache.put(0, 0, 0, 64, false);
+        cache.blockChanged(0, 0, 0, true, false, false, true);
+        assertTrue(cache.generation() > afterFirstChange,
+            "each distinct invalidating change must bump generation again, not just the first one");
+
+        // clear() is itself treated as an invalidation (e.g. unload/reload, delete-material-data).
+        long beforeClear = cache.generation();
+        cache.clear();
+        assertTrue(cache.generation() > beforeClear, "clear() must also bump generation");
+    }
+
+    @Test
+    void generationNeverBumpsForAnOutOfRangeBlockChange() {
+        var cache = new TerrainFactsCache(-64, 320);
+        long initial = cache.generation();
+        // Far below the chunk's height range: index() returns -1, so there is nothing to
+        // invalidate and nothing for the shared cross-tick cache to react to.
+        cache.blockChanged(0, -1000, 0, true, false);
+        assertEquals(initial, cache.generation(), "a block change outside this chunk's tracked range must not bump");
+    }
+
     private static int read(TerrainFactsCache cache, int x, int y, int z, int terrainAir, AtomicInteger scans) {
         int known = cache.emptyBlockCount(x, y, z);
         if (known >= 0) return known;
