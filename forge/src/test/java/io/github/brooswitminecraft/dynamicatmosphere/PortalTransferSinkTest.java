@@ -179,6 +179,70 @@ class PortalTransferSinkTest {
     }
 
     @Test
+    void windowReturnsTheWholeListUnchangedWhenItAlreadyFitsTheBudget() {
+        var ordered = List.of("a", "b", "c");
+        var result = PortalTransferSink.window(ordered, 0, 10);
+        assertEquals(ordered, result.selected());
+        assertEquals(0, result.nextStart());
+    }
+
+    @Test
+    void windowSelectsAtMostMaxPerCallAndReportsWhereToResume() {
+        var ordered = List.of("a", "b", "c", "d", "e");
+        var first = PortalTransferSink.window(ordered, 0, 2);
+        assertEquals(List.of("a", "b"), first.selected());
+        assertEquals(2, first.nextStart());
+
+        var second = PortalTransferSink.window(ordered, first.nextStart(), 2);
+        assertEquals(List.of("c", "d"), second.selected());
+        assertEquals(4, second.nextStart());
+    }
+
+    @Test
+    void windowWrapsAroundSoEveryElementIsEventuallyCoveredWithoutStarvation() {
+        var ordered = List.of("a", "b", "c", "d", "e");
+        var seen = new java.util.HashSet<String>();
+        int cursor = 0;
+        for (int i = 0; i < 3; i++) {
+            var result = PortalTransferSink.window(ordered, cursor, 2);
+            seen.addAll(result.selected());
+            cursor = result.nextStart();
+        }
+        assertEquals(java.util.Set.copyOf(ordered), seen);
+    }
+
+    @Test
+    void windowThrowsOnNonPositiveBudget() {
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+            () -> PortalTransferSink.window(List.of("a"), 0, 0));
+    }
+
+    @Test
+    void knownPositionsWindowedOnlyTouchesTheSelectedChunkEntriesAndCoversEverythingAcrossCalls() {
+        var a = new BlockPos(1, 64, 1);
+        var b = new BlockPos(2, 64, 2);
+        var c = new BlockPos(3, 64, 3);
+        var registry = registryOf(Level.END, Map.of(
+            new ChunkPos(0, 0), Set.of(a),
+            new ChunkPos(1, 0), Set.of(b),
+            new ChunkPos(2, 0), Set.of(c)));
+        var first = PortalTransferSink.knownPositionsWindowed(registry, Level.END, 0, 2);
+        assertEquals(2, first.positions().size(), "only the windowed chunk entries are touched, not all three");
+        var second = PortalTransferSink.knownPositionsWindowed(registry, Level.END, first.nextStartIndex(), 2);
+        var coveredAcrossBothCalls = new java.util.HashSet<>(first.positions());
+        coveredAcrossBothCalls.addAll(second.positions());
+        assertEquals(Set.of(a, b, c), coveredAcrossBothCalls,
+            "continuing from the returned cursor eventually covers every known position");
+    }
+
+    @Test
+    void knownPositionsWindowedReturnsEmptyForAnUnknownDimensionOrEmptyRegistry() {
+        var registry = registryOf(Level.NETHER, Map.of(new ChunkPos(0, 0), Set.of(new BlockPos(1, 64, 1))));
+        assertTrue(PortalTransferSink.knownPositionsWindowed(registry, Level.END, 0, 10).positions().isEmpty());
+        assertTrue(PortalTransferSink.knownPositionsWindowed(Map.of(), Level.NETHER, 0, 10).positions().isEmpty());
+    }
+
+    @Test
     void acceptedAmountMeasuresTheDestinationsOwnBeforeAfterDeltaNotThePlannedAmount() {
         // A near-full destination can clamp an emit short of what was requested while
         // DynamicAtmosphereMod#emitMaterial still reports success for the partial addition.

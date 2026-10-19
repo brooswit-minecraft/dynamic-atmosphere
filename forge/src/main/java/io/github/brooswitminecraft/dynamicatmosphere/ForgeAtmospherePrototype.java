@@ -7,7 +7,6 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.SectionPos;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -127,17 +126,33 @@ final class ForgeAtmospherePrototype {
         createMaterialProducerHooks();
     private final Map<AtmosphereMaterial, Long> nextMaterialProducerTicks = createMaterialProducerTicks();
     /**
-     * MINECRAFT-435: at most one {@link PortalChunkScanner} scan per visited chunk per tick,
-     * shared by the OBSIDIAN_POWDER and NETHER_GAS producer hooks below -- both need the same
-     * chunk's Nether portal positions, on the identical global producer cadence, and previously
-     * paid for two independent section/block scans of it. Cleared every tick in {@link #tick};
-     * never read across ticks, so a stale entry left behind by an unvisited chunk is harmless.
+     * MINECRAFT-435: at most one {@link PortalChunkScanner} scan actually completes per visited
+     * chunk per tick, shared by the OBSIDIAN_POWDER and NETHER_GAS producer hooks below -- both
+     * need the same chunk's Nether/End portal positions, on whichever of their (independent)
+     * cadences visits the chunk first. Cleared every tick in {@link #tick}; never read across
+     * ticks, so a stale entry left behind by an unvisited chunk is harmless.
      */
     private final Map<ChunkKey, PortalChunkScanner.Scan> portalScanCache = new HashMap<>();
+    /**
+     * MINECRAFT-435: in-progress, resumable {@link PortalChunkScanner} state for a chunk whose
+     * scan has not yet exhausted every section -- unlike {@link #portalScanCache}, this persists
+     * ACROSS ticks (never cleared per-tick) until that chunk's scan finally completes, since the
+     * whole point is to spread a dense chunk's section/block scan over several calls instead of
+     * paying for it synchronously in one. Cleared on chunk unload/replacement and when a producer
+     * schedule drops a stale candidate (see {@link #clearScanCursors}).
+     */
+    private final Map<ChunkKey, PortalChunkScanner.Progress> portalScanProgress = new HashMap<>();
+    /** MINECRAFT-435: same resumable-across-ticks shape as {@link #portalScanProgress}, for glowstone. */
+    private final Map<ChunkKey, Integer> glowstoneScanCursor = new HashMap<>();
+    /** MINECRAFT-435: same resumable-across-ticks shape as {@link #portalScanProgress}, for fire/smoke. */
+    private final Map<ChunkKey, Integer> fireScanCursor = new HashMap<>();
 
     ForgeAtmospherePrototype() {
         registerMaterialProducer(AtmosphereMaterial.OBSIDIAN_POWDER, this::sampleObsidianPowderChunk);
-        registerMaterialProducer(AtmosphereMaterial.OBSIDIAN_POWDER, this::sampleEndEnderGasChunk);
+        registerMaterialProducer(AtmosphereMaterial.OBSIDIAN_POWDER, (level, chunk) -> {
+            sampleEndEnderGasChunk(level, chunk);
+            return true;
+        });
         registerMaterialProducer(AtmosphereMaterial.VOID_GAS, (level, chunk) -> {
             voidGasGameplay.onLoadedChunkProducerCheck(level, chunk);
             int x = chunk.getPos().getMinBlockX() + level.random.nextInt(16);
@@ -145,15 +160,18 @@ final class ForgeAtmospherePrototype {
             int y = level.getMinBuildHeight() + level.random.nextInt(level.getHeight());
             BlockPos pos = new BlockPos(x, y, z);
             voidGasGameplay.onPassiveBlockSample(level, pos, chunk.getBlockState(pos));
+            return true;
         });
-        registerMaterialProducer(AtmosphereMaterial.SLIME, slimeGameplay::onLoadedChunkProducerCheck);
-        registerMaterialProducer(AtmosphereMaterial.NETHER_GAS, (level, chunk) -> {
-            netherGasGameplay.onLoadedChunkProducerCheck(level, chunk);
-            var scan = scanPortalsOnce(level, chunk);
-            portalTransferSink.onLoadedChunkProducerCheck(level, chunk, scan.netherPortals(), scan.endPortals());
+        registerMaterialProducer(AtmosphereMaterial.SLIME, (level, chunk) -> {
+            slimeGameplay.onLoadedChunkProducerCheck(level, chunk);
+            return true;
         });
+        registerMaterialProducer(AtmosphereMaterial.NETHER_GAS, this::sampleNetherGasAndPortalTransfer);
         registerMaterialProducer(AtmosphereMaterial.GLOW_GAS, this::sampleGlowGasChunk);
-        registerMaterialProducer(AtmosphereMaterial.NETHER_FOG, this::sampleNetherFogChunk);
+        registerMaterialProducer(AtmosphereMaterial.NETHER_FOG, (level, chunk) -> {
+            sampleNetherFogChunk(level, chunk);
+            return true;
+        });
     }
 
     private static Map<AtmosphereMaterial, AtmosphereGrid<ResourceKey<Level>>> createMaterialGrids() {
@@ -290,6 +308,9 @@ final class ForgeAtmospherePrototype {
                 ForgeMaterialCapacity.clear(chunk);
                 ChunkKey key = chunkKey(level, chunk);
                 pendingLoads.remove(key, chunk);
+                // MINECRAFT-435: an in-progress resumable section scan for this position must
+                // never resume against whatever chunk instance loads here next.
+                clearScanCursors(key);
                 ChunkState state = chunks.get(key);
                 if (state != null && state.chunk == chunk) {
                     flushDirtyChunks();
@@ -372,6 +393,9 @@ final class ForgeAtmospherePrototype {
         chunks.clear();
         pendingLoads.clear();
         portalScanCache.clear();
+        portalScanProgress.clear();
+        glowstoneScanCursor.clear();
+        fireScanCursor.clear();
         producerSchedule.clear();
         fanSchedule.clear();
         smokeProducerSchedule.clear();
@@ -613,9 +637,26 @@ final class ForgeAtmospherePrototype {
 
     private void processSmokeProducerChunks(MinecraftServer server) {
         for (ChunkKey key : smokeProducerSchedule.poll(tuning().runtime().maxSmokeProducerChunksPerTick(),
-            candidate -> isSmokeProducerChunkActive(server, candidate))) {
-            sampleFireSmoke(server, key);
+            candidate -> {
+                boolean active = isSmokeProducerChunkActive(server, candidate);
+                if (!active) clearScanCursors(candidate);
+                return active;
+            })) {
+            if (!sampleFireSmoke(server, key)) smokeProducerSchedule.requeue(key);
         }
+    }
+
+    /**
+     * MINECRAFT-435: drops any in-progress resumable section-scan state for a chunk the
+     * scheduler has just determined is no longer a valid candidate (unloaded, or replaced by a
+     * different chunk instance at the same position) -- a stale cursor left behind would
+     * otherwise resume against the WRONG chunk instance's content the next time this position
+     * becomes a candidate again, silently skipping sections that were never actually scanned.
+     */
+    private void clearScanCursors(ChunkKey key) {
+        glowstoneScanCursor.remove(key);
+        fireScanCursor.remove(key);
+        portalScanProgress.remove(key);
     }
 
     private boolean isSmokeProducerChunkActive(MinecraftServer server, ChunkKey key) {
@@ -647,14 +688,20 @@ final class ForgeAtmospherePrototype {
         for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
             List<AtmosphereMaterialProducer> hooks = List.copyOf(materialProducerHooks.get(material));
             if (hooks.isEmpty()) continue;
-            for (ChunkKey key : materialProducerSchedules.get(material).poll(perMaterialBudget,
-                candidate -> isMaterialProducerChunkActive(server, candidate, material))) {
+            var schedule = materialProducerSchedules.get(material);
+            for (ChunkKey key : schedule.poll(perMaterialBudget, candidate -> {
+                boolean active = isMaterialProducerChunkActive(server, candidate, material);
+                if (!active) clearScanCursors(candidate);
+                return active;
+            })) {
                 ServerLevel level = server.getLevel(key.dimension());
                 ChunkState state = chunks.get(key);
                 if (level == null || state == null) continue;
+                boolean allDone = true;
                 for (AtmosphereMaterialProducer hook : hooks) {
-                    hook.sampleLoadedChunk(level, state.chunk);
+                    if (!hook.sampleLoadedChunk(level, state.chunk)) allDone = false;
                 }
+                if (!allDone) schedule.requeue(key);
             }
         }
     }
@@ -664,38 +711,65 @@ final class ForgeAtmospherePrototype {
             .add(Objects.requireNonNull(producer, "producer"));
     }
 
-    private void sampleObsidianPowderChunk(ServerLevel level, LevelChunk chunk) {
-        obsidianPowderGameplay.onLoadedChunkProducerCheck(level, scanPortalsOnce(level, chunk).netherPortals());
+    /**
+     * MINECRAFT-435: the passive block sample is a single random position per call, unrelated to
+     * portal scanning; it is intentionally left ungated by {@link #scanPortalsBounded} so it keeps
+     * running every call rather than needing its own separate "have I already sampled for this
+     * chunk's current (possibly multi-call) portal scan" bookkeeping. The one consequence is a
+     * chunk whose portal scan takes N calls to exhaust gets its passive sample re-rolled N times
+     * instead of once -- a small, bounded increase in sampling frequency only for portal-dense
+     * chunks, not a change to the per-sample odds or amounts themselves.
+     */
+    private boolean sampleObsidianPowderChunk(ServerLevel level, LevelChunk chunk) {
         int x = chunk.getPos().getMinBlockX() + level.random.nextInt(16);
         int z = chunk.getPos().getMinBlockZ() + level.random.nextInt(16);
         int y = level.getMinBuildHeight()
             + level.random.nextInt(level.getMaxBuildHeight() - level.getMinBuildHeight());
         BlockPos sample = new BlockPos(x, y, z);
         obsidianPowderGameplay.onPassiveBlockSample(level, sample, chunk.getBlockState(sample));
+        Optional<PortalChunkScanner.Scan> scan = scanPortalsBounded(level, chunk);
+        if (scan.isEmpty()) return false;
+        obsidianPowderGameplay.onLoadedChunkProducerCheck(level, scan.get().netherPortals());
+        return true;
     }
 
     /**
-     * MINECRAFT-1 (B2): palette-gates loaded sections; only sections actually containing
-     * glowstone pay the bounded 4096-block scan. Emits a fixed amount per glowstone block found.
+     * MINECRAFT-435: ambient Netherrack sampling runs every call (unrelated to portal scanning,
+     * O(1) single-sample work, same re-roll-on-resumption caveat as {@link
+     * #sampleObsidianPowderChunk}'s passive sample); the portal leg only fires once {@link
+     * #scanPortalsBounded} has a completed scan for this chunk, which can take more than one call
+     * for a chunk with many matching sections.
      */
-    private void sampleGlowGasChunk(ServerLevel level, LevelChunk chunk) {
+    private boolean sampleNetherGasAndPortalTransfer(ServerLevel level, LevelChunk chunk) {
+        netherGasGameplay.onLoadedChunkProducerCheck(level, chunk);
+        Optional<PortalChunkScanner.Scan> scan = scanPortalsBounded(level, chunk);
+        if (scan.isEmpty()) return false;
+        portalTransferSink.onLoadedChunkProducerCheck(level, chunk, scan.get().netherPortals(), scan.get().endPortals());
+        return true;
+    }
+
+    /**
+     * MINECRAFT-1 (B2) / MINECRAFT-435: palette-gates loaded sections; only sections actually
+     * containing glowstone pay the scan, and at most {@link
+     * DynamicAtmosphereServerConfig.RuntimeTuning#maxScanSectionsPerCall} of those are walked per
+     * call -- a chunk with more matching sections than that resumes on a later call instead of
+     * scanning them all synchronously. Emits a fixed amount per glowstone block found.
+     */
+    private boolean sampleGlowGasChunk(ServerLevel level, LevelChunk chunk) {
         int amount = DynamicAtmosphereServerConfig.snapshot().glowGas().glowstoneEmission();
-        LevelChunkSection[] sections = chunk.getSections();
-        for (int sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
-            LevelChunkSection section = sections[sectionIndex];
-            if (!section.maybeHas(block -> block.is(Blocks.GLOWSTONE))) continue;
-            int sectionY = SectionPos.sectionToBlockCoord(chunk.getSectionYFromSectionIndex(sectionIndex));
-            for (int localY = 0; localY < 16; localY++) {
-                for (int localZ = 0; localZ < 16; localZ++) {
-                    for (int localX = 0; localX < 16; localX++) {
-                        if (!section.getBlockState(localX, localY, localZ).is(Blocks.GLOWSTONE)) continue;
-                        BlockPos pos = new BlockPos(chunk.getPos().getMinBlockX() + localX,
-                            sectionY + localY, chunk.getPos().getMinBlockZ() + localZ);
-                        emitMaterial(level, AtmosphereMaterial.GLOW_GAS, pos, amount);
-                    }
-                }
-            }
+        ChunkKey key = chunkKey(level, chunk);
+        int fromSection = glowstoneScanCursor.getOrDefault(key, 0);
+        var source = LevelChunkSectionSource.of(chunk, state -> state.is(Blocks.GLOWSTONE));
+        var result = BoundedChunkScanner.scan(source, fromSection, tuning().runtime().maxScanSectionsPerCall(),
+            state -> state.is(Blocks.GLOWSTONE),
+            (sectionIndex, blockIndex, state) -> emitMaterial(level, AtmosphereMaterial.GLOW_GAS,
+                LevelChunkSectionSource.positionOf(chunk, sectionIndex, blockIndex), amount));
+        if (result.exhausted()) {
+            glowstoneScanCursor.remove(key);
+            return true;
         }
+        glowstoneScanCursor.put(key, result.nextSection());
+        return false;
     }
 
     /**
@@ -888,34 +962,35 @@ final class ForgeAtmospherePrototype {
             && level.getChunkSource().getChunkNow(key.x(), key.z()) == state.chunk;
     }
 
-    /** Palette-gates loaded sections; only sections containing actual fire pay the bounded 4096-block scan. */
-    private void sampleFireSmoke(MinecraftServer server, ChunkKey key) {
+    /**
+     * MINECRAFT-435: palette-gates loaded sections; only sections containing actual fire pay the
+     * scan, and at most {@link DynamicAtmosphereServerConfig.RuntimeTuning#maxScanSectionsPerCall}
+     * of those are walked per call -- a chunk with more matching sections than that resumes on a
+     * later call instead of scanning them all synchronously. Returns {@code true} once this
+     * chunk's scan is exhausted for this visit.
+     */
+    private boolean sampleFireSmoke(MinecraftServer server, ChunkKey key) {
         ServerLevel level = server.getLevel(key.dimension());
         ChunkState state = chunks.get(key);
-        if (level == null || state == null || !state.smokeReadable) return;
+        if (level == null || state == null || !state.smokeReadable) return true;
         smokeProducerChecks++;
-        LevelChunkSection[] sections = state.chunk.getSections();
-        for (int sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
-            LevelChunkSection section = sections[sectionIndex];
-            if (!section.maybeHas(block -> ForgeSmokeGameplay.sourceAmount(block) > 0)) continue;
-            int sectionY = SectionPos.sectionToBlockCoord(state.chunk.getSectionYFromSectionIndex(sectionIndex));
-            for (int localY = 0; localY < 16; localY++) {
-                for (int localZ = 0; localZ < 16; localZ++) {
-                    for (int localX = 0; localX < 16; localX++) {
-                        int amount = ForgeSmokeGameplay.sourceAmount(section.getBlockState(localX, localY, localZ));
-                        if (amount <= 0) continue;
-                        BlockPos fire = new BlockPos(state.chunk.getPos().getMinBlockX() + localX,
-                            sectionY + localY, state.chunk.getPos().getMinBlockZ() + localZ);
-                        var smokeCell = smokeCellKey(level, fire.above());
-                        int capacity = smokeCapacityAt(level, smokeCell);
-                        if (capacity > 0 && smokeGrid.emit(
-                            smokeCell, amount, serverTicks, capacity)) {
-                            smokeEmissions++;
-                        }
-                    }
-                }
-            }
+        int fromSection = fireScanCursor.getOrDefault(key, 0);
+        var source = LevelChunkSectionSource.of(state.chunk, block -> ForgeSmokeGameplay.sourceAmount(block) > 0);
+        var result = BoundedChunkScanner.scan(source, fromSection, tuning().runtime().maxScanSectionsPerCall(),
+            block -> ForgeSmokeGameplay.sourceAmount(block) > 0,
+            (sectionIndex, blockIndex, blockState) -> {
+                int amount = ForgeSmokeGameplay.sourceAmount(blockState);
+                BlockPos fire = LevelChunkSectionSource.positionOf(state.chunk, sectionIndex, blockIndex);
+                var smokeCell = smokeCellKey(level, fire.above());
+                int capacity = smokeCapacityAt(level, smokeCell);
+                if (capacity > 0 && smokeGrid.emit(smokeCell, amount, serverTicks, capacity)) smokeEmissions++;
+            });
+        if (result.exhausted()) {
+            fireScanCursor.remove(key);
+            return true;
         }
+        fireScanCursor.put(key, result.nextSection());
+        return false;
     }
 
     private void drainWaterTransitions(MinecraftServer server) {
@@ -2290,12 +2365,26 @@ final class ForgeAtmospherePrototype {
     }
 
     /**
-     * MINECRAFT-435: scans {@code chunk} for Nether/End portal blocks at most once this tick,
-     * regardless of how many of the OBSIDIAN_POWDER/NETHER_GAS producer hooks visit it -- see
-     * {@link #portalScanCache}.
+     * MINECRAFT-435: scans {@code chunk} for Nether/End portal blocks, bounded to at most {@link
+     * DynamicAtmosphereServerConfig.RuntimeTuning#maxScanSectionsPerCall} matching sections this
+     * call -- see {@link #portalScanProgress}. Returns the completed scan once every section has
+     * been visited since the last reset (memoized for the rest of this tick so a chunk visited by
+     * both the OBSIDIAN_POWDER and NETHER_GAS hooks in the same tick is only actually re-scanned
+     * once it needs to be), or empty if bounded work remains and the caller must report "not
+     * done" so its producer schedule revisits this chunk.
      */
-    private PortalChunkScanner.Scan scanPortalsOnce(ServerLevel level, LevelChunk chunk) {
-        return portalScanCache.computeIfAbsent(chunkKey(level, chunk), ignored -> PortalChunkScanner.scan(chunk));
+    private Optional<PortalChunkScanner.Scan> scanPortalsBounded(ServerLevel level, LevelChunk chunk) {
+        ChunkKey key = chunkKey(level, chunk);
+        PortalChunkScanner.Scan cached = portalScanCache.get(key);
+        if (cached != null) return Optional.of(cached);
+        var result = PortalChunkScanner.scan(chunk, portalScanProgress.get(key), tuning().runtime().maxScanSectionsPerCall());
+        if (!result.exhausted()) {
+            portalScanProgress.put(key, result.progress());
+            return Optional.empty();
+        }
+        portalScanProgress.remove(key);
+        portalScanCache.put(key, result.completedScan());
+        return Optional.of(result.completedScan());
     }
 
     private record ChunkKey(ResourceKey<Level> dimension, int x, int z) {
