@@ -172,7 +172,8 @@ class AtmosphereGridTickDeterminismTest {
         var overriddenRuntime = new DynamicAtmosphereServerConfig.RuntimeTuning(
             runtime.syncIntervalTicks(), runtime.fullSnapshotIntervalTicks(), intervalTicks,
             runtime.producerIntervalTicks(), runtime.maxChunkImportsPerTick(), runtime.maxProducerChunksPerTick(),
-            runtime.maxSmokeProducerChunksPerTick(), runtime.maxScanSectionsPerCall(), runtime.simulationSkipChance());
+            runtime.maxSmokeProducerChunksPerTick(), runtime.maxScanSectionsPerCall(),
+            runtime.simulationSkipChance(), runtime.maxSyncOperationsPerPlayerPerTick());
         return new DynamicAtmosphereServerConfig.Snapshot(overriddenRuntime, base.vapor(), base.verticalMovement(),
             base.smoke(), base.dust(), base.voidGas(), base.exhaust(), base.slime(), base.obsidianPowder(),
             base.glowGas(), base.netherFog(), base.endSand(), base.plantGrowth(), base.integrations(),

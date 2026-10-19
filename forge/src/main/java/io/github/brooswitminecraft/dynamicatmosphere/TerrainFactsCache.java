@@ -20,6 +20,16 @@ final class TerrainFactsCache {
     private final int minCellY;
     private final byte[] emptyBlockCount;
     private final byte[] downwardBarrier;
+    /**
+     * MINECRAFT-436: bumped whenever a block change actually invalidates any cell in this chunk
+     * (never on a no-op block change that doesn't affect classification), and on {@link #clear()}.
+     * Lets a caller outside this cache (a cross-tick cell snapshot cache keyed by chunk) detect
+     * "did this chunk's capacity possibly change" cheaply -- a single long comparison -- instead
+     * of re-deriving capacity for every cell to find out, without needing its own hook into block
+     * events. Capacity invalidation is already unified across Vapor/Smoke/every material through
+     * this one shared cache, so one counter per chunk covers all of them.
+     */
+    private long generation;
 
     TerrainFactsCache(int minBlockY, int maxBlockY) {
         if (maxBlockY <= minBlockY) throw new IllegalArgumentException("Empty chunk height");
@@ -29,6 +39,9 @@ final class TerrainFactsCache {
         downwardBarrier = new byte[emptyBlockCount.length];
         clear();
     }
+
+    /** Monotonically increasing; never decreases. Only equality/inequality is meaningful. */
+    long generation() { return generation; }
 
     /** -1 means unknown and needs a terrain scan. */
     int emptyBlockCount(int x, int y, int z) {
@@ -71,7 +84,10 @@ final class TerrainFactsCache {
         if (previousEmptySpace == nextEmptySpace && previousDownwardBarrier == nextDownwardBarrier) return;
         int index = index(AtmosphereGridLayout.cellCoordinate(blockX), AtmosphereGridLayout.cellCoordinate(blockY),
             AtmosphereGridLayout.cellCoordinate(blockZ));
-        if (index >= 0) emptyBlockCount[index] = -1;
+        if (index >= 0) {
+            emptyBlockCount[index] = -1;
+            generation++;
+        }
     }
 
     void blockChanged(int blockX, int blockY, int blockZ, boolean previousEmptySpace, boolean nextEmptySpace) {
@@ -81,6 +97,7 @@ final class TerrainFactsCache {
     void clear() {
         Arrays.fill(emptyBlockCount, (byte) -1);
         Arrays.fill(downwardBarrier, (byte) 0);
+        generation++;
     }
 
     private int index(int x, int y, int z) {
