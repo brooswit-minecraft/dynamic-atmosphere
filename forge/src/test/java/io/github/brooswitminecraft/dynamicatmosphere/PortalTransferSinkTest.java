@@ -182,8 +182,13 @@ class PortalTransferSinkTest {
         assertEquals(null, scan.found);
     }
 
+    /**
+     * MINECRAFT-435 (fifth review): the per-call chunk-entry limit is a YIELD point, never a
+     * verdict -- a third, unexamined entry must leave the scan not-done, not conclude "nothing
+     * exists" just because one call's window ran out.
+     */
     @Test
-    void advanceEndCandidateScanOnlyTouchesTheBoundedNumberOfChunkEntriesWhenNothingIsEligible() {
+    void advanceEndCandidateScanYieldsNotDoneWhenMoreEntriesExistBeyondThePerCallWindow() {
         var registry = navigableRegistryOf(Map.of(
             new ChunkPos(0, 0), Set.of(new BlockPos(1, 64, 1)),
             new ChunkPos(1, 0), Set.of(new BlockPos(2, 64, 2)),
@@ -191,53 +196,135 @@ class PortalTransferSinkTest {
         var scan = new PortalTransferSink.EndCandidateScan();
         var budget = new PortalTransferSink.Budget(100);
         PortalTransferSink.advanceEndCandidateScan(registry, 2, scan, budget, pos -> false);
-        assertTrue(scan.done, "done once the bounded 2-entry window is exhausted, even though a third entry exists");
+        assertFalse(scan.done, "a third entry still exists unexamined -- the 2-entry window is only a per-call yield");
         assertEquals(null, scan.found);
     }
 
+    /**
+     * MINECRAFT-435 (fifth review): "test a valid destination beyond the first window" -- the
+     * eligible position sits in the third chunk entry, outside a 2-entry-per-call window; the
+     * SAME source/scan attempt must still find it on a later call, not conclude "nothing exists"
+     * after the first call's window.
+     */
     @Test
-    void selectLiveNearestPicksTheNearestEligibleCandidate() {
+    void advanceEndCandidateScanFindsAValidDestinationBeyondTheFirstWindowAcrossCalls() {
+        var beyondFirstWindow = new BlockPos(3, 64, 3);
+        var registry = navigableRegistryOf(Map.of(
+            new ChunkPos(0, 0), Set.of(new BlockPos(1, 64, 1)),
+            new ChunkPos(1, 0), Set.of(new BlockPos(2, 64, 2)),
+            new ChunkPos(2, 0), Set.of(beyondFirstWindow)));
+        var scan = new PortalTransferSink.EndCandidateScan();
+        var firstCallBudget = new PortalTransferSink.Budget(100);
+        PortalTransferSink.advanceEndCandidateScan(registry, 2, scan, firstCallBudget, pos -> pos.equals(beyondFirstWindow));
+        assertFalse(scan.done, "the eligible position is in the third entry, beyond the first call's 2-entry window");
+        var secondCallBudget = new PortalTransferSink.Budget(100);
+        PortalTransferSink.advanceEndCandidateScan(registry, 2, scan, secondCallBudget, pos -> pos.equals(beyondFirstWindow));
+        assertTrue(scan.done);
+        assertEquals(beyondFirstWindow, scan.found, "the same (resumed) scan attempt finds it, not abandoned as a false negative");
+    }
+
+    @Test
+    void advanceEndCandidateScanCompletesWithNothingFoundOnlyAfterWrappingAroundEveryEntry() {
+        var registry = navigableRegistryOf(Map.of(
+            new ChunkPos(0, 0), Set.of(new BlockPos(1, 64, 1)),
+            new ChunkPos(1, 0), Set.of(new BlockPos(2, 64, 2)),
+            new ChunkPos(2, 0), Set.of(new BlockPos(3, 64, 3))));
+        var scan = new PortalTransferSink.EndCandidateScan();
+        int calls = 0;
+        while (!scan.done) {
+            var budget = new PortalTransferSink.Budget(100);
+            PortalTransferSink.advanceEndCandidateScan(registry, 2, scan, budget, pos -> false);
+            calls++;
+            assertTrue(calls < 100, "safety bound to catch a runaway loop on test failure");
+        }
+        assertEquals(null, scan.found);
+        assertTrue(calls > 1, "a 2-entry-per-call window over 3 entries must genuinely take more than one call");
+    }
+
+    @Test
+    void advanceNetherSelectionPicksTheNearestEligibleCandidate() {
         var anchor = BlockPos.ZERO;
         var near = new BlockPos(10, 64, 0);
         var far = new BlockPos(100, 64, 0);
-        var pool = new java.util.HashSet<>(Set.of(near, far));
-        assertEquals(Optional.of(near), PortalTransferSink.selectLiveNearest(anchor, pool, 128, pos -> true));
+        var selection = new PortalTransferSink.NetherSelectionScan();
+        selection.remaining = Set.of(near, far).iterator();
+        var budget = new PortalTransferSink.Budget(100);
+        PortalTransferSink.advanceNetherSelection(anchor, 128, selection, budget, pos -> true);
+        assertTrue(selection.done);
+        assertEquals(near, selection.best);
     }
 
     /**
-     * MINECRAFT-435 (fourth review): a candidate added to the pool while live during an earlier
-     * advance may have been destroyed/unloaded by the time the scan completes and a winner is
-     * selected -- the nearer one must be revalidated and, if stale, discarded in favor of the
-     * next-nearest, never silently accepted.
+     * MINECRAFT-435 (fourth review): a candidate examined while live during an earlier advance may
+     * have been destroyed/unloaded by the time a later, nearer candidate turns out ineligible --
+     * eligibility is revalidated inline (only when a candidate could improve on the current best),
+     * so the farther-but-valid candidate is correctly kept instead of a nearer-but-stale one.
      */
     @Test
-    void selectLiveNearestRevalidatesAndFallsBackWhenTheNearestCandidateHasGoneStale() {
+    void advanceNetherSelectionFallsBackToTheNextNearestWhenTheNearestCandidateIsIneligible() {
         var anchor = BlockPos.ZERO;
-        var nearerButNowStale = new BlockPos(10, 64, 0);
-        var fartherButStillValid = new BlockPos(100, 64, 0);
-        var pool = new java.util.HashSet<>(Set.of(nearerButNowStale, fartherButStillValid));
-        var result = PortalTransferSink.selectLiveNearest(anchor, pool, 128, pos -> !pos.equals(nearerButNowStale));
-        assertEquals(Optional.of(fartherButStillValid), result);
-        assertEquals(Set.of(fartherButStillValid), pool, "the stale candidate is discarded from the pool");
+        var nearerButIneligible = new BlockPos(10, 64, 0);
+        var fartherButEligible = new BlockPos(100, 64, 0);
+        var selection = new PortalTransferSink.NetherSelectionScan();
+        selection.remaining = List.of(nearerButIneligible, fartherButEligible).iterator();
+        var budget = new PortalTransferSink.Budget(100);
+        PortalTransferSink.advanceNetherSelection(anchor, 128, selection, budget, pos -> !pos.equals(nearerButIneligible));
+        assertTrue(selection.done);
+        assertEquals(fartherButEligible, selection.best);
     }
 
     @Test
-    void selectLiveNearestReturnsEmptyWhenEveryCandidateIsStale() {
-        var anchor = BlockPos.ZERO;
-        var pool = new java.util.HashSet<>(Set.of(new BlockPos(10, 64, 0)));
-        assertTrue(PortalTransferSink.selectLiveNearest(anchor, pool, 128, pos -> false).isEmpty());
-        assertTrue(pool.isEmpty());
+    void advanceNetherSelectionIsDoneWithNoWinnerWhenEveryCandidateIsIneligible() {
+        var selection = new PortalTransferSink.NetherSelectionScan();
+        selection.remaining = List.of(new BlockPos(10, 64, 0)).iterator();
+        var budget = new PortalTransferSink.Budget(100);
+        PortalTransferSink.advanceNetherSelection(BlockPos.ZERO, 128, selection, budget, pos -> false);
+        assertTrue(selection.done);
+        assertEquals(null, selection.best);
     }
 
     @Test
-    void selectLiveNearestDependsOnTheAnchorEvenOverAnIdenticalSharedPool() {
-        // MINECRAFT-435 (fourth review): two different anchors sharing the same discovered pool
+    void advanceNetherSelectionDependsOnTheAnchorEvenOverAnIdenticalPool() {
+        // MINECRAFT-435 (fourth review): two different anchors over the same discovered pool
         // (e.g. the same destination chunk box) must each get their OWN nearest answer.
         var a = new BlockPos(0, 64, 0);
         var b = new BlockPos(100, 64, 0);
-        var pool = Set.of(a, b);
-        assertEquals(Optional.of(a), PortalTransferSink.selectLiveNearest(new BlockPos(-10, 64, 0), new java.util.HashSet<>(pool), 200, pos -> true));
-        assertEquals(Optional.of(b), PortalTransferSink.selectLiveNearest(new BlockPos(110, 64, 0), new java.util.HashSet<>(pool), 200, pos -> true));
+        var selectionNearA = new PortalTransferSink.NetherSelectionScan();
+        selectionNearA.remaining = List.of(a, b).iterator();
+        PortalTransferSink.advanceNetherSelection(new BlockPos(-10, 64, 0), 200, selectionNearA, new PortalTransferSink.Budget(100), pos -> true);
+        assertEquals(a, selectionNearA.best);
+
+        var selectionNearB = new PortalTransferSink.NetherSelectionScan();
+        selectionNearB.remaining = List.of(a, b).iterator();
+        PortalTransferSink.advanceNetherSelection(new BlockPos(110, 64, 0), 200, selectionNearB, new PortalTransferSink.Budget(100), pos -> true);
+        assertEquals(b, selectionNearB.best);
+    }
+
+    /**
+     * MINECRAFT-435 (fifth review): selection must itself be budget-bounded and resumable -- a
+     * dense pool cannot be fully examined (nor its eligibility rechecked) in a single call.
+     */
+    @Test
+    void advanceNetherSelectionBoundsExaminationToTheBudgetAndResumesAcrossCalls() {
+        var dense = new java.util.ArrayList<BlockPos>();
+        for (int i = 0; i < 237; i++) dense.add(new BlockPos(i, 64, 0));
+        var selection = new PortalTransferSink.NetherSelectionScan();
+        selection.remaining = dense.iterator();
+        int[] eligibilityChecks = {0};
+        int calls = 0;
+        while (!selection.done) {
+            var budget = new PortalTransferSink.Budget(40);
+            PortalTransferSink.advanceNetherSelection(new BlockPos(1000, 64, 0), 2000, selection, budget,
+                pos -> { eligibilityChecks[0]++; return true; });
+            calls++;
+            assertTrue(calls < 100, "safety bound to catch a runaway loop on test failure");
+        }
+        assertTrue(calls > 1, "a budget of 40 over 237 positions must genuinely take more than one call");
+        // Monotonic nearest-so-far tracking means eligibility is only rechecked when a candidate
+        // could improve on the current best, not once per candidate unconditionally -- bounded by
+        // the pool size, never quadratic in it.
+        assertTrue(eligibilityChecks[0] <= dense.size(), "eligibility checks must not exceed the pool size (no O(n^2) re-scanning)");
+        assertEquals(new BlockPos(236, 64, 0), selection.best, "nearest to anchor (1000,64,0) among x in 0..236 is the largest x");
     }
 
     @Test
@@ -315,8 +402,9 @@ class PortalTransferSinkTest {
     /**
      * Integration of {@link PortalTransferSink#advanceNetherCandidateScan} (anchor-independent
      * discovery, possibly spread over several calls) with {@link
-     * PortalTransferSink#selectLiveNearest} (anchor-specific selection, applied once discovery is
-     * done) -- the true nearest candidate is found regardless of which call examined it.
+     * PortalTransferSink#advanceNetherSelection} (anchor-specific selection, applied once
+     * discovery is done) -- the true nearest candidate is found regardless of which call examined
+     * it during discovery.
      */
     @Test
     void discoveredPoolYieldsTheTrueNearestRegardlessOfWhichCallExaminedEachCandidate() {
@@ -334,9 +422,12 @@ class PortalTransferSinkTest {
             assertTrue(calls < 100, "safety bound to catch a runaway loop on test failure");
         }
         var anchor = new BlockPos(10, 64, 0);
-        assertEquals(Optional.of(nearToAnchor),
-            PortalTransferSink.selectLiveNearest(anchor, scan.eligibleCandidates, 2000, pos -> true),
-            "the globally nearest candidate is found even though a farther one was examined in an earlier call");
+        var selection = new PortalTransferSink.NetherSelectionScan();
+        selection.remaining = scan.eligibleCandidates.iterator();
+        PortalTransferSink.advanceNetherSelection(anchor, 2000, selection, new PortalTransferSink.Budget(100), pos -> true);
+        assertTrue(selection.done);
+        assertEquals(nearToAnchor, selection.best,
+            "the globally nearest candidate is found even though a farther one was examined in an earlier discovery call");
     }
 
     @Test
