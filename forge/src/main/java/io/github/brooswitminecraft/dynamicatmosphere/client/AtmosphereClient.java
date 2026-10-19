@@ -18,13 +18,7 @@ import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
 
 import java.lang.ref.WeakReference;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Deque;
 import java.util.EnumMap;
-import java.util.List;
-import java.util.Objects;
-import com.mojang.logging.LogUtils;
 
 @EventBusSubscriber(modid = DynamicAtmosphereMod.MODID, value = Dist.CLIENT)
 public final class AtmosphereClient {
@@ -44,21 +38,11 @@ public final class AtmosphereClient {
     private static final AtmosphereDiskCache DISK = new AtmosphereDiskCache(
         Minecraft.getInstance().gameDirectory.toPath().resolve("dynamicatmosphere-cache"));
     private static final AtmosphereCacheWriter SAVER = new AtmosphereCacheWriter(DISK);
+    /** Bounded, incrementally-applied historical restore; guarded against stale namespace/dimension. */
+    private static final AtmosphereRestoreCoordinator RESTORE = new AtmosphereRestoreCoordinator(SAVER);
     private static String cacheNamespace;
     private static String cacheDimension;
     private static int saveTicks;
-
-    /** Bounded, incrementally-applied historical restore; guarded against stale namespace/dimension. */
-    private static final int RESTORE_BATCH_SIZE = 2048;
-    private static final Object RESTORE_LOCK = new Object();
-    private static final Deque<AtmosphereClientCache.Update> pendingRestore = new ArrayDeque<>();
-    private static String pendingRestoreNamespace;
-    private static String pendingRestoreDimension;
-    /** Monotonic token for the in-flight restore; bumped on every begin/cancel so a stale disk read
-     *  from a superseded connection/world (even one sharing the same namespace, e.g. a disconnect
-     *  and reconnect to the same world) can never be admitted into a later session. */
-    private static long restoreGeneration;
-    private static long pendingRestoreGeneration = -1;
 
     static {
         Runtime.getRuntime().addShutdownHook(new Thread(SAVER::shutdown, "Atmosphere cache shutdown"));
@@ -120,7 +104,7 @@ public final class AtmosphereClient {
             if (observedLevel != null) SESSION.world(payload.dimension().toString());
             cacheNamespace = namespace;
             cacheDimension = payload.dimension().toString();
-            beginRestore(namespace, cacheDimension);
+            RESTORE.beginRestore(namespace, cacheDimension);
         }
         SESSION.receive(payload.dimension().toString(), payload.reset(), payload.snapshotEnd(), payload.authoritativeChunks().stream()
             .map(chunk -> new AtmosphereClientCache.Chunk(chunk.x(), chunk.z())).toList(), payload.cells().stream()
@@ -129,50 +113,10 @@ public final class AtmosphereClient {
             .toList());
     }
 
-    /** Kicks off the historical disk read off this (main packet handler) thread; never blocks here. */
-    private static void beginRestore(String namespace, String dimension) {
-        long generation;
-        synchronized (RESTORE_LOCK) {
-            generation = ++restoreGeneration;
-            pendingRestore.clear();
-            pendingRestoreNamespace = namespace;
-            pendingRestoreDimension = dimension;
-            pendingRestoreGeneration = generation;
-        }
-        SAVER.loadAsync(namespace).whenComplete((updates, failure) -> {
-            if (failure != null) {
-                LogUtils.getLogger().warn("Cannot load disposable atmosphere cache", failure);
-                return;
-            }
-            synchronized (RESTORE_LOCK) {
-                // A later namespace switch, disconnect/reconnect (even to the same world/namespace)
-                // or ClientLevel replacement bumps the generation and supersedes this result.
-                if (generation == pendingRestoreGeneration) pendingRestore.addAll(updates);
-            }
-        });
-    }
-
-    private static void cancelRestore() {
-        synchronized (RESTORE_LOCK) {
-            restoreGeneration++;
-            pendingRestore.clear();
-            pendingRestoreNamespace = null;
-            pendingRestoreDimension = null;
-            pendingRestoreGeneration = -1;
-        }
-    }
-
     /** Applies at most one bounded batch per tick, on the client thread, like every other cache mutation. */
     private static void drainRestoreBatch() {
-        List<AtmosphereClientCache.Update> batch;
-        String dimension;
-        synchronized (RESTORE_LOCK) {
-            if (pendingRestore.isEmpty() || !Objects.equals(pendingRestoreNamespace, cacheNamespace)) return;
-            dimension = pendingRestoreDimension;
-            batch = new ArrayList<>(Math.min(RESTORE_BATCH_SIZE, pendingRestore.size()));
-            for (int i = 0; i < RESTORE_BATCH_SIZE && !pendingRestore.isEmpty(); i++) batch.add(pendingRestore.poll());
-        }
-        SESSION.restore(dimension, batch);
+        var drained = RESTORE.drainBatch(cacheNamespace);
+        if (drained != null) SESSION.restore(drained.dimension(), drained.updates());
     }
 
     @SubscribeEvent
@@ -224,10 +168,9 @@ public final class AtmosphereClient {
             unloadedLevel = null;
         }
         if (current != observedLevel) {
-            // Any ClientLevel replacement invalidates the in-flight restore, even when the
-            // dimension id is unchanged (e.g. a disconnect/reconnect back into the same world).
-            cancelRestore();
-            if (current == null || !current.dimension().location().toString().equals(cacheDimension)) {
+            String currentDimension = current == null ? null : current.dimension().location().toString();
+            var change = RESTORE.syncLevel(observedLevel, current, currentDimension, cacheNamespace, cacheDimension);
+            if (change == AtmosphereRestoreCoordinator.LevelChange.NAMESPACE_RESET) {
                 checkpoint();
                 cacheNamespace = null;
                 cacheDimension = null;
@@ -238,9 +181,8 @@ public final class AtmosphereClient {
             }
             AtmosphereVolumeRenderer.close();
             observedLevel = current;
-            SESSION.world(current == null ? null : current.dimension().location().toString());
-            String dimension = current == null ? null : current.dimension().location().toString();
-            MATERIALS.values().forEach(session -> session.world(dimension));
+            SESSION.world(currentDimension);
+            MATERIALS.values().forEach(session -> session.world(currentDimension));
         }
     }
 
@@ -248,7 +190,7 @@ public final class AtmosphereClient {
         checkpoint();
         cacheNamespace = null;
         cacheDimension = null;
-        cancelRestore();
+        RESTORE.cancelRestore();
         observedLevel = null;
         unloadedLevel = null;
         SESSION.clear();
