@@ -2,7 +2,9 @@ package io.github.brooswitminecraft.dynamicatmosphere;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.function.IntPredicate;
+import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.MobCategory;
@@ -108,23 +110,25 @@ public final class VoidGasGameplay {
         });
     }
 
-    /** The one operation the villager-ready effect needs, seamed so {@link #readyFirstEligible}
-     * is testable without a real ServerLevel/Villager. */
-    interface VillagerCandidate {
-        void receiveBread();
-    }
-
     /**
-     * ServerLevel-independent seam {@link #readyOneVillager} delegates to: only the first
-     * candidate is ever tried, {@code consume} is invoked at most once (with {@code cost}), and
-     * a refused consumption grants no bread and tries no further candidate -- matching the
-     * original loop, whose per-iteration cap was unreachable dead code since every body path
-     * already returned on iteration 1.
+     * ServerLevel-independent seam {@link #readyOneVillager} delegates to: {@code eligible} is
+     * applied here (not baked into the bounded native query, matching
+     * {@code SmokeVillagerEffect}'s convention of filtering candidates on the application side),
+     * only the first eligible candidate is ever tried, {@code consume} is invoked at most once
+     * (with {@code cost}), and a refused consumption grants no reward and tries no further
+     * candidate -- matching the original loop, whose per-iteration cap was unreachable dead code
+     * since every body path already returned on iteration 1. Generic purely to stay testable --
+     * production passes the real, already-bounded {@code List<Villager>} directly, with no
+     * per-candidate wrapper allocation.
      */
-    static boolean readyFirstEligible(int cost, IntPredicate consume, Iterable<? extends VillagerCandidate> candidates) {
-        for (VillagerCandidate candidate : candidates) {
+    static <T> boolean readyFirstEligible(
+        int cost, IntPredicate consume, Iterable<? extends T> candidates,
+        Predicate<? super T> eligible, Consumer<? super T> reward
+    ) {
+        for (T candidate : candidates) {
+            if (!eligible.test(candidate)) continue;
             if (!consume.test(cost)) return false;
-            candidate.receiveBread();
+            reward.accept(candidate);
             return true;
         }
         return false;
@@ -132,17 +136,16 @@ public final class VoidGasGameplay {
 
     private static void readyOneVillager(ServerLevel level, BlockPos cellOrigin, int cost, int breedingBread) {
         AABB bounds = cellBounds(cellOrigin, AtmosphereMaterial.VOID_GAS.cellSize());
-        // Only the first successful candidate is ever used; bound the underlying scan itself
-        // instead of collecting every eligible villager in the cell before capping the loop.
+        // Bound the underlying scan itself to a plain in-bounds check; eligibility is applied by
+        // readyFirstEligible below, not baked into the native query.
         List<Villager> villagers = new ArrayList<>();
         level.getEntities(EntityTypeTest.forClass(Villager.class), bounds,
-            candidate -> bounds.contains(candidate.position()) && eligibleVillager(candidate, breedingBread),
-            villagers, MAX_VILLAGER_CANDIDATES);
+            candidate -> bounds.contains(candidate.position()), villagers, MAX_VILLAGER_CANDIDATES);
         readyFirstEligible(cost,
             candidateCost -> DynamicAtmosphereMod.consumeMaterial(level, AtmosphereMaterial.VOID_GAS, cellOrigin, candidateCost),
-            villagers.stream()
-                .<VillagerCandidate>map(villager -> () -> villager.getInventory().addItem(new ItemStack(Items.BREAD, breedingBread)))
-                .toList());
+            villagers,
+            villager -> eligibleVillager(villager, breedingBread),
+            villager -> villager.getInventory().addItem(new ItemStack(Items.BREAD, breedingBread)));
     }
 
     static boolean eligibleVillager(Villager villager) {

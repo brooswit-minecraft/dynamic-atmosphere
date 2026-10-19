@@ -2,6 +2,7 @@ package io.github.brooswitminecraft.dynamicatmosphere;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.IntPredicate;
 import net.minecraft.world.entity.MobCategory;
 import org.junit.jupiter.api.Test;
 
@@ -18,45 +19,69 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * which is a thin, untested pass-through.
  */
 class VoidGasGameplayTest {
-    private static final class FakeCandidate implements VoidGasGameplay.VillagerCandidate {
+    private static final class FakeCandidate {
+        final boolean eligible;
         int breadReceived;
 
-        @Override
-        public void receiveBread() { breadReceived++; }
+        FakeCandidate(boolean eligible) {
+            this.eligible = eligible;
+        }
+    }
+
+    private static boolean ready(int cost, IntPredicate consume, List<FakeCandidate> candidates) {
+        return VoidGasGameplay.readyFirstEligible(cost, consume, candidates,
+            c -> c.eligible, c -> c.breadReceived++);
     }
 
     @Test
     void noCandidatesNeverConsumesAndReportsFailure() {
         var consumeCalls = new int[1];
-        boolean readied = VoidGasGameplay.readyFirstEligible(5, cost -> { consumeCalls[0]++; return true; }, List.of());
+        boolean readied = ready(5, cost -> { consumeCalls[0]++; return true; }, List.of());
         assertFalse(readied);
         assertEquals(0, consumeCalls[0]);
     }
 
     @Test
-    void onlyTheFirstCandidateIsEverTriedEvenWithMultipleEligibleOnes() {
-        var first = new FakeCandidate();
-        var second = new FakeCandidate();
+    void ineligibleCandidatesAreSkippedAndNeverConsumedOrRewarded() {
+        var ineligible1 = new FakeCandidate(false);
+        var ineligible2 = new FakeCandidate(false);
+        var consumeCalls = new int[1];
+        boolean readied = ready(5, cost -> { consumeCalls[0]++; return true; },
+            List.of(ineligible1, ineligible2));
+
+        assertFalse(readied, "a bounded query that turned up only ineligible candidates must not ready anyone");
+        assertEquals(0, consumeCalls[0], "an ineligible candidate must never reach the material charge");
+        assertEquals(0, ineligible1.breadReceived);
+        assertEquals(0, ineligible2.breadReceived);
+    }
+
+    @Test
+    void onlyTheFirstEligibleCandidateIsEverTriedEvenWithMultipleEligibleOnes() {
+        var ineligibleFirst = new FakeCandidate(false);
+        var firstEligible = new FakeCandidate(true);
+        var secondEligible = new FakeCandidate(true);
         var consumeCalls = new ArrayList<Integer>();
-        boolean readied = VoidGasGameplay.readyFirstEligible(5,
-            cost -> { consumeCalls.add(cost); return true; }, List.of(first, second));
+        boolean readied = ready(5, cost -> { consumeCalls.add(cost); return true; },
+            List.of(ineligibleFirst, firstEligible, secondEligible));
 
         assertTrue(readied);
-        assertEquals(List.of(5), consumeCalls, "exactly one charge, for the first candidate only");
-        assertEquals(1, first.breadReceived, "the first candidate receives bread exactly once");
-        assertEquals(0, second.breadReceived, "a second eligible candidate must never be reached");
+        assertEquals(List.of(5), consumeCalls, "exactly one charge, for the first eligible candidate only");
+        assertEquals(0, ineligibleFirst.breadReceived, "an ineligible candidate ahead of the eligible one is skipped");
+        assertEquals(1, firstEligible.breadReceived, "the first eligible candidate receives bread exactly once");
+        assertEquals(0, secondEligible.breadReceived, "a second eligible candidate must never be reached");
     }
 
     @Test
     void aRefusedConsumptionGrantsNoBreadAndTriesNoFurtherCandidate() {
-        var first = new FakeCandidate();
-        var second = new FakeCandidate();
-        boolean readied = VoidGasGameplay.readyFirstEligible(5, cost -> false, List.of(first, second));
+        var first = new FakeCandidate(true);
+        var second = new FakeCandidate(true);
+        boolean readied = ready(5, cost -> false, List.of(first, second));
 
         assertFalse(readied);
         assertEquals(0, first.breadReceived, "a failed consumption must not grant bread");
-        assertEquals(0, second.breadReceived, "a refused first candidate must not fall through to the next one");
+        assertEquals(0, second.breadReceived, "a refused first eligible candidate must not fall through to the next one");
     }
+
     @Test
     void onlyMonsterCategoryDeathsAreHostileProduction() {
         assertTrue(VoidGasGameplay.isHostileCategory(MobCategory.MONSTER));

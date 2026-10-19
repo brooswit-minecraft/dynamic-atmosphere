@@ -1,7 +1,8 @@
 package io.github.brooswitminecraft.dynamicatmosphere;
 
-import java.util.ArrayList;
 import java.util.Optional;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -56,54 +57,28 @@ public final class NetherGasGameplay {
         onPassiveBlockSample(level, pos, chunk.getBlockState(pos));
     }
 
-    /** The handful of LivingEntity operations the cell effect actually needs, seamed so the
-     * eligibility/effect-application logic below is testable without a real ServerLevel/entity. */
-    interface EffectTarget {
-        boolean isAlive();
-
-        void applyMild();
-
-        void applyDangerous();
-    }
-
-    static void apply(CellEffect effect, EffectTarget target) {
-        if (!target.isAlive()) return;
-        if (effect.mild()) target.applyMild();
-        if (effect.dangerous()) target.applyDangerous();
-    }
-
     /**
      * ServerLevel-independent seam {@link #processTurn} delegates to: {@code targetsSupplier} is
      * invoked exactly once when {@code state} makes an effect eligible, and never otherwise, so
      * this proves the production entry point's entity-query boundary without needing a real
-     * ServerLevel/LivingEntity (none is available in this test suite).
+     * ServerLevel/LivingEntity (none is available in this test suite). Generic over the target
+     * type and operations purely to stay testable -- production passes {@code LivingEntity} and
+     * its own methods directly, with no per-entity wrapper allocation.
      */
-    static void runEligible(
+    static <T> void runEligible(
         Optional<AtmosphereMaterialState> state, double mildFullness, double dangerousFullness,
-        Supplier<Iterable<? extends EffectTarget>> targetsSupplier
+        Supplier<? extends Iterable<? extends T>> targetsSupplier,
+        Predicate<? super T> isAlive, Consumer<? super T> applyMild, Consumer<? super T> applyDangerous
     ) {
         state.ifPresent(s -> {
             CellEffect effect = effectFor(s.amount(), s.capacity(), mildFullness, dangerousFullness);
             if (!effect.active()) return;
-            for (EffectTarget target : targetsSupplier.get()) apply(effect, target);
+            for (T target : targetsSupplier.get()) {
+                if (!isAlive.test(target)) continue;
+                if (effect.mild()) applyMild.accept(target);
+                if (effect.dangerous()) applyDangerous.accept(target);
+            }
         });
-    }
-
-    private static EffectTarget asTarget(LivingEntity entity) {
-        return new EffectTarget() {
-            @Override
-            public boolean isAlive() { return entity.isAlive(); }
-
-            @Override
-            public void applyMild() {
-                entity.addEffect(new MobEffectInstance(MobEffects.CONFUSION, EFFECT_DURATION_TICKS, MILD_AMPLIFIER));
-            }
-
-            @Override
-            public void applyDangerous() {
-                entity.addEffect(new MobEffectInstance(MobEffects.POISON, EFFECT_DURATION_TICKS, DANGEROUS_AMPLIFIER));
-            }
-        };
     }
 
     /**
@@ -118,11 +93,10 @@ public final class NetherGasGameplay {
         runEligible(
             DynamicAtmosphereMod.materialState(level, AtmosphereMaterial.NETHER_GAS, cellOrigin),
             config.mildFullness(), config.dangerousFullness(),
-            () -> {
-                var targets = new ArrayList<EffectTarget>();
-                for (LivingEntity entity : entitiesSupplier.get()) targets.add(asTarget(entity));
-                return targets;
-            });
+            entitiesSupplier,
+            LivingEntity::isAlive,
+            entity -> entity.addEffect(new MobEffectInstance(MobEffects.CONFUSION, EFFECT_DURATION_TICKS, MILD_AMPLIFIER)),
+            entity -> entity.addEffect(new MobEffectInstance(MobEffects.POISON, EFFECT_DURATION_TICKS, DANGEROUS_AMPLIFIER)));
     }
 
     private NetherGasGameplay() { }
