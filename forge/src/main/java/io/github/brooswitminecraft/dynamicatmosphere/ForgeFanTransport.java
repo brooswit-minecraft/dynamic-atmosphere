@@ -2,11 +2,15 @@ package io.github.brooswitminecraft.dynamicatmosphere;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.function.BiFunction;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.neoforged.fml.ModList;
@@ -40,7 +44,62 @@ public final class ForgeFanTransport {
             || mods == null || !mods.isLoaded("create")) {
             return List.of();
         }
-        return CreateAccess.collect(level, cellMin, cellSize, rpmCoefficient);
+        return ChunkFanCache.forLevel(level, rpmCoefficient).requestsInCell(cellMin, cellSize);
+    }
+
+    /**
+     * Scans each chunk's active Create fans at most once per cache instance, no matter how many
+     * cells/grids ask for requests overlapping that chunk. Construct one cache per pass-local chunk
+     * iteration (never reused across ticks) and reuse it across Vapor, Smoke and every material grid
+     * instead of letting each grid independently re-scan the same block entities.
+     */
+    public static final class ChunkFanCache {
+        private final BiFunction<Integer, Integer, List<LocatedRequest>> scanner;
+        private final Map<Long, List<LocatedRequest>> scanned = new HashMap<>();
+
+        ChunkFanCache(BiFunction<Integer, Integer, List<LocatedRequest>> scanner) {
+            this.scanner = scanner;
+        }
+
+        public static ChunkFanCache forLevel(ServerLevel level, double rpmCoefficient) {
+            return new ChunkFanCache((chunkX, chunkZ) -> scanChunk(level, chunkX, chunkZ, rpmCoefficient));
+        }
+
+        /** Requests inside the half-open cell, in the same deterministic X/Z/Y order as before. */
+        public List<Request> requestsInCell(BlockPos cellMin, int size) {
+            if (size < 1 || size > 16) {
+                throw new IllegalArgumentException("Fan cell size must be between 1 and 16 blocks");
+            }
+            int minChunkX = Math.floorDiv(cellMin.getX(), 16);
+            int maxChunkX = Math.floorDiv(cellMin.getX() + size - 1, 16);
+            int minChunkZ = Math.floorDiv(cellMin.getZ(), 16);
+            int maxChunkZ = Math.floorDiv(cellMin.getZ() + size - 1, 16);
+            List<LocatedRequest> located = new ArrayList<>();
+            for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+                for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+                    for (var entry : chunkRequests(chunkX, chunkZ)) {
+                        if (contains(cellMin, size, entry.pos())) located.add(entry);
+                    }
+                }
+            }
+            return orderedRequests(located);
+        }
+
+        private List<LocatedRequest> chunkRequests(int chunkX, int chunkZ) {
+            return scanned.computeIfAbsent(ChunkPos.asLong(chunkX, chunkZ), key -> scanner.apply(chunkX, chunkZ));
+        }
+    }
+
+    private static List<LocatedRequest> scanChunk(ServerLevel level, int chunkX, int chunkZ,
+                                                   double rpmCoefficient) {
+        ModList mods = ModList.get();
+        if (!Double.isFinite(rpmCoefficient) || rpmCoefficient <= 0
+            || mods == null || !mods.isLoaded("create")) {
+            return List.of();
+        }
+        LevelChunk chunk = level.getChunkSource().getChunkNow(chunkX, chunkZ);
+        if (chunk == null) return List.of();
+        return CreateAccess.collectChunk(chunk, rpmCoefficient);
     }
 
     public record Request(Direction direction, int amount, boolean reverse) {
@@ -78,31 +137,21 @@ public final class ForgeFanTransport {
                 .map(entry -> entry.getKey().immutable()).sorted().toList();
         }
 
-        private static List<Request> collect(ServerLevel level, BlockPos min, int size, double coefficient) {
+        private static List<LocatedRequest> collectChunk(LevelChunk chunk, double coefficient) {
             List<LocatedRequest> requests = new ArrayList<>();
-            int maxChunkX = Math.floorDiv(min.getX() + size - 1, 16);
-            int maxChunkZ = Math.floorDiv(min.getZ() + size - 1, 16);
-            for (int chunkX = Math.floorDiv(min.getX(), 16); chunkX <= maxChunkX; chunkX++) {
-                for (int chunkZ = Math.floorDiv(min.getZ(), 16); chunkZ <= maxChunkZ; chunkZ++) {
-                    LevelChunk chunk = level.getChunkSource().getChunkNow(chunkX, chunkZ);
-                    if (chunk == null) continue;
-                    for (var entry : chunk.getBlockEntities().entrySet()) {
-                        BlockPos pos = entry.getKey();
-                        if (!contains(min, size, pos)) continue;
-                        BlockEntity entity = entry.getValue();
-                        if (!(entity instanceof com.simibubi.create.content.kinetics.fan.EncasedFanBlockEntity fan)
-                            || fan.isRemoved()) continue;
-                        // Verified against Create 6.0.10: getSpeed() is zero when overstressed/frozen.
-                        int amount = AtmosphereFanTransport.requestedAmount(
-                            fan.getSpeed(), coefficient, AtmosphereGrid.MAX_AMOUNT);
-                        if (amount > 0) {
-                            requests.add(new LocatedRequest(pos.immutable(),
-                                new Request(fan.getAirflowOriginSide(), amount, fan.getSpeed() < 0)));
-                        }
-                    }
+            for (var entry : chunk.getBlockEntities().entrySet()) {
+                BlockEntity entity = entry.getValue();
+                if (!(entity instanceof com.simibubi.create.content.kinetics.fan.EncasedFanBlockEntity fan)
+                    || fan.isRemoved()) continue;
+                // Verified against Create 6.0.10: getSpeed() is zero when overstressed/frozen.
+                int amount = AtmosphereFanTransport.requestedAmount(
+                    fan.getSpeed(), coefficient, AtmosphereGrid.MAX_AMOUNT);
+                if (amount > 0) {
+                    requests.add(new LocatedRequest(entry.getKey().immutable(),
+                        new Request(fan.getAirflowOriginSide(), amount, fan.getSpeed() < 0)));
                 }
             }
-            return orderedRequests(requests);
+            return requests;
         }
     }
 }

@@ -1310,20 +1310,22 @@ final class ForgeAtmospherePrototype {
             var state = chunks.get(chunkKey);
             var positions = ForgeFanTransport.activeFanPositions(state.chunk);
             if (positions.isEmpty()) continue;
-            if (state.readable) applyFanCells(level, positions, grid, AtmosphereGrid.CELL_SIZE,
+            var fanCache = ForgeFanTransport.ChunkFanCache.forLevel(level, config.createFanTransportPerRpm());
+            if (state.readable) applyFanCells(level, positions, grid, AtmosphereGrid.CELL_SIZE, fanCache,
                 key -> capacityAt(level, key), (from, to) -> canTransferDown(server, from, to, false));
-            if (state.smokeReadable) applyFanCells(level, positions, smokeGrid, SmokeGridLayout.CELL_SIZE,
+            if (state.smokeReadable) applyFanCells(level, positions, smokeGrid, SmokeGridLayout.CELL_SIZE, fanCache,
                 key -> smokeCapacityAt(level, key), (from, to) -> canTransferDown(server, from, to, true));
             for (var material : AtmosphereMaterial.values()) {
                 if (state.materialReadable.contains(material)) applyFanCells(level, positions,
-                    materialGrids.get(material), material.cellSize(), key -> materialCapacityAt(level, material, key),
+                    materialGrids.get(material), material.cellSize(), fanCache,
+                    key -> materialCapacityAt(level, material, key),
                     (from, to) -> canMaterialTransferDown(server, material, from, to));
             }
         }
     }
 
     private void applyFanCells(ServerLevel level, List<BlockPos> positions,
-        AtmosphereGrid<ResourceKey<Level>> target, int size,
+        AtmosphereGrid<ResourceKey<Level>> target, int size, ForgeFanTransport.ChunkFanCache fanCache,
         ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacity,
         BiPredicate<AtmosphereGrid.CellKey<ResourceKey<Level>>, AtmosphereGrid.CellKey<ResourceKey<Level>>> canTransfer) {
         if (!AtmosphereFanTransport.supportsCellSize(size)) return;
@@ -1331,12 +1333,12 @@ final class ForgeAtmospherePrototype {
         for (var pos : positions) {
             var key = new AtmosphereGrid.CellKey<>(level.dimension(), Math.floorDiv(pos.getX(), size),
                 Math.floorDiv(pos.getY(), size), Math.floorDiv(pos.getZ(), size));
-            if (seen.add(key)) applyFans(level, target, key, size, capacity, canTransfer);
+            if (seen.add(key)) applyFans(level, target, key, size, fanCache, capacity, canTransfer);
         }
     }
 
     private void applyFans(ServerLevel level, AtmosphereGrid<ResourceKey<Level>> target,
-        AtmosphereGrid.CellKey<ResourceKey<Level>> source, int size,
+        AtmosphereGrid.CellKey<ResourceKey<Level>> source, int size, ForgeFanTransport.ChunkFanCache fanCache,
         ToIntFunction<AtmosphereGrid.CellKey<ResourceKey<Level>>> capacity,
         BiPredicate<AtmosphereGrid.CellKey<ResourceKey<Level>>, AtmosphereGrid.CellKey<ResourceKey<Level>>> canTransfer) {
         fanCellsChecked++;
@@ -1344,8 +1346,7 @@ final class ForgeAtmospherePrototype {
         int sourceCapacity = capacity.applyAsInt(source);
         if (sourceCapacity < 0) return;
         BlockPos origin = new BlockPos(source.x() * size, source.y() * size, source.z() * size);
-        for (var request : ForgeFanTransport.collect(level, origin, size,
-            tuning().integrations().createFanTransportPerRpm())) {
+        for (var request : fanCache.requestsInCell(origin, size)) {
             fanRequests++;
             var current = target.get(source);
             var directions = Direction.values();
