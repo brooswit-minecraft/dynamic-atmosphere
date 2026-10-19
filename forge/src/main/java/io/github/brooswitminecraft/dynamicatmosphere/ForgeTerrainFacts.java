@@ -7,21 +7,25 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.attachment.AttachmentType;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import net.neoforged.neoforge.registries.NeoForgeRegistries;
+
 import java.util.function.Supplier;
 
-/** Server-thread cache, attached to chunk identity and deliberately not serialized. */
-public final class ForgeAtmosphereCapacity {
+/**
+ * Server-thread terrain-facts cache, attached to chunk identity and deliberately not
+ * serialized. One cache per chunk is shared by Vapor, Smoke and every material grid.
+ */
+public final class ForgeTerrainFacts {
     private static final DeferredRegister<AttachmentType<?>> TYPES =
         DeferredRegister.create(NeoForgeRegistries.ATTACHMENT_TYPES, DynamicAtmosphereMod.MODID);
-    private static final Supplier<AttachmentType<AtmosphereCapacityCache>> CACHE = TYPES.register("capacity_cache", () ->
+    private static final Supplier<AttachmentType<TerrainFactsCache>> CACHE = TYPES.register("terrain_facts_cache", () ->
         AttachmentType.builder(holder -> {
             LevelChunk chunk = (LevelChunk) holder;
-            return new AtmosphereCapacityCache(chunk.getMinBuildHeight(), chunk.getMaxBuildHeight());
+            return new TerrainFactsCache(chunk.getMinBuildHeight(), chunk.getMaxBuildHeight());
         }).build());
 
     public static void register(IEventBus bus) { TYPES.register(bus); }
 
-    static AtmosphereCapacityCache get(LevelChunk chunk) { return chunk.getData(CACHE.get()); }
+    static TerrainFactsCache get(LevelChunk chunk) { return chunk.getData(CACHE.get()); }
 
     public static void blockChanged(LevelChunk chunk, BlockPos pos, BlockState previous, BlockState next) {
         if (previous == null || chunk.getLevel().isClientSide) return;
@@ -37,5 +41,5 @@ public final class ForgeAtmosphereCapacity {
         if (cache != null) cache.clear();
     }
 
-    private ForgeAtmosphereCapacity() { }
+    private ForgeTerrainFacts() { }
 }
