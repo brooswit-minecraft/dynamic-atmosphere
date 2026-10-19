@@ -1308,9 +1308,9 @@ final class ForgeAtmospherePrototype {
             })) {
             var level = server.getLevel(chunkKey.dimension());
             var state = chunks.get(chunkKey);
-            var positions = ForgeFanTransport.activeFanPositions(state.chunk);
-            if (positions.isEmpty()) continue;
             var fanCache = ForgeFanTransport.ChunkFanCache.forLevel(level, config.createFanTransportPerRpm());
+            var positions = fanCache.positionsInChunk(chunkKey.x(), chunkKey.z());
+            if (positions.isEmpty()) continue;
             if (state.readable) applyFanCells(level, positions, grid, AtmosphereGrid.CELL_SIZE, fanCache,
                 key -> capacityAt(level, key), (from, to) -> canTransferDown(server, from, to, false));
             if (state.smokeReadable) applyFanCells(level, positions, smokeGrid, SmokeGridLayout.CELL_SIZE, fanCache,
