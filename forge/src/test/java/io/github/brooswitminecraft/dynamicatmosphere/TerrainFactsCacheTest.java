@@ -2,6 +2,7 @@ package io.github.brooswitminecraft.dynamicatmosphere;
 
 import org.junit.jupiter.api.Test;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -66,25 +67,20 @@ class TerrainFactsCacheTest {
     }
 
     @Test
-    void multipleGridsQueryingTheSameUnchangedCellReuseTheSameTerrainFacts() {
+    void emptyBlockCountWithScanSupplierScansOnlyOnce() {
         var cache = new TerrainFactsCache(-64, 320);
         var scans = new AtomicInteger();
-        int vaporAir = read(cache, 5, 10, 5, 48, scans);
-        int smokeAir = read(cache, 5, 10, 5, 48, scans);
-        int dustAir = read(cache, 5, 10, 5, 48, scans);
-        assertEquals(1, scans.get(), "only the first grid's query should scan terrain");
-        assertEquals(vaporAir, smokeAir);
-        assertEquals(vaporAir, dustAir);
+        Supplier<TerrainFactsCache.Scan> scan = () -> {
+            scans.incrementAndGet();
+            return new TerrainFactsCache.Scan(48, false);
+        };
+        assertEquals(48, cache.emptyBlockCount(5, 10, 5, scan));
+        assertEquals(48, cache.emptyBlockCount(5, 10, 5, scan));
+        assertEquals(1, scans.get(), "a cached cell must not be rescanned");
 
-        // Each grid still derives its own, independent capacity from the shared facts.
-        assertEquals(AtmosphereGridLayout.capacityForAirBlocks(vaporAir),
-            AtmosphereGridLayout.capacityForAirBlocks(cache.emptyBlockCount(5, 10, 5)));
-        assertEquals(SmokeGridLayout.capacityForAirBlocks(smokeAir),
-            SmokeGridLayout.capacityForAirBlocks(cache.emptyBlockCount(5, 10, 5)));
-        for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
-            assertEquals(material.capacityForAirBlocks(dustAir),
-                material.capacityForAirBlocks(cache.emptyBlockCount(5, 10, 5)));
-        }
+        cache.blockChanged(5 * 4, 10 * 4, 5 * 4, true, false);
+        assertEquals(48, cache.emptyBlockCount(5, 10, 5, scan));
+        assertEquals(2, scans.get(), "invalidation must force exactly one rescan");
     }
 
     @Test

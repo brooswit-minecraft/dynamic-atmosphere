@@ -47,6 +47,8 @@ import java.util.UUID;
 import java.util.Optional;
 import java.util.Objects;
 import java.util.function.BiPredicate;
+import java.util.function.IntUnaryOperator;
+import java.util.function.Supplier;
 import java.util.function.ToIntFunction;
 import org.slf4j.Logger;
 
@@ -1871,31 +1873,11 @@ final class ForgeAtmospherePrototype {
         }
         ChunkState state = ensureImported(level, AtmosphereGridLayout.chunkCoordinate(key.x()),
             AtmosphereGridLayout.chunkCoordinate(key.z()));
-        if (state == null || !state.readable) {
-            return -1;
-        }
+        if (state == null) return -1;
         var facts = ForgeTerrainFacts.get(state.chunk);
-        int air = facts.emptyBlockCount(key.x(), key.y(), key.z());
-        if (air < 0) {
-            int size = AtmosphereGrid.CELL_SIZE;
-            air = 0;
-            boolean bedrock = false;
-            BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-            for (int y = 0; y < size; y++) {
-                for (int z = 0; z < size; z++) {
-                    for (int x = 0; x < size; x++) {
-                        pos.set(key.x() * size + x, key.y() * size + y, key.z() * size + z);
-                        if (level.isInWorldBounds(pos)) {
-                            var block = state.chunk.getBlockState(pos);
-                            if (ForgeCapacityBlockClassifier.isEmptySpace(block)) air++;
-                            if (ForgeCapacityBlockClassifier.blocksDownwardTransfer(block)) bedrock = true;
-                        }
-                    }
-                }
-            }
-            facts.put(key.x(), key.y(), key.z(), air, bedrock);
-        }
-        return AtmosphereGridLayout.capacityForAirBlocks(air);
+        return sharedCapacity(state.readable, facts, key.x(), key.y(), key.z(),
+            () -> scanCell(level, state.chunk, key.x(), key.y(), key.z(), AtmosphereGrid.CELL_SIZE),
+            AtmosphereGridLayout::capacityForAirBlocks);
     }
 
     private int smokeCapacityAt(ServerLevel level, AtmosphereGrid.CellKey<ResourceKey<Level>> key) {
@@ -1905,30 +1887,11 @@ final class ForgeAtmospherePrototype {
             || originY + SmokeGridLayout.CELL_SIZE <= level.getMinBuildHeight()) return 0;
         ChunkState state = ensureImported(level, SmokeGridLayout.chunkCoordinate(key.x()),
             SmokeGridLayout.chunkCoordinate(key.z()));
-        if (state == null || !state.smokeReadable) return -1;
+        if (state == null) return -1;
         var facts = ForgeTerrainFacts.get(state.chunk);
-        int air = facts.emptyBlockCount(key.x(), key.y(), key.z());
-        if (air < 0) {
-            air = 0;
-            boolean bedrock = false;
-            BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-            for (int y = 0; y < SmokeGridLayout.CELL_SIZE; y++) {
-                for (int z = 0; z < SmokeGridLayout.CELL_SIZE; z++) {
-                    for (int x = 0; x < SmokeGridLayout.CELL_SIZE; x++) {
-                        pos.set(key.x() * SmokeGridLayout.CELL_SIZE + x,
-                            key.y() * SmokeGridLayout.CELL_SIZE + y,
-                            key.z() * SmokeGridLayout.CELL_SIZE + z);
-                        if (level.isInWorldBounds(pos)) {
-                            var block = state.chunk.getBlockState(pos);
-                            if (ForgeCapacityBlockClassifier.isEmptySpace(block)) air++;
-                            if (ForgeCapacityBlockClassifier.blocksDownwardTransfer(block)) bedrock = true;
-                        }
-                    }
-                }
-            }
-            facts.put(key.x(), key.y(), key.z(), air, bedrock);
-        }
-        return SmokeGridLayout.capacityForAirBlocks(air);
+        return sharedCapacity(state.smokeReadable, facts, key.x(), key.y(), key.z(),
+            () -> scanCell(level, state.chunk, key.x(), key.y(), key.z(), SmokeGridLayout.CELL_SIZE),
+            SmokeGridLayout::capacityForAirBlocks);
     }
 
     private int materialCapacityAt(
@@ -1941,27 +1904,58 @@ final class ForgeAtmospherePrototype {
         long originY = (long) key.y() * size;
         if (originY >= level.getMaxBuildHeight() || originY + size <= level.getMinBuildHeight()) return 0;
         ChunkState state = ensureImported(level, material.chunkCoordinate(key.x()), material.chunkCoordinate(key.z()));
-        if (state == null || !state.materialReadable.contains(material)) return -1;
-        TerrainFactsCache facts = ForgeTerrainFacts.get(state.chunk);
-        int air = facts.emptyBlockCount(key.x(), key.y(), key.z());
-        if (air < 0) {
-            air = 0;
-            boolean bedrock = false;
-            BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-            for (int y = 0; y < size; y++) {
-                for (int z = 0; z < size; z++) {
-                    for (int x = 0; x < size; x++) {
-                        pos.set(key.x() * size + x, key.y() * size + y, key.z() * size + z);
-                        if (!level.isInWorldBounds(pos)) continue;
-                        var block = state.chunk.getBlockState(pos);
+        if (state == null) return -1;
+        var facts = ForgeTerrainFacts.get(state.chunk);
+        return sharedCapacity(state.materialReadable.contains(material), facts, key.x(), key.y(), key.z(),
+            () -> scanCell(level, state.chunk, key.x(), key.y(), key.z(), size),
+            material::capacityForAirBlocks);
+    }
+
+    /**
+     * The production seam every one of Vapor/Smoke/material capacity lookups funnels through:
+     * an unreadable grid returns -1 regardless of what another grid has already warmed into the
+     * shared {@code facts} cache (so a warmed cache never authorizes an unreadable grid's capacity
+     * or downward transfer), and a readable grid derives its own capacity from the shared terrain
+     * facts, scanning (and caching) only when those facts are not already known.
+     */
+    static int sharedCapacity(
+        boolean readable,
+        TerrainFactsCache facts,
+        int cellX,
+        int cellY,
+        int cellZ,
+        Supplier<TerrainFactsCache.Scan> scan,
+        IntUnaryOperator capacityForAirBlocks
+    ) {
+        if (!readable) return -1;
+        int air = facts.emptyBlockCount(cellX, cellY, cellZ, scan);
+        return capacityForAirBlocks.applyAsInt(air);
+    }
+
+    private static TerrainFactsCache.Scan scanCell(
+        ServerLevel level,
+        LevelChunk chunk,
+        int cellX,
+        int cellY,
+        int cellZ,
+        int size
+    ) {
+        int air = 0;
+        boolean bedrock = false;
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int y = 0; y < size; y++) {
+            for (int z = 0; z < size; z++) {
+                for (int x = 0; x < size; x++) {
+                    pos.set(cellX * size + x, cellY * size + y, cellZ * size + z);
+                    if (level.isInWorldBounds(pos)) {
+                        var block = chunk.getBlockState(pos);
                         if (ForgeCapacityBlockClassifier.isEmptySpace(block)) air++;
                         if (ForgeCapacityBlockClassifier.blocksDownwardTransfer(block)) bedrock = true;
                     }
                 }
             }
-            facts.put(key.x(), key.y(), key.z(), air, bedrock);
         }
-        return material.capacityForAirBlocks(air);
+        return new TerrainFactsCache.Scan(air, bedrock);
     }
 
     private boolean canTransferDown(
