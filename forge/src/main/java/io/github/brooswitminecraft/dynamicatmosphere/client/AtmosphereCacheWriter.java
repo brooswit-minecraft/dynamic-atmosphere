@@ -22,6 +22,12 @@ final class AtmosphereCacheWriter {
         return thread;
     });
     private boolean running;
+    /** Test-only synchronization seams (default no-op): beforeSave fires on the writer thread right
+     *  before each disk.saveDelta attempt, letting a test deterministically inject a concurrent
+     *  submit() mid-write; afterAttempt fires right after each attempt resolves, success or failure,
+     *  letting a test wait for a drain pass without sleeping. */
+    volatile Runnable beforeSave = () -> { };
+    volatile Runnable afterAttempt = () -> { };
 
     AtmosphereCacheWriter(AtmosphereDiskCache disk) { this.disk = disk; }
 
@@ -32,11 +38,17 @@ final class AtmosphereCacheWriter {
         retry();
     }
 
-    /** Same-session reconnect view: disk state with any not-yet-flushed deltas overlaid. Blocks on disk I/O. */
-    synchronized List<AtmosphereClientCache.Update> load(String namespace) throws IOException {
-        var deltas = pending.get(namespace);
+    /** Same-session reconnect view: disk state with any not-yet-flushed deltas overlaid. */
+    List<AtmosphereClientCache.Update> load(String namespace) throws IOException {
+        Map<AtmosphereClientCache.Chunk, List<AtmosphereClientCache.Update>> deltas;
+        synchronized (this) {
+            var map = pending.get(namespace);
+            deltas = (map == null || map.isEmpty()) ? Map.of() : Map.copyOf(map);
+        }
+        // Disk I/O deliberately runs without the writer monitor held, so it never blocks a
+        // concurrent submit()/retry() from the client thread.
         var base = disk.load(namespace);
-        if (deltas == null || deltas.isEmpty()) return base;
+        if (deltas.isEmpty()) return base;
         var result = new ArrayList<AtmosphereClientCache.Update>();
         for (var update : base) {
             if (!deltas.containsKey(AtmosphereDiskCache.chunkOf(update.cell()))) result.add(update);
@@ -70,21 +82,35 @@ final class AtmosphereCacheWriter {
         var failed = new java.util.HashSet<String>();
         while (true) {
             String namespace;
-            Map<AtmosphereClientCache.Chunk, List<AtmosphereClientCache.Update>> deltas;
+            Map<AtmosphereClientCache.Chunk, List<AtmosphereClientCache.Update>> snapshot;
             synchronized (this) {
                 namespace = pending.keySet().stream().filter(key -> !failed.contains(key)).findFirst().orElse(null);
                 if (namespace == null) { running = false; return; }
-                deltas = pending.get(namespace);
+                // Detach an immutable in-flight generation so a concurrent submit() can keep
+                // mutating/replacing entries in the live pending map while disk.saveDelta runs below
+                // without the writer monitor held.
+                snapshot = Map.copyOf(pending.get(namespace));
             }
-            try { disk.saveDelta(namespace, deltas); }
+            beforeSave.run();
+            try { disk.saveDelta(namespace, snapshot); }
             catch (IOException | RuntimeException failure) {
                 LogUtils.getLogger().warn("Cannot save disposable atmosphere cache; checkpoint retained for retry", failure);
                 failed.add(namespace);
+                afterAttempt.run();
                 continue;
             }
             synchronized (this) {
-                if (pending.get(namespace) == deltas) pending.remove(namespace);
+                var current = pending.get(namespace);
+                if (current != null) {
+                    // Acknowledge only the exact deltas we saved: a chunk re-submitted (same key,
+                    // new value reference) while the write was in flight keeps its newer delta pending.
+                    for (var entry : snapshot.entrySet()) {
+                        if (current.get(entry.getKey()) == entry.getValue()) current.remove(entry.getKey());
+                    }
+                    if (current.isEmpty()) pending.remove(namespace);
+                }
             }
+            afterAttempt.run();
         }
     }
 

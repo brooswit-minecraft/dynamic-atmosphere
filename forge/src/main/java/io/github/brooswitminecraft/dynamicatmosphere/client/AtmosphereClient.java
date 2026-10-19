@@ -54,6 +54,11 @@ public final class AtmosphereClient {
     private static final Deque<AtmosphereClientCache.Update> pendingRestore = new ArrayDeque<>();
     private static String pendingRestoreNamespace;
     private static String pendingRestoreDimension;
+    /** Monotonic token for the in-flight restore; bumped on every begin/cancel so a stale disk read
+     *  from a superseded connection/world (even one sharing the same namespace, e.g. a disconnect
+     *  and reconnect to the same world) can never be admitted into a later session. */
+    private static long restoreGeneration;
+    private static long pendingRestoreGeneration = -1;
 
     static {
         Runtime.getRuntime().addShutdownHook(new Thread(SAVER::shutdown, "Atmosphere cache shutdown"));
@@ -126,10 +131,13 @@ public final class AtmosphereClient {
 
     /** Kicks off the historical disk read off this (main packet handler) thread; never blocks here. */
     private static void beginRestore(String namespace, String dimension) {
+        long generation;
         synchronized (RESTORE_LOCK) {
+            generation = ++restoreGeneration;
             pendingRestore.clear();
             pendingRestoreNamespace = namespace;
             pendingRestoreDimension = dimension;
+            pendingRestoreGeneration = generation;
         }
         SAVER.loadAsync(namespace).whenComplete((updates, failure) -> {
             if (failure != null) {
@@ -137,17 +145,20 @@ public final class AtmosphereClient {
                 return;
             }
             synchronized (RESTORE_LOCK) {
-                // A later namespace switch (teleport/reconnect/world change) supersedes this result.
-                if (namespace.equals(pendingRestoreNamespace)) pendingRestore.addAll(updates);
+                // A later namespace switch, disconnect/reconnect (even to the same world/namespace)
+                // or ClientLevel replacement bumps the generation and supersedes this result.
+                if (generation == pendingRestoreGeneration) pendingRestore.addAll(updates);
             }
         });
     }
 
     private static void cancelRestore() {
         synchronized (RESTORE_LOCK) {
+            restoreGeneration++;
             pendingRestore.clear();
             pendingRestoreNamespace = null;
             pendingRestoreDimension = null;
+            pendingRestoreGeneration = -1;
         }
     }
 
@@ -213,11 +224,13 @@ public final class AtmosphereClient {
             unloadedLevel = null;
         }
         if (current != observedLevel) {
+            // Any ClientLevel replacement invalidates the in-flight restore, even when the
+            // dimension id is unchanged (e.g. a disconnect/reconnect back into the same world).
+            cancelRestore();
             if (current == null || !current.dimension().location().toString().equals(cacheDimension)) {
                 checkpoint();
                 cacheNamespace = null;
                 cacheDimension = null;
-                cancelRestore();
             }
             if (observedLevel != null && current != null) {
                 SESSION.clear();

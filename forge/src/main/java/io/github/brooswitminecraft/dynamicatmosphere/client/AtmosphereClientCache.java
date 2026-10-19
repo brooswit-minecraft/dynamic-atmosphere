@@ -35,6 +35,10 @@ public final class AtmosphereClientCache {
     private final Map<Cell, Amount> cells = new LinkedHashMap<>(16, 0.75f, true);
     private final Map<Chunk, Set<Cell>> chunkMembers = new LinkedHashMap<>();
     private final Set<Chunk> dirtyChunks = new java.util.LinkedHashSet<>();
+    /** Chunks live authority has ever declared for the current dimension/session; a disk restore
+     *  must never write into one of these, even if the specific cell it names was never touched. */
+    private final Set<Chunk> knownAuthoritative = new HashSet<>();
+    private boolean wholeWorldAuthoritative;
     private final AtmosphereLodHierarchy lod;
     private final int baseCellSize;
     private final int cellBudget;
@@ -88,6 +92,8 @@ public final class AtmosphereClientCache {
         detailedView = cell -> true;
         dimension = null;
         hasSnapshot = false;
+        knownAuthoritative.clear();
+        wholeWorldAuthoritative = false;
         tick = 0;
         revision++;
         detailedRevision = -1;
@@ -121,6 +127,7 @@ public final class AtmosphereClientCache {
         }
         if (snapshot != null) {
             snapshotChunks.addAll(authoritativeChunks);
+            knownAuthoritative.addAll(authoritativeChunks);
             for (Update update : updates) {
                 snapshot.put(update.cell(), update);
             }
@@ -134,6 +141,7 @@ public final class AtmosphereClientCache {
                 chunkMembers.clear();
                 lod.clear();
                 reconcile(previous, snapshot.values());
+                wholeWorldAuthoritative = true;
             } else {
                 var absent = new ArrayList<Update>();
                 for (var entry : cells.entrySet()) {
@@ -149,6 +157,7 @@ public final class AtmosphereClientCache {
             snapshotChunks = null;
             hasSnapshot = true;
         } else if (hasSnapshot && !snapshotEnd) {
+            knownAuthoritative.addAll(authoritativeChunks);
             reconcile(cells, updates);
         }
         trim();
@@ -189,15 +198,22 @@ public final class AtmosphereClientCache {
         return result;
     }
 
-    /** Seed before receiving authority; cached visuals appear immediately and do not authorize deltas. */
+    /**
+     * Seed before/while receiving authority; cached visuals appear immediately and do not authorize
+     * deltas. Only chunks live authority has never declared are eligible: a completed live snapshot
+     * must not discard delayed history for chunks it never touched, and a still-in-progress partial
+     * snapshot must already exclude the chunks it has declared so far, not just the final set.
+     */
     public void restore(List<Update> updates) {
-        if (hasSnapshot) return;
-        for (Update update : updates) {
-            int material = Math.clamp(update.amount(), 0, 1_000_000);
-            int capacity = Math.clamp(update.capacity(), 0, 1000);
-            float fullness = capacity == 0 ? 0 : Math.min(1000, material * 1000.0f / capacity);
-            if (material > 0 && !cells.containsKey(update.cell())) {
-                put(update.cell(), new Amount(fullness, fullness, tick, material, capacity), true);
+        if (!wholeWorldAuthoritative) {
+            for (Update update : updates) {
+                if (knownAuthoritative.contains(chunk(update.cell())) || cells.containsKey(update.cell())) continue;
+                int material = Math.clamp(update.amount(), 0, 1_000_000);
+                int capacity = Math.clamp(update.capacity(), 0, 1000);
+                float fullness = capacity == 0 ? 0 : Math.min(1000, material * 1000.0f / capacity);
+                if (material > 0) {
+                    put(update.cell(), new Amount(fullness, fullness, tick, material, capacity), true);
+                }
             }
         }
         trim();

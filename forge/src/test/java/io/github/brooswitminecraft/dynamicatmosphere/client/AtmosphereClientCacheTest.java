@@ -297,6 +297,32 @@ class AtmosphereClientCacheTest {
     }
 
     @Test
+    void delayedRestoreAfterSnapshotStillAppliesUnaffectedChunksButSkipsDeclaredOnes() {
+        var cache = new AtmosphereClientCache();
+        var chunkA = new AtmosphereClientCache.Chunk(-1, 0); // contains A
+        cache.changeDimension("overworld");
+        cache.apply("overworld", true, true, List.of(chunkA), List.of(update(A, 900)));
+        assertEquals(900, cache.storedAmount(A));
+        // Disk history for A (its chunk is now authoritative) and B (never declared authoritative,
+        // out of view) completes after the snapshot already finished.
+        cache.restore(List.of(update(A, 100), update(B, 600)));
+        assertEquals(900, cache.storedAmount(A)); // Live authority for A is never overwritten.
+        assertEquals(600, cache.storedAmount(B)); // The untouched chunk's history still restores.
+    }
+
+    @Test
+    void delayedRestoreDuringAnInProgressSnapshotAlreadyExcludesDeclaredChunks() {
+        var cache = new AtmosphereClientCache();
+        var chunkA = new AtmosphereClientCache.Chunk(-1, 0); // contains A
+        cache.changeDimension("overworld");
+        cache.apply("overworld", true, false, List.of(chunkA), List.of(update(A, 900))); // snapshot still open
+        // A disk read for A completes mid-snapshot, before snapshotEnd. Chunk A was already
+        // declared authoritative by this in-progress snapshot and must not be seeded from disk.
+        cache.restore(List.of(update(A, 100)));
+        assertEquals(0, cache.storedAmount(A));
+    }
+
+    @Test
     void disconnectAndSameDimensionWorldReplacementRequireFreshSnapshot() {
         var cache = new AtmosphereClientCache();
         cache.changeDimension("overworld");
