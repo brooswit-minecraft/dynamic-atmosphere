@@ -2306,6 +2306,12 @@ final class ForgeAtmospherePrototype {
             for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
                 previous.materialCells.get(material).keySet().forEach(materialGrids.get(material)::remove);
             }
+            // MINECRAFT-435: this chunk instance is being replaced WITHOUT an intervening
+            // onChunkUnload callback (that path already calls clearScanCursors itself) -- any
+            // resumable per-chunk state keyed by this position (section cursors, accumulated
+            // portal positions, pending emission/transfer queues, hook-completion flags) still
+            // describes the OLD chunk incarnation and must never resume against the new one.
+            clearScanCursors(key);
         }
         ChunkState state = new ChunkState(chunk);
         chunks.put(key, state);

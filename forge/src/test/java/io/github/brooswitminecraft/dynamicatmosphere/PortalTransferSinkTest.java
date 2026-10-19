@@ -63,13 +63,6 @@ class PortalTransferSinkTest {
     }
 
     @Test
-    void anyReturnsEmptyOnlyWhenNoCandidateHasEverBeenObserved() {
-        assertTrue(PortalTransferSink.any(List.of()).isEmpty());
-        var observed = new BlockPos(100, 50, 0);
-        assertEquals(Optional.of(observed), PortalTransferSink.any(List.of(observed)));
-    }
-
-    @Test
     void planDeclinesOnEmptySourceNonPositiveThroughputOrUnresolvedDestination() {
         assertFalse(PortalTransferSink.plan(0, 64, true).active());
         assertFalse(PortalTransferSink.plan(100, 0, true).active());
@@ -119,15 +112,6 @@ class PortalTransferSinkTest {
     }
 
     @Test
-    void anyNeverPicksAnUnloadedEndCandidateOverALoadedValidExit() {
-        var unloaded = new BlockPos(100, 50, 0);
-        var loadedAndValid = new BlockPos(200, 50, 0);
-        var eligible = PortalTransferSink.filterStale(
-            List.of(unloaded, loadedAndValid), pos -> pos.equals(loadedAndValid));
-        assertEquals(Optional.of(loadedAndValid), PortalTransferSink.any(eligible));
-    }
-
-    @Test
     void chunkBoxAroundCoversEveryChunkThatCouldContainABlockWithinRadius() {
         // Anchor at the origin of chunk (0,0); a radius of 128 blocks reaches 8 chunks either way.
         var box = PortalTransferSink.chunkBoxAround(new BlockPos(5, 64, 5), 128);
@@ -135,16 +119,6 @@ class PortalTransferSinkTest {
         assertEquals(8, box[1]);
         assertEquals(-8, box[2]);
         assertEquals(8, box[3]);
-    }
-
-    private static Map<ResourceKey<Level>, Map<Long, Set<BlockPos>>> registryOf(
-        ResourceKey<Level> dimension, Map<ChunkPos, Set<BlockPos>> byChunk
-    ) {
-        var inner = new HashMap<Long, Set<BlockPos>>();
-        byChunk.forEach((chunkPos, positions) -> inner.put(chunkPos.toLong(), positions));
-        var outer = new HashMap<ResourceKey<Level>, Map<Long, Set<BlockPos>>>();
-        outer.put(dimension, inner);
-        return outer;
     }
 
     /** {@link PortalTransferSink#knownPositionsWindowed} requires a {@link java.util.NavigableMap}, matching production. */
@@ -156,37 +130,6 @@ class PortalTransferSinkTest {
         var outer = new HashMap<ResourceKey<Level>, java.util.NavigableMap<Long, Set<BlockPos>>>();
         outer.put(dimension, inner);
         return outer;
-    }
-
-    @Test
-    void knownPositionsNearOnlyTouchesChunksInsideTheGivenBox() {
-        var inBox = new BlockPos(10, 64, 10); // chunk (0, 0)
-        var outsideBox = new BlockPos(2000, 64, 2000); // chunk (125, 125)
-        var registry = registryOf(Level.NETHER, Map.of(
-            new ChunkPos(0, 0), Set.of(inBox),
-            new ChunkPos(125, 125), Set.of(outsideBox)));
-        var found = PortalTransferSink.knownPositionsNear(registry, Level.NETHER, -1, 1, -1, 1);
-        assertEquals(Set.of(inBox), Set.copyOf(found));
-    }
-
-    @Test
-    void knownPositionsNearReturnsEmptyForAnUnknownDimensionOrEmptyRegistry() {
-        var registry = registryOf(Level.NETHER, Map.of(new ChunkPos(0, 0), Set.of(new BlockPos(1, 64, 1))));
-        assertTrue(PortalTransferSink.knownPositionsNear(registry, Level.END, -1, 1, -1, 1).isEmpty());
-        assertTrue(PortalTransferSink.knownPositionsNear(Map.of(), Level.NETHER, -1, 1, -1, 1).isEmpty());
-    }
-
-    @Test
-    void knownPositionsNearCombinesEveryChunkInsideTheBoxButNoneOutsideIt() {
-        var west = new BlockPos(-10, 64, 0); // chunk (-1, 0)
-        var east = new BlockPos(10, 64, 0); // chunk (0, 0)
-        var farEast = new BlockPos(2000, 64, 0); // chunk (125, 0)
-        var registry = registryOf(Level.OVERWORLD, Map.of(
-            new ChunkPos(-1, 0), Set.of(west),
-            new ChunkPos(0, 0), Set.of(east),
-            new ChunkPos(125, 0), Set.of(farEast)));
-        var found = Set.copyOf(PortalTransferSink.knownPositionsNear(registry, Level.OVERWORLD, -1, 0, 0, 0));
-        assertEquals(Set.of(west, east), found);
     }
 
     @Test
@@ -301,6 +244,80 @@ class PortalTransferSinkTest {
         var queues = new HashMap<ResourceKey<Level>, Map<Long, java.util.Deque<BlockPos>>>();
         PortalTransferSink.ensureQueue(queues, Level.NETHER, 1L, Set.of());
         org.junit.jupiter.api.Assertions.assertNull(PortalTransferSink.queueFor(queues, Level.NETHER, 1L));
+    }
+
+    @Test
+    void advanceNetherCandidateScanFinishesInOneCallForASparseBox() {
+        var only = new BlockPos(10, 64, 10); // chunk (0, 0)
+        Map<Long, Set<BlockPos>> byChunk = Map.of(ChunkPos.asLong(0, 0), Set.of(only));
+        var scan = new PortalTransferSink.CandidateScan();
+        var budget = new PortalTransferSink.Budget(100);
+        var examined = new java.util.ArrayList<BlockPos>();
+        PortalTransferSink.advanceNetherCandidateScan(byChunk, 0, 0, 0, 0, new BlockPos(12, 64, 12), 128,
+            scan, budget, pos -> { examined.add(pos); return true; });
+        assertTrue(scan.done);
+        assertEquals(only, scan.best);
+        assertEquals(List.of(only), examined);
+    }
+
+    /**
+     * MINECRAFT-435 (third review): "Add a counting dense-single-registry-chunk fixture" -- a
+     * single chunk entry with far more candidates than the per-call budget must still cost
+     * exactly the budget, not the whole dense set, proving one densely-populated destination
+     * chunk can never force unbounded work in a single call.
+     */
+    @Test
+    void advanceNetherCandidateScanBoundsExaminationOfASingleDenseChunkEntryToTheBudget() {
+        var dense = new java.util.HashSet<BlockPos>();
+        for (int i = 0; i < 10_000; i++) dense.add(new BlockPos(i, 64, 0));
+        Map<Long, Set<BlockPos>> byChunk = Map.of(ChunkPos.asLong(0, 0), dense);
+        var scan = new PortalTransferSink.CandidateScan();
+        var budget = new PortalTransferSink.Budget(50);
+        int[] callCount = {0};
+        PortalTransferSink.advanceNetherCandidateScan(byChunk, 0, 0, 0, 0, BlockPos.ZERO, 20_000,
+            scan, budget, pos -> { callCount[0]++; return false; });
+        assertFalse(scan.done, "10,000 positions in one chunk entry cannot all be examined within a budget of 50");
+        assertEquals(50, callCount[0], "exactly the budget's worth of positions were examined, never the whole dense set");
+        assertFalse(budget.hasRemaining());
+    }
+
+    @Test
+    void advanceNetherCandidateScanResumesAcrossCallsAndExaminesEveryPositionInADenseChunkExactlyOnce() {
+        var dense = new java.util.HashSet<BlockPos>();
+        for (int i = 0; i < 237; i++) dense.add(new BlockPos(i, 64, 0));
+        Map<Long, Set<BlockPos>> byChunk = Map.of(ChunkPos.asLong(0, 0), dense);
+        var scan = new PortalTransferSink.CandidateScan();
+        var seen = new java.util.HashSet<BlockPos>();
+        int calls = 0;
+        while (!scan.done) {
+            var budget = new PortalTransferSink.Budget(40);
+            PortalTransferSink.advanceNetherCandidateScan(byChunk, 0, 0, 0, 0, BlockPos.ZERO, 1000,
+                scan, budget, pos -> { assertTrue(seen.add(pos), "no position examined twice across the resumed scan"); return true; });
+            calls++;
+            assertTrue(calls < 100, "safety bound to catch a runaway loop on test failure");
+        }
+        assertEquals(dense, seen, "every position in the dense chunk examined exactly once across the resumed scan, none omitted");
+        assertTrue(calls > 1, "a budget of 40 over 237 positions must genuinely take more than one call");
+    }
+
+    @Test
+    void advanceNetherCandidateScanFindsTheTrueNearestAcrossChunkEntriesRegardlessOfExaminationOrder() {
+        var closerToAnchorButExaminedLast = new BlockPos(5, 64, 0); // chunk (0, 0)
+        var fartherButExaminedFirst = new BlockPos(1000, 64, 0); // chunk (62, 0)
+        var byChunk = new java.util.HashMap<Long, Set<BlockPos>>();
+        byChunk.put(ChunkPos.asLong(0, 0), Set.of(closerToAnchorButExaminedLast));
+        byChunk.put(ChunkPos.asLong(62, 0), Set.of(fartherButExaminedFirst));
+        var scan = new PortalTransferSink.CandidateScan();
+        int calls = 0;
+        while (!scan.done) {
+            var budget = new PortalTransferSink.Budget(1);
+            PortalTransferSink.advanceNetherCandidateScan(byChunk, 0, 62, 0, 0, BlockPos.ZERO, 2000,
+                scan, budget, pos -> true);
+            calls++;
+            assertTrue(calls < 100, "safety bound to catch a runaway loop on test failure");
+        }
+        assertEquals(closerToAnchorButExaminedLast, scan.best,
+            "the globally nearest candidate is kept even though a farther one was examined in an earlier call");
     }
 
     @Test

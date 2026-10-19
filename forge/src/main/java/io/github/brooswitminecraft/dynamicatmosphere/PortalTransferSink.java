@@ -13,9 +13,11 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
@@ -105,6 +107,26 @@ public final class PortalTransferSink {
     private BlockPos cachedEndDestination;
     /** Persisted, rotating cursor into the End registry's own chunk-entry key space; see {@link #resolveEndDestination}. */
     private long endRegistryProbeCursor = Long.MIN_VALUE;
+    /**
+     * MINECRAFT-435: in-progress, resumable nearest-candidate search for one Nether destination
+     * box -- keyed by {@link NetherBoxKey}, which includes the destination dimension, since the
+     * same box coordinates can independently arise for both an Overworld source (destination the
+     * Nether) and a Nether source (destination the Overworld), and this map is shared across
+     * every chunk and every dimension's sources, not scoped to one call or one chunk. Persisted
+     * across calls (not just within one), so a box whose candidate set is too dense to fully
+     * examine within one call's {@link
+     * DynamicAtmosphereServerConfig.PortalTransferSinkTuning#maxCandidateOperationsPerCall} budget
+     * keeps its running nearest-so-far and resumes exactly where it left off next call, rather
+     * than ever picking a non-nearest candidate from only a partial view. See {@link
+     * #advanceNetherCandidateScan}. A box resolved to completion is removed immediately
+     * (reusing it is instead the job of the PER-CALL {@code resolvedThisCall} cache {@link
+     * #transferNetherPortal} is given -- see {@link #drainNetherTransfers} -- so a stale answer
+     * is never reused into a later, separate call).
+     */
+    private final Map<NetherBoxKey, CandidateScan> netherCandidateScans = new HashMap<>();
+
+    /** MINECRAFT-435: see {@link #netherCandidateScans}. Pure value key, safe as a Map key (records implement equals/hashCode). */
+    private record NetherBoxKey(ResourceKey<Level> destinationDimension, int minChunkX, int maxChunkX, int minChunkZ, int maxChunkZ) { }
 
     /**
      * MINECRAFT-435: {@code netherPortalsHere}/{@code endPortalsHere} are the positions {@link
@@ -150,15 +172,17 @@ public final class PortalTransferSink {
             clearQueue(pendingEndTransfers, level.dimension(), chunkKey);
             return true;
         }
-        int maxPerCall = DynamicAtmosphereServerConfig.snapshot().portalTransferSink().maxSourcesPerCall();
-        // Pass-local: every position below is checked against the identical, already-recorded
-        // registry snapshot for this one synchronous call, so a resolved destination chunk-box
-        // is safely reused across positions that land on it rather than re-resolved each time.
-        var netherCandidateCache = new HashMap<List<Integer>, Collection<BlockPos>>();
-        boolean netherDone = drainQueue(pendingNetherTransfers, level.dimension(), chunkKey, maxPerCall,
-            pos -> transferNetherPortal(server, level, pos, throughput, netherCandidateCache));
+        var tuning = DynamicAtmosphereServerConfig.snapshot().portalTransferSink();
+        int maxPerCall = tuning.maxSourcesPerCall();
+        // MINECRAFT-435: separate, per-leg candidate-operation budgets, shared across every
+        // source this call processes for that leg -- bounds the total registry-position
+        // live-checks/nearest-comparisons this call can do, regardless of how many sources are
+        // batched or how densely populated any single destination chunk entry is.
+        boolean netherDone = drainNetherTransfers(server, level, level.dimension(), chunkKey, throughput,
+            maxPerCall, new Budget(tuning.maxCandidateOperationsPerCall()));
+        var endBudget = new Budget(tuning.maxCandidateOperationsPerCall());
         boolean endDone = drainQueue(pendingEndTransfers, level.dimension(), chunkKey, maxPerCall,
-            pos -> transferEndPortal(server, level, pos, throughput));
+            pos -> transferEndPortal(server, level, pos, throughput, endBudget));
         return netherDone && endDone;
     }
 
@@ -172,6 +196,42 @@ public final class PortalTransferSink {
     public void clearAllPendingWork() {
         pendingNetherTransfers.clear();
         pendingEndTransfers.clear();
+        netherCandidateScans.clear();
+    }
+
+    /**
+     * MINECRAFT-435: bespoke drain for the Nether leg, unlike the generic {@link #drainQueue} the
+     * End leg still uses -- a source whose destination box resolution is not yet complete (budget
+     * exhausted mid-scan, see {@link #advanceNetherCandidateScan}) must stay at the FRONT of the
+     * queue and be retried, never popped and never counted as serviced. Once a source's box
+     * resolution genuinely cannot make further progress this call, there is no point trying later
+     * sources either (the shared budget is spent), so this stops rather than skipping ahead.
+     *
+     * <p>{@code resolvedThisCall} is a fresh, call-local memo of boxes already fully resolved
+     * during THIS call: several source portals in the same chunk visit that resolve to an
+     * identical box reuse that one answer for free (the "pass-local reuse" this ticket requires),
+     * without reusing a possibly-stale answer across separate, later calls -- unlike {@link
+     * #netherCandidateScans}, which only ever holds a NOT-YET-complete scan.</p>
+     */
+    private boolean drainNetherTransfers(
+        MinecraftServer server, ServerLevel level, ResourceKey<Level> dimension, long chunkKey,
+        int throughput, int maxSources, Budget candidateBudget
+    ) {
+        var queue = queueFor(pendingNetherTransfers, dimension, chunkKey);
+        if (queue == null) return true;
+        var resolvedThisCall = new HashMap<NetherBoxKey, Optional<BlockPos>>();
+        int processed = 0;
+        while (processed < maxSources && !queue.isEmpty()) {
+            BlockPos pos = queue.peek();
+            if (!transferNetherPortal(server, level, pos, throughput, candidateBudget, resolvedThisCall)) break;
+            queue.poll();
+            processed++;
+        }
+        if (queue.isEmpty()) {
+            clearQueue(pendingNetherTransfers, dimension, chunkKey);
+            return true;
+        }
+        return false;
     }
 
     static void ensureQueue(
@@ -232,40 +292,15 @@ public final class PortalTransferSink {
     }
 
     /**
-     * Bounded registry lookup for the Nether leg (which has a real spatial search radius to
-     * narrow by) -- touches only the chunk entries whose chunk coordinates fall inside the given
-     * box, instead of flattening every chunk the destination dimension has ever recorded a portal
-     * in. The box is expected to already cover every block position within the real search radius
-     * (chunk-granular, so it is allowed to be a little generous at the edges); {@link
-     * #nearestWithinRadius} still applies the exact per-block distance check afterward, so a
-     * chunk-box-level over-inclusion here can never admit a candidate that search radius would
-     * otherwise have rejected. Pure and injectable, so it is testable with a fake registry map.
-     */
-    static Collection<BlockPos> knownPositionsNear(
-        Map<ResourceKey<Level>, ? extends Map<Long, Set<BlockPos>>> registry, ResourceKey<Level> dimension,
-        int minChunkX, int maxChunkX, int minChunkZ, int maxChunkZ
-    ) {
-        var byChunk = registry.get(dimension);
-        if (byChunk == null || byChunk.isEmpty()) return Set.of();
-        var result = new HashSet<BlockPos>();
-        for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
-            for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
-                var atChunk = byChunk.get(ChunkPos.asLong(chunkX, chunkZ));
-                if (atChunk != null) result.addAll(atChunk);
-            }
-        }
-        return result;
-    }
-
-    /**
      * MINECRAFT-435: bounded registry lookup for the End leg, which has no spatial search-radius
      * concept to narrow by (the End's exit is not coordinate-linked to any source). Walks a
      * {@link NavigableMap} directly via {@code ceilingKey}/{@code higherKey} starting at {@code
      * startKey} (wrapping around), examining at most {@code maxChunkEntries} distinct chunk
      * entries -- unlike a sort-then-slice approach, the registry's full key set is never
      * materialized or sorted, so the traversal cost itself (not just the returned entry count) is
-     * bounded regardless of how large the registry has grown. Pure and injectable, like {@link
-     * #knownPositionsNear}.
+     * bounded regardless of how large the registry has grown. Pure and injectable. (The Nether leg
+     * has an analogous bounded-traversal concern but, unlike the End leg, also needs the true
+     * nearest candidate, not just any one -- see {@link #advanceNetherCandidateScan}.)
      */
     record WindowedPositions(Collection<BlockPos> positions, long nextStartKey) { }
 
@@ -331,9 +366,94 @@ public final class PortalTransferSink {
         return Optional.ofNullable(best);
     }
 
-    /** The End's exit portal is not coordinate-linked to any source position; any known one will do. */
-    static Optional<BlockPos> any(Collection<BlockPos> candidates) {
-        return candidates.stream().findFirst();
+    /**
+     * MINECRAFT-435: a per-call budget shared across however many positions a resumable
+     * candidate search examines, independent of {@code MaterialPorts} or any live level --
+     * decrementing it is the only side effect {@link #advanceNetherCandidateScan} and {@link
+     * #resolveEndDestination} have in common with each other.
+     */
+    static final class Budget {
+        private int remaining;
+
+        Budget(int remaining) {
+            this.remaining = remaining;
+        }
+
+        boolean hasRemaining() {
+            return remaining > 0;
+        }
+
+        void spend() {
+            remaining--;
+        }
+    }
+
+    /**
+     * MINECRAFT-435: in-progress state for one Nether destination box's resumable nearest-candidate
+     * search -- which chunk entry (by index into the box's own deterministic coordinate sequence)
+     * and which position within that entry's set to resume at, plus the nearest eligible candidate
+     * found so far. Package-private fields: driven entirely by {@link #advanceNetherCandidateScan}.
+     */
+    static final class CandidateScan {
+        int chunkIndex;
+        Iterator<BlockPos> currentChunkPositions = Collections.emptyIterator();
+        BlockPos best;
+        boolean done;
+    }
+
+    /**
+     * MINECRAFT-435: resumable, budget-bounded advance of one box's nearest-candidate search --
+     * the part of destination resolution the review found still unbounded ("one source can still
+     * collect and live-check every portal block in the ... chunk box"). Pure and injectable: {@code
+     * byChunk} is a plain registry snapshot and {@code isEligible} stands in for a live
+     * loaded-chunk-and-block check, so this is directly unit-testable with a fake dense chunk entry
+     * and a counting predicate, without a real level.
+     *
+     * <p>Walks the box's (bounded, radius-derived) chunk-coordinate sequence in a fixed
+     * deterministic order, and within each chunk entry walks its {@code Set<BlockPos>} via a
+     * live {@link Iterator} retained in {@code scan} -- never sorted or copied into a List, so an
+     * arbitrarily densely-populated single chunk entry still only costs exactly {@code
+     * budget}-many examinations per call, resumed via the retained iterator on the next call
+     * rather than re-walked from its start. {@code scan.best} only ever reflects positions
+     * actually examined, combined via {@link #nearestWithinRadius} on every advance, so a decision
+     * is never made against a non-nearest candidate from a partial view -- {@link
+     * CandidateScan#done} only becomes {@code true} once every chunk entry in the box has been
+     * fully walked.</p>
+     */
+    static void advanceNetherCandidateScan(
+        Map<Long, Set<BlockPos>> byChunk, int minChunkX, int maxChunkX, int minChunkZ, int maxChunkZ,
+        BlockPos anchor, int maxRadius, CandidateScan scan, Budget budget, Predicate<BlockPos> isEligible
+    ) {
+        if (scan.done) return;
+        int heightInChunks = maxChunkZ - minChunkZ + 1;
+        int totalChunks = (maxChunkX - minChunkX + 1) * heightInChunks;
+        var eligibleThisAdvance = new ArrayList<BlockPos>();
+        while (budget.hasRemaining()) {
+            if (!scan.currentChunkPositions.hasNext()) {
+                if (scan.chunkIndex >= totalChunks) {
+                    scan.done = true;
+                    break;
+                }
+                int chunkX = minChunkX + scan.chunkIndex / heightInChunks;
+                int chunkZ = minChunkZ + scan.chunkIndex % heightInChunks;
+                scan.chunkIndex++;
+                Set<BlockPos> positions = byChunk == null ? null : byChunk.get(ChunkPos.asLong(chunkX, chunkZ));
+                scan.currentChunkPositions = positions == null ? Collections.emptyIterator() : positions.iterator();
+                continue;
+            }
+            BlockPos candidate = scan.currentChunkPositions.next();
+            budget.spend();
+            if (isEligible.test(candidate)) eligibleThisAdvance.add(candidate);
+        }
+        if (!scan.done && scan.chunkIndex >= totalChunks && !scan.currentChunkPositions.hasNext()) {
+            scan.done = true;
+        }
+        if (!eligibleThisAdvance.isEmpty() || scan.best != null) {
+            var combined = new ArrayList<BlockPos>(eligibleThisAdvance.size() + 1);
+            combined.addAll(eligibleThisAdvance);
+            if (scan.best != null) combined.add(scan.best);
+            scan.best = nearestWithinRadius(anchor, combined, maxRadius).orElse(null);
+        }
     }
 
     /**
@@ -389,22 +509,26 @@ public final class PortalTransferSink {
     }
 
     /**
-     * MINECRAFT-435: {@code candidateCache} lets several portal positions resolved within the
-     * same {@link #drainPending} call reuse an already-validated candidate set for an identical
-     * chunk box, instead of each re-querying and re-validating it. {@code pos} is first
-     * revalidated against the already-loaded source chunk's OWN live block state -- a portal
-     * discovered by the scan several ticks ago may have since been destroyed, and a destroyed
-     * source is never a valid transfer source regardless of what the atmosphere grid still
-     * records there. The source-amount check then runs so a portal with nothing to transfer
-     * never pays for the (now bounded, but still non-free) destination search at all.
+     * MINECRAFT-435: {@code pos} is first revalidated against the already-loaded source chunk's
+     * OWN live block state -- a portal discovered by the scan several ticks ago may have since
+     * been destroyed, and a destroyed source is never a valid transfer source regardless of what
+     * the atmosphere grid still records there. The source-amount check then runs so a portal with
+     * nothing to transfer never pays for the (bounded, but still non-free) destination search at
+     * all.
+     *
+     * @return {@code true} if this source was fully handled this call (transferred, declined, or
+     *     found to have nothing to transfer) and the caller should advance past it; {@code false}
+     *     if its destination box's candidate search is still in progress (the shared {@code
+     *     candidateBudget} ran out mid-scan) and the caller must retry this exact source later,
+     *     never treating it as serviced.
      */
-    private void transferNetherPortal(
-        MinecraftServer server, ServerLevel level, BlockPos pos, int throughput,
-        Map<List<Integer>, Collection<BlockPos>> candidateCache
+    private boolean transferNetherPortal(
+        MinecraftServer server, ServerLevel level, BlockPos pos, int throughput, Budget candidateBudget,
+        Map<NetherBoxKey, Optional<BlockPos>> resolvedThisCall
     ) {
-        if (!level.getBlockState(pos).is(Blocks.NETHER_PORTAL)) return;
+        if (!level.getBlockState(pos).is(Blocks.NETHER_PORTAL)) return true;
         if (ports.state(level, AtmosphereMaterial.NETHER_GAS, pos).map(AtmosphereMaterialState::amount).orElse(0) <= 0) {
-            return;
+            return true;
         }
         ResourceKey<Level> destinationDimension;
         BlockPos anchor;
@@ -415,27 +539,42 @@ public final class PortalTransferSink {
             destinationDimension = Level.NETHER;
             anchor = overworldToNether(pos);
         } else {
-            return;
+            return true;
         }
         ServerLevel destinationLevel = server.getLevel(destinationDimension);
-        if (destinationLevel == null) return;
+        if (destinationLevel == null) return true;
         int[] box = chunkBoxAround(anchor, NETHER_LINK_SEARCH_RADIUS);
-        var cacheKey = List.of(box[0], box[1], box[2], box[3]);
-        var candidates = candidateCache.computeIfAbsent(cacheKey, ignored -> eligibleCandidates(destinationLevel,
-            knownPositionsNear(knownNetherPortals, destinationDimension, box[0], box[1], box[2], box[3]),
-            state -> state.is(Blocks.NETHER_PORTAL)));
-        Optional<BlockPos> destination = nearestWithinRadius(anchor, candidates, NETHER_LINK_SEARCH_RADIUS);
-        if (destination.isEmpty()) return;
-        transfer(level, pos, destinationLevel, destination.get(), AtmosphereMaterial.NETHER_GAS, throughput);
+        var boxKey = new NetherBoxKey(destinationDimension, box[0], box[1], box[2], box[3]);
+
+        if (resolvedThisCall.containsKey(boxKey)) {
+            resolvedThisCall.get(boxKey).ifPresent(
+                destination -> transfer(level, pos, destinationLevel, destination, AtmosphereMaterial.NETHER_GAS, throughput));
+            return true;
+        }
+        CandidateScan scan = netherCandidateScans.computeIfAbsent(boxKey, ignored -> new CandidateScan());
+        advanceNetherCandidateScan(knownNetherPortals.get(destinationDimension), box[0], box[1], box[2], box[3],
+            anchor, NETHER_LINK_SEARCH_RADIUS, scan, candidateBudget,
+            candidate -> !eligibleCandidates(destinationLevel, List.of(candidate), state -> state.is(Blocks.NETHER_PORTAL)).isEmpty());
+        if (!scan.done) return false;
+        netherCandidateScans.remove(boxKey);
+        resolvedThisCall.put(boxKey, Optional.ofNullable(scan.best));
+        if (scan.best != null) {
+            transfer(level, pos, destinationLevel, scan.best, AtmosphereMaterial.NETHER_GAS, throughput);
+        }
+        return true;
     }
 
     /**
      * MINECRAFT-435: revalidates {@code pos} against the already-loaded source chunk's own live
      * block state first -- a destroyed End portal is never a valid transfer source, regardless of
      * what the atmosphere grid still records there -- then skips the destination search entirely
-     * when nothing at {@code pos} has anything to transfer.
+     * when nothing at {@code pos} has anything to transfer. Unlike the Nether leg, declining to
+     * resolve a destination this call (shared {@code candidateBudget} exhausted) is always safe
+     * to simply retry the SOURCE again on its next scheduled visit: the End leg only ever needs
+     * "any" eligible destination, never "the nearest," so there is no risk of committing to a
+     * worse-than-available choice by giving up early.
      */
-    private void transferEndPortal(MinecraftServer server, ServerLevel level, BlockPos pos, int throughput) {
+    private void transferEndPortal(MinecraftServer server, ServerLevel level, BlockPos pos, int throughput, Budget candidateBudget) {
         if (level.dimension().equals(Level.END) || !level.getBlockState(pos).is(Blocks.END_PORTAL)) return;
         List<AtmosphereMaterial> withSource = new ArrayList<>();
         for (AtmosphereMaterial material : AtmosphereMaterial.values()) {
@@ -446,7 +585,7 @@ public final class PortalTransferSink {
         if (withSource.isEmpty()) return;
         ServerLevel endLevel = server.getLevel(Level.END);
         if (endLevel == null) return;
-        Optional<BlockPos> destination = resolveEndDestination(endLevel);
+        Optional<BlockPos> destination = resolveEndDestination(endLevel, candidateBudget);
         if (destination.isEmpty()) return;
         for (AtmosphereMaterial material : withSource) {
             transfer(level, pos, endLevel, destination.get(), material, throughput);
@@ -455,25 +594,37 @@ public final class PortalTransferSink {
 
     /**
      * MINECRAFT-435: bounded alternative to flattening and validating the whole historical End
-     * registry on every call. Tries the last resolved destination first (cheap, O(1)); only when
-     * that is no longer eligible does it fall back to a small rotating, non-materializing probe
-     * of the registry's own chunk entries ({@link #knownPositionsWindowed}, cursor persisted in
-     * {@link #endRegistryProbeCursor}), so repeated calls eventually cover the whole registry
-     * rather than always re-probing the same prefix.
+     * registry on every call. Tries the last resolved destination first (cheap, O(1), free --
+     * does not spend {@code candidateBudget}); only when that is no longer eligible does it fall
+     * back to a small rotating, non-materializing probe of the registry's own chunk entries
+     * ({@link #knownPositionsWindowed}, cursor persisted in {@link #endRegistryProbeCursor}), so
+     * repeated calls eventually cover the whole registry rather than always re-probing the same
+     * prefix. The live-check loop over that probe's positions is itself bounded by {@code
+     * candidateBudget} and stops (short-circuiting on the first eligible hit, since "any" is all
+     * the End leg needs) rather than validating every position a single densely-populated
+     * registry chunk entry might contribute.
      */
-    private Optional<BlockPos> resolveEndDestination(ServerLevel endLevel) {
-        if (cachedEndDestination != null && !eligibleCandidates(
-            endLevel, List.of(cachedEndDestination), state -> state.is(Blocks.END_PORTAL)).isEmpty()) {
+    private Optional<BlockPos> resolveEndDestination(ServerLevel endLevel, Budget candidateBudget) {
+        if (cachedEndDestination != null && isEligibleEndPortal(endLevel, cachedEndDestination)) {
             return Optional.of(cachedEndDestination);
         }
         cachedEndDestination = null;
-        int maxProbes = DynamicAtmosphereServerConfig.snapshot().portalTransferSink().maxSourcesPerCall();
-        var windowed = knownPositionsWindowed(knownEndPortals, Level.END, endRegistryProbeCursor, maxProbes);
+        int maxChunkEntries = DynamicAtmosphereServerConfig.snapshot().portalTransferSink().maxSourcesPerCall();
+        var windowed = knownPositionsWindowed(knownEndPortals, Level.END, endRegistryProbeCursor, maxChunkEntries);
         endRegistryProbeCursor = windowed.nextStartKey();
-        Optional<BlockPos> destination = any(
-            eligibleCandidates(endLevel, windowed.positions(), state -> state.is(Blocks.END_PORTAL)));
-        destination.ifPresent(found -> cachedEndDestination = found);
-        return destination;
+        for (BlockPos candidate : windowed.positions()) {
+            if (!candidateBudget.hasRemaining()) break;
+            candidateBudget.spend();
+            if (isEligibleEndPortal(endLevel, candidate)) {
+                cachedEndDestination = candidate;
+                return Optional.of(candidate);
+            }
+        }
+        return Optional.empty();
+    }
+
+    private boolean isEligibleEndPortal(ServerLevel endLevel, BlockPos pos) {
+        return !eligibleCandidates(endLevel, List.of(pos), state -> state.is(Blocks.END_PORTAL)).isEmpty();
     }
 
     /**

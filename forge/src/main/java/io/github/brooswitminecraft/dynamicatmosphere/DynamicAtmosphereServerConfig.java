@@ -120,6 +120,7 @@ public final class DynamicAtmosphereServerConfig {
 
     private static final IntOption PORTAL_TRANSFER_THROUGHPUT;
     private static final IntOption PORTAL_TRANSFER_MAX_SOURCES_PER_CALL;
+    private static final IntOption PORTAL_TRANSFER_MAX_CANDIDATE_OPERATIONS_PER_CALL;
 
     private static final IntOption ENDER_MOB;
     private static final IntOption ENDER_PORTAL;
@@ -368,6 +369,12 @@ public final class DynamicAtmosphereServerConfig {
             "one visited chunk are actually transferred before the rest are deferred to the chunk's",
             "next full scan pass -- a fair rotating window, not always the same subset.");
         PORTAL_TRANSFER_MAX_SOURCES_PER_CALL = integer(builder, "maxSourcesPerCall", 32, 1, 1_000_000);
+        builder.comment("MINECRAFT-435: per-call budget on how many destination-registry candidate",
+            "positions are actually live-checked/nearest-compared while resolving one source's",
+            "destination -- a single densely-populated destination chunk entry can otherwise force",
+            "unbounded work in one call. The Nether leg resumes a partial resolution across calls",
+            "(never picking a non-nearest candidate); the End leg simply retries the source later.");
+        PORTAL_TRANSFER_MAX_CANDIDATE_OPERATIONS_PER_CALL = integer(builder, "maxCandidateOperationsPerCall", 256, 1, 1_000_000);
         builder.pop();
 
         builder.push("obsidianPowder");
@@ -590,7 +597,8 @@ public final class DynamicAtmosphereServerConfig {
             new NetherGas(NETHER_GAS_NETHERRACK.get(), NETHER_GAS_MILD_FULLNESS.get(), NETHER_GAS_DANGEROUS_FULLNESS.get()),
             new Dimensions(new DimensionAtmosphereConfig(
                 THE_END_HONOR_PREFERRED_ALTITUDE.get(), THE_END_GLOBAL_DISSIPATION_MULTIPLIER.get())),
-            new PortalTransferSinkTuning(PORTAL_TRANSFER_THROUGHPUT.get(), PORTAL_TRANSFER_MAX_SOURCES_PER_CALL.get())
+            new PortalTransferSinkTuning(PORTAL_TRANSFER_THROUGHPUT.get(), PORTAL_TRANSFER_MAX_SOURCES_PER_CALL.get(),
+                PORTAL_TRANSFER_MAX_CANDIDATE_OPERATIONS_PER_CALL.get())
         );
     }
 
@@ -738,7 +746,8 @@ public final class DynamicAtmosphereServerConfig {
         }
     }
     public record Dimensions(DimensionAtmosphereConfig theEnd) { }
-    public record PortalTransferSinkTuning(int throughputPerPortalBlock, int maxSourcesPerCall) { }
+    public record PortalTransferSinkTuning(
+        int throughputPerPortalBlock, int maxSourcesPerCall, int maxCandidateOperationsPerCall) { }
 
     private DynamicAtmosphereServerConfig() { }
 }
