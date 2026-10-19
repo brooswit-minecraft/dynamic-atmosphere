@@ -451,6 +451,96 @@ class PortalTransferSinkTest {
         assertEquals(new BlockPos(235, 64, 0), selection.best, "next-nearest to anchor once 236 is excluded as stale");
     }
 
+    /**
+     * MINECRAFT-435 (sixth review, kickback): the final revalidation check itself must spend the
+     * shared candidate budget -- a budget of exactly 1 must be able to do EITHER the budgeted
+     * selection pass's own last check OR the final revalidation check, never both uncharged in the
+     * same call. With a pool already selected (best decided and selection.done == true before
+     * this call) and a budget of exactly 1, a single finalizeNetherSelection call must spend
+     * exactly one eligibility check and, if the budget is then gone, retain the still-unconfirmed
+     * best rather than checking it for free.
+     */
+    @Test
+    void finalizeNetherSelectionChargesTheBudgetForTheFinalRevalidationCheckItself() {
+        var anchor = BlockPos.ZERO;
+        var winner = new BlockPos(10, 64, 0);
+        var pool = List.of(winner);
+        var selection = new PortalTransferSink.NetherSelectionScan();
+        selection.remaining = pool.iterator();
+        PortalTransferSink.advanceNetherSelection(anchor, 128, selection, new PortalTransferSink.Budget(100), pos -> true);
+        assertTrue(selection.done);
+        assertEquals(winner, selection.best);
+
+        int[] eligibilityChecks = {0};
+        var budget = new PortalTransferSink.Budget(1);
+        boolean finalized = PortalTransferSink.finalizeNetherSelection(anchor, 128, selection, pool, budget,
+            pos -> { eligibilityChecks[0]++; return true; });
+        assertTrue(finalized, "winner is still live, so the single charged check must be enough to confirm it");
+        assertEquals(1, eligibilityChecks[0], "exactly one eligibility check, charged against the budget");
+        assertEquals(winner, selection.best);
+    }
+
+    /**
+     * MINECRAFT-435 (sixth review, kickback): mirrors the above with a budget that is already
+     * exhausted before finalization even runs -- the final check must not be performed for free;
+     * the still-unconfirmed winner must be retained so the caller retries with a fresh budget.
+     */
+    @Test
+    void finalizeNetherSelectionRetainsTheUnconfirmedWinnerWhenNoBudgetRemainsForTheFinalCheck() {
+        var anchor = BlockPos.ZERO;
+        var winner = new BlockPos(10, 64, 0);
+        var pool = List.of(winner);
+        var selection = new PortalTransferSink.NetherSelectionScan();
+        selection.remaining = pool.iterator();
+        PortalTransferSink.advanceNetherSelection(anchor, 128, selection, new PortalTransferSink.Budget(100), pos -> true);
+        assertTrue(selection.done);
+
+        int[] eligibilityChecks = {0};
+        var exhaustedBudget = new PortalTransferSink.Budget(0);
+        boolean finalized = PortalTransferSink.finalizeNetherSelection(anchor, 128, selection, pool, exhaustedBudget,
+            pos -> { eligibilityChecks[0]++; return true; });
+        assertFalse(finalized, "no budget left -- the caller must retry this exact source later");
+        assertEquals(0, eligibilityChecks[0], "the final check must never run uncharged when the budget is already empty");
+        assertEquals(winner, selection.best, "the still-unconfirmed winner is retained, not discarded");
+    }
+
+    /**
+     * MINECRAFT-435 (sixth review, kickback): {@link PortalTransferSink#abandonFrontOnly} (the
+     * pure core of {@link PortalTransferSink#clearPendingWork}'s Nether-side cleanup) must never
+     * walk a chunk's whole pending queue -- {@link PortalTransferSink#drainNetherTransfers} always
+     * resolves sources head-first, so only the front element can ever have in-progress selection
+     * state; every other still-queued source was never started and has nothing to release. Walking
+     * through the whole queue to confirm that (as an earlier revision did) is itself unbounded
+     * O(n) over however many sources are queued -- a counting iterator proves only the front is
+     * ever advanced.
+     */
+    @Test
+    void abandonFrontOnlyTouchesOnlyTheFrontElementNeverWalksTheWholeRemainder() {
+        var dense = new java.util.ArrayList<BlockPos>();
+        for (int i = 0; i < 10_000; i++) dense.add(new BlockPos(i, 64, 0));
+        int[] iteratorAdvances = {0};
+        java.util.Iterator<BlockPos> countingIterator = new java.util.Iterator<>() {
+            final java.util.Iterator<BlockPos> delegate = dense.iterator();
+            @Override public boolean hasNext() { return delegate.hasNext(); }
+            @Override public BlockPos next() { iteratorAdvances[0]++; return delegate.next(); }
+        };
+        var queue = new PortalTransferSink.SourceQueue(countingIterator);
+        var abandoned = new java.util.ArrayList<BlockPos>();
+
+        PortalTransferSink.abandonFrontOnly(queue, abandoned::add);
+
+        assertEquals(1, iteratorAdvances[0], "only the front element may be examined -- the dense remainder must never be walked");
+        assertEquals(List.of(dense.get(0)), abandoned);
+    }
+
+    @Test
+    void abandonFrontOnlyDoesNothingForAnEmptyOrNullQueue() {
+        var abandoned = new java.util.ArrayList<BlockPos>();
+        PortalTransferSink.abandonFrontOnly(null, abandoned::add);
+        PortalTransferSink.abandonFrontOnly(new PortalTransferSink.SourceQueue(java.util.Collections.emptyIterator()), abandoned::add);
+        assertTrue(abandoned.isEmpty());
+    }
+
     @Test
     void ensureQueueNeverStompsAnAlreadyInProgressQueue() {
         var queues = new HashMap<ResourceKey<Level>, Map<Long, PortalTransferSink.SourceQueue>>();

@@ -231,23 +231,40 @@ public final class PortalTransferSink {
 
     /**
      * Drops any in-progress pass for this chunk -- see the unload/replacement invalidation this
-     * ticket requires. Also abandons any in-progress Nether SELECTION scan for one of this
-     * chunk's still-pending source positions (releasing its {@link DiscoveredPool} reference so a
-     * box solely depended on by this chunk's sources does not leak forever); discovery itself
-     * ({@link #netherCandidateScans}/{@link #netherDiscoveredPools}) is keyed by the DESTINATION
-     * box, not this source chunk, so it is correctly left untouched -- it may still be relevant to
-     * other sources, even in other chunks.
+     * ticket requires. Also abandons any in-progress Nether SELECTION scan for this chunk's
+     * still-pending sources (releasing its {@link DiscoveredPool} reference so a box solely
+     * depended on by this chunk's sources does not leak forever); discovery itself ({@link
+     * #netherCandidateScans}/{@link #netherDiscoveredPools}) is keyed by the DESTINATION box, not
+     * this source chunk, so it is correctly left untouched -- it may still be relevant to other
+     * sources, even in other chunks.
+     *
+     * <p>MINECRAFT-435 (sixth review, kickback): {@link #drainNetherTransfers} always peek/polls
+     * head-first and never starts a source's {@link NetherSelectionScan} until it is at the front
+     * -- so only the queue's FRONT element can possibly have in-progress selection state to
+     * release; every other still-queued source was never touched. Checking just the front is
+     * therefore sufficient, and the whole queue is then dropped in O(1) via {@link #clearQueue}
+     * rather than walked one-by-one through its iterator -- walking an arbitrarily large,
+     * never-yet-started remainder here would itself be exactly the kind of unbounded per-call work
+     * this ticket exists to eliminate.
      */
     public void clearPendingWork(ResourceKey<Level> dimension, long chunkKey) {
-        var netherQueue = queueFor(pendingNetherTransfers, dimension, chunkKey);
-        if (netherQueue != null) {
-            while (!netherQueue.isEmpty()) {
-                abandonNetherSelection(dimension, netherQueue.peek());
-                netherQueue.poll();
-            }
-        }
+        abandonFrontOnly(queueFor(pendingNetherTransfers, dimension, chunkKey), pos -> abandonNetherSelection(dimension, pos));
         clearQueue(pendingNetherTransfers, dimension, chunkKey);
         clearQueue(pendingEndTransfers, dimension, chunkKey);
+    }
+
+    /**
+     * MINECRAFT-435 (sixth review, kickback): releases only {@code queue}'s FRONT element via
+     * {@code abandonFront} -- never walks the rest -- since a head-first-draining queue (see
+     * {@link #drainNetherTransfers}) can only ever have in-progress selection state on whichever
+     * source is currently at the front; every other still-queued source was never started and has
+     * nothing to release. Pure and injectable so this O(1)-not-O(n) behavior is directly testable
+     * with a counting-iterator fixture, without a real level/instance.
+     */
+    static void abandonFrontOnly(SourceQueue queue, java.util.function.Consumer<BlockPos> abandonFront) {
+        if (queue != null && !queue.isEmpty()) {
+            abandonFront.accept(queue.peek());
+        }
     }
 
     /** Drops every in-progress pass, for a full world/session reset. */
@@ -704,7 +721,16 @@ public final class PortalTransferSink {
         BlockPos anchor, int maxRadius, NetherSelectionScan selection, Collection<BlockPos> pool,
         Budget budget, Predicate<BlockPos> isEligible
     ) {
-        while (selection.best != null && !isEligible.test(selection.best)) {
+        while (selection.best != null) {
+            // MINECRAFT-435 (sixth review, kickback): the final revalidation check itself must
+            // spend the shared candidate budget, exactly like every other live-eligibility check
+            // in this scan -- otherwise a call whose budget is already exhausted could still do
+            // one uncharged check here, on top of whatever the budgeted selection pass already
+            // spent. If nothing is left, retain the still-unconfirmed best and retry this exact
+            // check on a later call rather than checking it for free.
+            if (!budget.hasRemaining()) return false;
+            budget.spend();
+            if (isEligible.test(selection.best)) break;
             selection.best = null;
             selection.bestDistanceSquared = Long.MAX_VALUE;
             selection.remaining = pool.iterator();
