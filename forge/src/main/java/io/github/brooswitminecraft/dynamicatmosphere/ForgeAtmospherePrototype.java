@@ -1432,8 +1432,9 @@ final class ForgeAtmospherePrototype {
                 if (cellLevel == null) return;
                 BlockPos origin = materialCellOrigin(material, key);
                 if (material == AtmosphereMaterial.MOLD) {
-                    moldGameplay.processCellAndConsume(cellLevel, origin, cellLevel.random);
-                    capacities.clear();
+                    if (moldGameplay.processCellAndConsume(cellLevel, origin, cellLevel.random) > 0) {
+                        capacities.clear();
+                    }
                 }
                 if (material == AtmosphereMaterial.VOID_GAS) {
                     voidGasGameplay.onProcessedCell(cellLevel, origin);

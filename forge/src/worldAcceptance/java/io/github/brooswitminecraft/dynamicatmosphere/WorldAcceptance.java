@@ -21,6 +21,8 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
 /** Compiled only with -PworldAcceptance. Every mutation is in the new CI-only disposable world. */
 @EventBusSubscriber(modid = DynamicAtmosphereMod.MODID)
 public final class WorldAcceptance {
+    private static final net.minecraft.server.level.TicketType<net.minecraft.world.level.ChunkPos> FIXTURE_TICKET =
+            net.minecraft.server.level.TicketType.create("m484_acceptance", java.util.Comparator.comparingLong(net.minecraft.world.level.ChunkPos::toLong));
     private static final BlockPos BASE = new BlockPos(520,100,520);
     private static final BlockPos EDGE = new BlockPos(16015,100,16015);
     private static final BlockPos FLORA = new BlockPos(776,0,776);
@@ -44,7 +46,7 @@ public final class WorldAcceptance {
                 clearRoom(level);
                 // Only this far-away central chunk is FULL. Direct fixture writes avoid
                 // notifying/loading neighbors before the production unloaded-edge check.
-                var edge = level.getChunk(EDGE);
+                var edge = fixtureChunk(level, EDGE.getX() >> 4, EDGE.getZ() >> 4);
                 edge.setBlockState(EDGE.below(), Blocks.MYCELIUM.defaultBlockState(), false);
                 edge.setBlockState(EDGE, Blocks.AIR.defaultBlockState(), false);
             }
@@ -159,7 +161,13 @@ public final class WorldAcceptance {
     }
 
     private static void loadNeighborhood(ServerLevel level, BlockPos center) {
-        for(int dx=-1;dx<=1;dx++) for(int dz=-1;dz<=1;dz++) level.getChunk((center.getX()>>4)+dx,(center.getZ()>>4)+dz);
+        for(int dx=-1;dx<=1;dx++) for(int dz=-1;dz<=1;dz++) fixtureChunk(level,(center.getX()>>4)+dx,(center.getZ()>>4)+dz);
+    }
+    private static net.minecraft.world.level.chunk.LevelChunk fixtureChunk(ServerLevel level, int x, int z) {
+        var pos = new net.minecraft.world.level.ChunkPos(x,z);
+        // Level 33 keeps exactly the selected chunk FULL; neighboring chunks remain below FULL.
+        level.getChunkSource().addRegionTicket(FIXTURE_TICKET,pos,0,pos);
+        return level.getChunk(x,z);
     }
     private static void clearRoom(ServerLevel level) {
         for(BlockPos p : BlockPos.betweenClosed(BASE.offset(-6,0,-6),BASE.offset(6,16,6))) level.setBlock(p,Blocks.AIR.defaultBlockState(),2);

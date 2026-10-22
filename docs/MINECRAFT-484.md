@@ -58,7 +58,8 @@ proves 130 due sources run as 128 then 2, exactly once, without random skips.
 
 Local Gradle cannot start: `services.gradle.org` DNS resolution fails before compilation.
 CI and exact-head results are recorded in the PR; this document does not assert a green build.
-No runtime/manual test was performed and no mod was installed or world modified.
+No live world was changed. Isolated CI runtime coverage is described below; interactive
+manual acceptance remains outstanding.
 
 Manual checks still required on a disposable authorized test instance:
 1. Compare Vapor to the horizon at day, night, rain, across biome/dimension transitions; check
@@ -85,3 +86,29 @@ Mold now has explicit attachment write -> NBT -> new ProtoChunk -> read coverage
 and an actual byte-buffer payload encode/decode -> Mold client session -> amount/palette/reset
 round trip. Actual region-file disk I/O, live client networking and in-world conversion still
 require manual/runtime acceptance. No new production rate, material or feature scope is added.
+
+
+## Disposable ticking-world acceptance
+
+`python3 scripts/world_acceptance.py` refuses an existing run directory and starts
+an opt-in test-only server on localhost, with a new flat world. Test classes are
+excluded from normal builds. The fixture explicitly loads its setup chunks; the
+production actions are then checked for no additional loaded chunks.
+
+The fixture invokes the same production Mold placement/debit and cow-conversion
+boundaries used by simulation/entity ticks, with deterministic random draws in a
+real ticking ServerLevel. It checks successful and invalid small placement,
+insufficient funds, blocked and successful vanilla red/brown giants, real cow to
+mooshroom conversion, repeat-charge prevention, and unloaded-edge deferral followed
+by loaded-edge success. It does not substitute mocked world I/O. Deterministic
+invocation establishes action/debit behavior, not the statistical natural cadence.
+
+An actual underground moss source and exposed desert sand source exercise the
+production bounded flora sampler: 32 candidate attempts (98 total integer draws
+including surface coordinates), duplicate suppression, Vapor emission without sky,
+surface Dust without cave Dust, and unchanged loaded-chunk count. Its recorded
+single-call nanoseconds are diagnostic only, not a tick-time performance benchmark.
+The existing engine source-budget tests remain the scheduling bound evidence.
+`world-acceptance-result.json` and CI logs are the pass/failure receipts; the PR
+records which exact head passed. Region-file restart persistence, client rendering,
+probability distribution and sustained server workload measurements remain gaps.

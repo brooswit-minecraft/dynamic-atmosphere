@@ -18,4 +18,5 @@ if result.returncode or not result_path.exists():
 evidence = json.loads(result_path.read_text())
 print(json.dumps(evidence))
 if result.returncode or not evidence.get('passed'):
+    print((root / 'world-acceptance.log').read_text()[-16000:])
     raise SystemExit('World acceptance failed; inspect world-acceptance.log and result JSON')
