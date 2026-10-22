@@ -78,6 +78,7 @@ public class DynamicAtmosphereMod {
         NeoForge.EVENT_BUS.addListener(LavaWaterMagmaGameplay::onFluidPlaceBlock);
         DustGameplay dust = prototype.dustGameplay();
         NeoForge.EVENT_BUS.addListener(dust::onEntityTick);
+        NeoForge.EVENT_BUS.addListener(prototype.moldGameplay()::onEntityTick);
         NeoForge.EVENT_BUS.addListener(dust::onLivingDamage);
         NeoForge.EVENT_BUS.addListener(EventPriority.LOWEST, dust::onBlockBreak);
         NeoForge.EVENT_BUS.addListener(EventPriority.LOWEST, dust::onBlockPlace);

@@ -173,12 +173,12 @@ class AtmosphereGridTickDeterminismTest {
             runtime.syncIntervalTicks(), runtime.fullSnapshotIntervalTicks(), intervalTicks,
             runtime.producerIntervalTicks(), runtime.maxChunkImportsPerTick(), runtime.maxProducerChunksPerTick(),
             runtime.maxSmokeProducerChunksPerTick(), runtime.maxScanSectionsPerCall(),
-            runtime.simulationSkipChance(), runtime.maxSyncOperationsPerPlayerPerTick());
+            runtime.maxSyncOperationsPerPlayerPerTick());
         return new DynamicAtmosphereServerConfig.Snapshot(overriddenRuntime, base.vapor(), base.verticalMovement(),
             base.smoke(), base.dust(), base.voidGas(), base.exhaust(), base.slime(), base.obsidianPowder(),
             base.glowGas(), base.netherFog(), base.endSand(), base.plantGrowth(), base.integrations(),
             base.heavyGas(), base.magma(), base.lightning(), base.ghastSpawn(), base.zombieFog(),
-            base.slimePrecipitation(), base.netherGas(), base.dimensions(), base.portalTransferSink());
+            base.slimePrecipitation(), base.netherGas(), base.dimensions(), base.portalTransferSink(), base.flora(), base.mold());
     }
 
     @Test

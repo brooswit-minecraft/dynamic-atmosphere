@@ -215,7 +215,7 @@ emission sources, thresholds, and costs did not change.
 | Slime | 4 blocks | 200 ticks | Green (`slimeColor`, default `0x00FF00`) | 4x |
 | Nether Gas | 4 blocks | 200 ticks | Sickly green (`netherGasColor`, default `0x6B8E23`) | 4x |
 | Glow Gas | 4 blocks | 200 ticks | Warm gold (`glowGasColor`, default `0xFFC83C`) | 2x |
-| Nether Fog | 4 blocks | 200 ticks | Very dark red (`netherFogColor`, default `0x400000`) | 1x |
+| Nether Fog | 4 blocks | 200 ticks | Netherrack red (`netherFogColor`, default `0x804040`) | 1x |
 
 Glow Gas (MINECRAFT-1 B2) is visual only: it carries no real block light and is
 rendered unlit, purely atmospheric haze colored to suggest glowstone's glow.
@@ -257,8 +257,8 @@ nor floods lava over any number of round trips. No explosions either way: both
 are direct block-state writes, the same technique the existing magma-regrowth
 feature uses. The existing Smoke "lava disappeared" emission is deliberately
 not fired for a Nether Fog harvest. Known physics: gas cannot move down out of
-a cell containing fluid, so Nether Fog pools on the surface of a Nether lava
-sea rather than reaching the bedrock beneath it -- accepted, not a bug.
+a cell containing fluid. Nether Fog now prefers TOP (`maxBuildHeight - 1`),
+with Netherrack-red default RGB; dense cells still follow the shared fullness drift rule.
 
 Ender Gas (Obsidian Powder) gains a third, End-only production path
 (MINECRAFT-1 B4): near the dimension's build-height ceiling, a 10%-by-default
@@ -703,9 +703,10 @@ general passive source; plain obsidian has its own `obsidianPowder.obsidianBlock
 (default 1), and crying obsidian has its own `obsidianPowder.cryingObsidianEmission`
 (default 1000).
 
-`runtime.simulationSkipChance` applies to all ten materials (default 0.75,
-zero processes every due cell, one skips every due cell). It replaces the old
-Vapor-only `vapor.skipChance` setting; producer cadence is independent.
+All eligible due cells are processed under the existing deterministic work budgets.
+`runtime.simulationSkipChance` and the older `vapor.skipChance` are obsolete and
+not read; existing config entries cannot restore random skipping. Producer cadence
+and intentional producer/transformation randomness remain independent.
 
 Server gameplay, cadence, work-budget, and fan settings live in
 `config/dynamicatmosphere-server.toml` on the current dedicated server; older
@@ -887,3 +888,5 @@ or cache correctness; those checks remain pending user verification.
 After adding the published Modrinth version to Sickos, use Sickos' normal version
 bump and CI release/deploy path. Verify the hosted jar hash, restarted server, and
 runtime command; retain the existing world.
+
+MINECRAFT-484 frozen batch defaults, acceptance evidence, and manual checks: [docs/MINECRAFT-484.md](docs/MINECRAFT-484.md).

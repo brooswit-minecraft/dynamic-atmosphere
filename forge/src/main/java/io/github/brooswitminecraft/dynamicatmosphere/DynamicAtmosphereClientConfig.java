@@ -43,6 +43,8 @@ public final class DynamicAtmosphereClientConfig {
     private static final DoubleOption NETHER_GAS_DENSITY;
     private static final DoubleOption GLOW_GAS_DENSITY;
     private static final DoubleOption NETHER_FOG_DENSITY;
+    private static final DoubleOption MOLD_DENSITY;
+    private static final IntOption MOLD_COLOR;
 
     private static final IntOption VAPOR_COLOR;
     private static final IntOption SMOKE_COLOR;
@@ -117,6 +119,8 @@ public final class DynamicAtmosphereClientConfig {
         // The renderer reads this client-config value, not the catalog field -- both must match.
         GLOW_GAS_DENSITY = decimal(builder, "glowGasOpticalDensity", 2, 0, 1000);
         // MINECRAFT-1 (B3): vapor-like default; see the catalog default in AtmosphericMaterials.
+        MOLD_DENSITY = decimal(builder, "moldOpticalDensity", 1, 0, 1000);
+        MOLD_COLOR = integer(builder, "moldColor", 0x706061, 0, 0xFFFFFF);
         NETHER_FOG_DENSITY = decimal(builder, "netherFogOpticalDensity", 1, 0, 1000);
 
         // MINECRAFT-21 (transferred from MINECRAFT-20): all materials' colours are now
@@ -158,7 +162,7 @@ public final class DynamicAtmosphereClientConfig {
         builder.comment("Packed 0xRRGGBB.");
         GLOW_GAS_COLOR = integer(builder, "glowGasColor", 0xFFC83C, 0x000000, 0xFFFFFF);
         builder.comment("Packed 0xRRGGBB.");
-        NETHER_FOG_COLOR = integer(builder, "netherFogColor", 0x400000, 0x000000, 0xFFFFFF);
+        NETHER_FOG_COLOR = integer(builder, "netherFogColor", 0x804040, 0x000000, 0xFFFFFF);
         builder.pop();
 
         builder.push("allocation");
@@ -197,6 +201,7 @@ public final class DynamicAtmosphereClientConfig {
             new Material(NETHER_GAS_DENSITY.get(), NETHER_GAS_COLOR.get()),
             new Material(GLOW_GAS_DENSITY.get(), GLOW_GAS_COLOR.get()),
             new Material(NETHER_FOG_DENSITY.get(), NETHER_FOG_COLOR.get()),
+            new Material(MOLD_DENSITY.get(), MOLD_COLOR.get()),
             new Allocation(CELL_BUDGET.get())
         );
     }
@@ -269,7 +274,7 @@ public final class DynamicAtmosphereClientConfig {
                            Material vapor, Material smoke,
                            Material dust, Material voidGas, Material exhaust, Material slime,
                            Material obsidianPowder, Material zombieFog, Material netherGas, Material glowGas,
-                           Material netherFog, Allocation allocation) { }
+                           Material netherFog, Material mold, Allocation allocation) { }
     public record Material(double opticalDensity, int color) { }
     public record Allocation(int cellBudget) { }
 

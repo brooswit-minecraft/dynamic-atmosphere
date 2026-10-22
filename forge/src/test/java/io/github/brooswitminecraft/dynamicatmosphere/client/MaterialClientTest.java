@@ -65,7 +65,8 @@ class MaterialClientTest {
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.ZOMBIE_FOG,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.NETHER_GAS,
             io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.GLOW_GAS,
-            io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.NETHER_FOG);
+            io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.NETHER_FOG,
+            io.github.brooswitminecraft.dynamicatmosphere.engine.AtmosphericMaterials.MOLD);
         var materials = AtmosphereRenderMaterial.values();
         for (int i = 0; i < materials.length; i++) {
             assertEquals(definitions.get(i).settings().opticalDensityMultiplier(), materials[i].opticalDensityMultiplier);
@@ -272,7 +273,7 @@ class MaterialClientTest {
     @Test
     void paletteAndSevenMaterialSliceOrderingAreIndependent() {
         float[] fog = {0.2f, 0.5f, 0.8f};
-        assertEquals(fog[1], AtmosphereRenderMaterial.VAPOR.channel(1, fog));
+        assertEquals(fog[1] * 1.08f, AtmosphereRenderMaterial.VAPOR.channel(1, fog), 0.00001);
         // MINECRAFT-21: Smoke colour 0x1F160F -> 0x0D0A08.
         assertEquals(13 / 255f, AtmosphereRenderMaterial.SMOKE.channel(0, fog));
         assertEquals(10 / 255f, AtmosphereRenderMaterial.SMOKE.channel(1, fog));
