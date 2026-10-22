@@ -130,7 +130,7 @@ public final class WorldAcceptance {
 
     @SuppressWarnings("unchecked")
     private static void producers(ServerLevel level) throws Exception {
-        var chunk = level.getChunk(FLORA);
+        var chunk = level.getChunk(FLORA.getX() >> 4, FLORA.getZ() >> 4);
         var desert = level.registryAccess().registryOrThrow(Registries.BIOME).getHolderOrThrow(Biomes.DESERT);
         chunk.fillBiomesFromNoise((x,y,z,sampler) -> desert, level.getChunkSource().randomState().sampler());
         for (int x=768;x<784;x++) for(int z=768;z<784;z++) level.setBlock(new BlockPos(x,32,z),Blocks.STONE.defaultBlockState(),2);
