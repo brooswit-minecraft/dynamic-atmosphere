@@ -249,6 +249,20 @@ class ForgeMaterialStorageProductionChunkTest {
         assertEquals(List.of(cell(B, 4, 0, 44)), ForgeMaterialStorage.read(reloaded, B));
     }
 
+    @Test
+    void moldSurvivesRealAttachmentNbtRoundTripAlongsideExistingMaterials() {
+        ChunkAccess original = newChunk(-1, -1);
+        var mold = AtmosphereMaterial.MOLD;
+        var expected = List.of(cell(mold, -1, -1, 768));
+        assertTrue(ForgeMaterialStorage.writeBatch(original, Map.of(mold, expected,
+                A, List.of(cell(A, -1, -1, 25)))).isEmpty());
+        CompoundTag serialized = original.writeAttachmentsToNBT(RegistryAccess.EMPTY);
+        ChunkAccess reloaded = newChunk(-1, -1);
+        reloaded.readAttachmentsFromNBT(RegistryAccess.EMPTY, serialized);
+        assertEquals(expected, ForgeMaterialStorage.read(reloaded, mold));
+        assertEquals(List.of(cell(A, -1, -1, 25)), ForgeMaterialStorage.read(reloaded, A));
+    }
+
     private static void writeRawAttachmentNbt(ChunkAccess chunk, AtmosphereMaterial material, CompoundTag materialTag) {
         // Round-trips through the real IAttachmentSerializer.read() so the corrupt tag is
         // retained exactly the way MaterialChunkData.decodeStored would see it after a genuine

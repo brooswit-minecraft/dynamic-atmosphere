@@ -16,24 +16,38 @@ final class MoldGameplay {
 
     /** A single candidate per processed cell, independent of world size or entity population. */
     static int processCell(ServerLevel level, BlockPos origin, int amount, int capacity) {
+        return processCell(level, origin, amount, capacity, level.random);
+    }
+
+    /** The production turn with an explicit RNG for deterministic placement-path regression tests. */
+    static int processCell(ServerLevel level, BlockPos origin, int amount, int capacity,
+                           net.minecraft.util.RandomSource random) {
         var config = DynamicAtmosphereServerConfig.snapshot().mold();
         int size = AtmosphereMaterial.MOLD.cellSize();
-        BlockPos pos = origin.offset(level.random.nextInt(size), level.random.nextInt(size),
-            level.random.nextInt(size));
+        BlockPos pos = origin.offset(random.nextInt(size), random.nextInt(size),
+            random.nextInt(size));
+        if (!level.hasChunkAt(pos)) return 0;
         var state = level.getBlockState(pos);
         if (state.is(Blocks.RED_MUSHROOM) || state.is(Blocks.BROWN_MUSHROOM)) {
             return MoldGrowth.attempt(amount, capacity, config.giantMushroomCost(),
-                config.highConcentration(), config.transformationChance(), level.random.nextDouble(), () -> {
+                config.highConcentration(), config.transformationChance(), random.nextDouble(), () -> {
                     // Vanilla giant features may cross chunk boundaries. Only run with the entire
                     // conservative feature footprint loaded; no chunk retrieval/generation here.
                     if (!level.hasChunksAt(pos.offset(-16, -1, -16), pos.offset(16, 16, 16))) return false;
-                    return ((MushroomBlock) state.getBlock()).growMushroom(level, pos, state, level.random);
+                    return ((MushroomBlock) state.getBlock()).growMushroom(level, pos, state, random);
                 });
         }
         return MoldGrowth.attempt(amount, capacity, config.smallMushroomCost(), 0,
-            config.transformationChance(), level.random.nextDouble(), () -> {
+            config.transformationChance(), random.nextDouble(), () -> {
                 if (!state.isAir() || !level.isInWorldBounds(pos.below())) return false;
-                var mushroom = (level.random.nextBoolean() ? Blocks.RED_MUSHROOM : Blocks.BROWN_MUSHROOM)
+                // Match condensation's conservative 3x3 loaded-chunk footprint. Survival and
+                // setBlockAndUpdate may inspect/notify neighbors; defer before either call.
+                for (int dx = -16; dx <= 16; dx += 16) {
+                    for (int dz = -16; dz <= 16; dz += 16) {
+                        if (!level.hasChunkAt(pos.offset(dx, 0, dz))) return false;
+                    }
+                }
+                var mushroom = (random.nextBoolean() ? Blocks.RED_MUSHROOM : Blocks.BROWN_MUSHROOM)
                     .defaultBlockState();
                 return mushroom.canSurvive(level, pos) && level.setBlockAndUpdate(pos, mushroom);
             });

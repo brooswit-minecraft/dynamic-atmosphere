@@ -28,7 +28,9 @@ No parked stories, caster/roll-center changes, version bump, release, deployment
   Living witches emit 2 per 100 ticks, staggered by entity ID, through existing entity tick events.
   Emission still requires readable loaded material cells and available capacity.
 - Mold transformations: one random block candidate per processed cell; 2% chance. A valid small
-  red/brown mushroom costs 16, with air and vanilla survival checks. At >=75% concentration,
+  red/brown mushroom costs 16, with air and vanilla survival checks. Small placement first
+  requires the target and the surrounding 3x3 chunk footprint to be loaded, matching
+  condensation; missing neighbors defer before survival/notifications, with zero debit. At >=75% concentration,
   ordinary red/brown mushrooms use vanilla corresponding giant feature placement, costing 128
   only if placement succeeds. Require a conservative ±16-block loaded footprint first.
   Ordinary cows check at the same staggered 100-tick cadence and 2% probability, require >=75%
@@ -69,3 +71,17 @@ Manual checks still required on a disposable authorized test instance:
 6. Compare rare desert surface dust with cave absence; walk/run/stand on full and layered
    sand/dirt/snow/ice, then check unrelated jump/landing/break emissions.
 7. Observe red Nether Fog rising toward TOP and unchanged lava/condensation/Smoke/Nether Gas.
+
+## Review correction: unloaded small-mushroom edges
+
+`MoldPlacementIntegrationTest` calls the production `processCell` turn with deterministic RNG,
+real block states and vanilla mushroom survival, using a mocked ServerLevel I/O boundary. It
+covers positive/negative X and Z chunk edges: an unavailable neighbor permits no survival read,
+placement or returned debit; marking the footprint loaded permits exactly one placement and
+16-unit debit, followed by zero for the same existing mushroom. It asserts no chunk retrieval.
+This is a production-path regression with mocked world I/O, not an actual ticking-world test.
+
+Mold now has explicit attachment write -> NBT -> new ProtoChunk -> read coverage alongside Dust,
+and an actual byte-buffer payload encode/decode -> Mold client session -> amount/palette/reset
+round trip. Actual region-file disk I/O, live client networking and in-world conversion still
+require manual/runtime acceptance. No new production rate, material or feature scope is added.
