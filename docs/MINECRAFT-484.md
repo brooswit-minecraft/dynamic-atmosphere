@@ -48,9 +48,11 @@ No parked stories, caster/roll-center changes, version bump, release, deployment
 ## Acceptance evidence and gaps
 
 Tests cover RGB hue/bounds, config skip-key removal, flora selection/classification, bounded
-sampling/no duplicates, mushroom payment success/failure/insufficient funds, material catalog
+sampling/no duplicates, TOP versus bottom homes, mushroom payment success/failure/insufficient funds, material catalog
 parity, and shared persistence/scheduling. Existing deterministic grid, overflow-budget,
-loaded-chunk and movement tests remain in the full suite.
+loaded-chunk and movement tests remain in the full suite. In particular,
+`AtmosphereGridTest.beforeSpreadCallbackSharesTheOneHundredTwentyEightSourceBudget`
+proves 130 due sources run as 128 then 2, exactly once, without random skips.
 
 Local Gradle cannot start: `services.gradle.org` DNS resolution fails before compilation.
 CI and exact-head results are recorded in the PR; this document does not assert a green build.

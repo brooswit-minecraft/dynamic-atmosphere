@@ -79,13 +79,17 @@ public enum AtmosphereMaterial {
      * clamped to the dimension's build range; Glow Gas rests at a literal Y=0, not configurable.
      */
     public int home(ServerLevel level) {
+        return homeInBuildRange(level.getMinBuildHeight(), level.getMaxBuildHeight());
+    }
+
+    int homeInBuildRange(int minHeight, int maxHeight) {
         var snapshot = DynamicAtmosphereServerConfig.snapshot();
         return switch (this) {
-            case DUST, OBSIDIAN_POWDER, VOID_GAS, EXHAUST, ZOMBIE_FOG, NETHER_GAS, MOLD -> level.getMinBuildHeight();
-            case NETHER_FOG -> level.getMaxBuildHeight() - 1;
+            case DUST, OBSIDIAN_POWDER, VOID_GAS, EXHAUST, ZOMBIE_FOG, NETHER_GAS, MOLD -> minHeight;
+            case NETHER_FOG -> maxHeight - 1;
             case SLIME -> Math.clamp(snapshot.slime().preferredHeight(),
-                level.getMinBuildHeight(), level.getMaxBuildHeight());
-            case GLOW_GAS -> Math.clamp(0, level.getMinBuildHeight(), level.getMaxBuildHeight());
+                minHeight, maxHeight);
+            case GLOW_GAS -> Math.clamp(0, minHeight, maxHeight);
         };
     }
 }

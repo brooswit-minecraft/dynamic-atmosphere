@@ -9,6 +9,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AtmosphereMaterialTest {
     @Test
+    void netherFogUsesTopWhileNetherGasAndMoldKeepBottomHomes() {
+        assertEquals(255, AtmosphereMaterial.NETHER_FOG.homeInBuildRange(0, 256));
+        assertEquals(319, AtmosphereMaterial.NETHER_FOG.homeInBuildRange(-64, 320));
+        assertEquals(-64, AtmosphereMaterial.NETHER_GAS.homeInBuildRange(-64, 320));
+        assertEquals(-64, AtmosphereMaterial.MOLD.homeInBuildRange(-64, 320));
+    }
+
+    @Test
     void layoutsShareTheUniformCellSizeAndSupportNegativeCoordinates() {
         for (var material : AtmosphereMaterial.values()) {
             assertEquals(4, material.cellSize());
