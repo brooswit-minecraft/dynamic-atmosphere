@@ -32,6 +32,8 @@ public final class WorldAcceptance {
     private static final BlockPos SAVED = new BlockPos(524,120,524);
     private static final boolean RESTART = Files.exists(Path.of("restart-phase"));
     private static ForgeAtmospherePrototype prototype;
+    private static BlockPos netherLava;
+    private static long harvestSeed;
 
     @SubscribeEvent
     public static void tick(ServerTickEvent.Post event) {
@@ -48,6 +50,7 @@ public final class WorldAcceptance {
                 loadNeighborhood(level, FLORA);
                 clearRoom(level);
                 prepareProducers(level);
+                prepareNether(server.getLevel(net.minecraft.world.level.Level.NETHER));
                 // Only this far-away central chunk is FULL. Direct fixture writes avoid
                 // notifying/loading neighbors before the production unloaded-edge check.
                 var edge = fixtureChunk(level, EDGE.getX() >> 4, EDGE.getZ() >> 4);
@@ -67,6 +70,7 @@ public final class WorldAcceptance {
                 producers(level);
                 walking(level);
                 measuredSampler(level);
+                nether(server.getLevel(net.minecraft.world.level.Level.NETHER));
                 int beforeChunks = level.getChunkSource().getLoadedChunksCount();
                 check(!level.hasChunkAt(EDGE.east()), "unloaded-edge fixture unexpectedly has its east neighbor");
                 seed(level, EDGE, 100);
@@ -180,6 +184,64 @@ public final class WorldAcceptance {
         results.put("underground_vapor_surface_only_dust_bounded_no_load",true);
     }
 
+
+
+    private static void prepareNether(ServerLevel level) {
+        loadNeighborhood(level,new BlockPos(104,200,104));
+        for(harvestSeed=0;;harvestSeed++) {
+            level.random.setSeed(harvestSeed);
+            int x=96+level.random.nextInt(16), z=96+level.random.nextInt(16);
+            int y=level.getMinBuildHeight()+level.random.nextInt(level.getHeight());
+            if(y>=160 && y<240) { netherLava=new BlockPos(x,y,z); break; }
+        }
+        BlockPos origin=new BlockPos(Math.floorDiv(netherLava.getX(),4)*4,Math.floorDiv(netherLava.getY(),4)*4,Math.floorDiv(netherLava.getZ(),4)*4);
+        for(BlockPos pos:BlockPos.betweenClosed(origin,origin.offset(3,3,3))) level.setBlock(pos,Blocks.AIR.defaultBlockState(),2);
+        level.setBlock(netherLava,Blocks.LAVA.defaultBlockState(),2);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void nether(ServerLevel level) throws Exception {
+        check(AtmosphereMaterial.NETHER_FOG.home(level)==level.getMaxBuildHeight()-1,"Nether Fog home is not TOP");
+        check(AtmosphereMaterial.NETHER_GAS.home(level)==level.getMinBuildHeight(),"separate Nether Gas home changed");
+        var chunk=level.getChunk(netherLava.getX()>>4,netherLava.getZ()>>4);
+        int chunks=level.getChunkSource().getLoadedChunksCount();
+        var smokeField=ForgeAtmospherePrototype.class.getDeclaredField("smokeGrid"); smokeField.setAccessible(true);
+        var smoke=(AtmosphereGrid<net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level>>)smokeField.get(prototype);
+        BlockPos smokePos=netherLava.above();
+        var smokeKey=new AtmosphereGrid.CellKey<>(level.dimension(),Math.floorDiv(smokePos.getX(),4),Math.floorDiv(smokePos.getY(),4),Math.floorDiv(smokePos.getZ(),4));
+        int smokeBefore=smoke.get(smokeKey)==null?0:smoke.get(smokeKey).amount();
+        Class<?> keyType=Class.forName(ForgeAtmospherePrototype.class.getName()+"$ChunkKey");
+        var ctor=keyType.getDeclaredConstructor(net.minecraft.resources.ResourceKey.class,int.class,int.class); ctor.setAccessible(true);
+        Object chunkKey=ctor.newInstance(level.dimension(),chunk.getPos().x,chunk.getPos().z);
+        var smokeMethod=ForgeAtmospherePrototype.class.getDeclaredMethod("sampleFireSmoke",net.minecraft.server.MinecraftServer.class,keyType); smokeMethod.setAccessible(true);
+        boolean completed=false;
+        for(int i=0;i<32 && !completed;i++) completed=(boolean)smokeMethod.invoke(prototype,level.getServer(),chunkKey);
+        check(completed && smoke.get(smokeKey)!=null && smoke.get(smokeKey).amount()>smokeBefore,"ongoing lava Smoke emission missing");
+        var fog=AtmosphereMaterial.NETHER_FOG;
+        int before=prototype.materialState(level,fog,netherLava).orElseThrow().amount();
+        var harvest=ForgeAtmospherePrototype.class.getDeclaredMethod("sampleNetherFogChunk",ServerLevel.class,net.minecraft.world.level.chunk.LevelChunk.class); harvest.setAccessible(true);
+        level.random.setSeed(harvestSeed);
+        harvest.invoke(prototype,level,chunk);
+        int cost=fog.capacityForAirBlocks(1);
+        check(level.getBlockState(netherLava).isAir() && prototype.materialState(level,fog,netherLava).orElseThrow().amount()==before+cost,"lava harvest did not exchange exact Fog amount");
+        int current=prototype.materialState(level,fog,netherLava).orElseThrow().amount();
+        if(current>0) check(prototype.consumeMaterial(level,fog,netherLava,current),"clear Fog fixture");
+        check(prototype.emitMaterial(level,fog,netherLava,1000),"seed Fog fixture");
+        var gridsField=ForgeAtmospherePrototype.class.getDeclaredField("materialGrids"); gridsField.setAccessible(true);
+        var grids=(Map<AtmosphereMaterial,AtmosphereGrid<net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level>>>)gridsField.get(prototype);
+        var key=new AtmosphereGrid.CellKey<>(level.dimension(),Math.floorDiv(netherLava.getX(),4),Math.floorDiv(netherLava.getY(),4),Math.floorDiv(netherLava.getZ(),4));
+        var condense=ForgeAtmospherePrototype.class.getDeclaredMethod("condenseNetherFog",ServerLevel.class,AtmosphereGrid.class,AtmosphereGrid.CellKey.class,java.util.function.ToIntFunction.class); condense.setAccessible(true);
+        java.util.function.ToIntFunction<AtmosphereGrid.CellKey<net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level>>> capacity=k -> prototype.materialState(level,fog,new BlockPos(k.x()*4,k.y()*4,k.z()*4)).orElseThrow().capacity();
+        long seed=0;
+        for(;;seed++) { level.random.setSeed(seed); if(level.random.nextDouble()<.01) break; }
+        level.random.setSeed(seed);
+        check((boolean)condense.invoke(prototype,level,grids.get(fog),key,capacity),"Fog failed valid lava condensation");
+        check(prototype.materialState(level,fog,netherLava).orElseThrow().amount()==1000-cost,"Fog condensation debit mismatch");
+        int lava=0;
+        for(BlockPos pos:BlockPos.betweenClosed(new BlockPos(key.x()*4,key.y()*4,key.z()*4),new BlockPos(key.x()*4+3,key.y()*4+3,key.z()*4+3))) if(level.getBlockState(pos).is(Blocks.LAVA)) lava++;
+        check(lava==1 && chunks==level.getChunkSource().getLoadedChunksCount(),"condensation lava count or loaded footprint changed");
+        results.put("nether_top_unchanged_gas_lava_smoke_harvest_condensation_exact_exchange",true);
+    }
 
     private static void walking(ServerLevel level) throws Exception {
         var surfaces = new java.util.ArrayList<net.minecraft.world.level.block.state.BlockState>();
