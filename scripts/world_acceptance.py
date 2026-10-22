@@ -11,7 +11,11 @@ run.mkdir(exist_ok=False)
 with (root / 'world-acceptance.log').open('w') as log:
     result = subprocess.run(['./gradlew', ':forge:runAcceptanceServer', '-PworldAcceptance', '--no-daemon'],
                             cwd=root, stdout=log, stderr=subprocess.STDOUT, timeout=600)
-evidence = json.loads((run / 'world-acceptance-result.json').read_text())
+result_path = run / 'world-acceptance-result.json'
+if result.returncode or not result_path.exists():
+    print((root / 'world-acceptance.log').read_text()[-24000:])
+    raise SystemExit('Disposable world failed to start or finish; see log above')
+evidence = json.loads(result_path.read_text())
 print(json.dumps(evidence))
 if result.returncode or not evidence.get('passed'):
     raise SystemExit('World acceptance failed; inspect world-acceptance.log and result JSON')
