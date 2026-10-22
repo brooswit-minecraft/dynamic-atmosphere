@@ -44,6 +44,7 @@ public final class WorldAcceptance {
                 loadNeighborhood(level, BASE);
                 loadNeighborhood(level, FLORA);
                 clearRoom(level);
+                prepareProducers(level);
                 // Only this far-away central chunk is FULL. Direct fixture writes avoid
                 // notifying/loading neighbors before the production unloaded-edge check.
                 var edge = fixtureChunk(level, EDGE.getX() >> 4, EDGE.getZ() >> 4);
@@ -130,8 +131,7 @@ public final class WorldAcceptance {
         results.put("cow_success_insufficient_no_double_charge",true);
     }
 
-    @SuppressWarnings("unchecked")
-    private static void producers(ServerLevel level) throws Exception {
+    private static void prepareProducers(ServerLevel level) {
         var chunk = level.getChunk(FLORA.getX() >> 4, FLORA.getZ() >> 4);
         var desert = level.registryAccess().registryOrThrow(Registries.BIOME).getHolderOrThrow(Biomes.DESERT);
         chunk.fillBiomesFromNoise((x,y,z,sampler) -> desert, level.getChunkSource().randomState().sampler());
@@ -140,6 +140,12 @@ public final class WorldAcceptance {
         level.setBlock(FLORA.above(),Blocks.AIR.defaultBlockState(),3);
         BlockPos surface = new BlockPos(776,100,776);
         level.setBlock(surface,Blocks.SAND.defaultBlockState(),2);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void producers(ServerLevel level) throws Exception {
+        var chunk = level.getChunk(FLORA.getX() >> 4, FLORA.getZ() >> 4);
+        BlockPos surface = new BlockPos(776,100,776);
         check(!level.canSeeSky(FLORA.above()),"cave fixture sees sky");
         var field = ForgeAtmospherePrototype.class.getDeclaredField("grid"); field.setAccessible(true);
         var grid = (AtmosphereGrid<net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level>>)field.get(prototype);
