@@ -130,7 +130,7 @@ public final class DustGameplay {
             previous.damagingLandingTick()));
         if (emission != MotionEmission.NONE) {
             if ((emission == MotionEmission.WALK || emission == MotionEmission.RUN)
-                && movementMaterial(entity.isInWater(), isSnowOrIce(level.getBlockState(entity.getOnPos())))
+                && movementMaterial(entity.isInWater(), isSnowOrIce(supportState(level, entity)))
                     == MovementMaterial.VAPOR) {
                 DynamicAtmosphereMod.emitVapor(level, entity.blockPosition(), configuredAmount(emission, config));
             } else {
@@ -175,7 +175,23 @@ public final class DustGameplay {
         }
     }
 
-    private static boolean isSnowOrIce(BlockState state) {
+    /** Probe just below the feet: getOnPos's 0.2 offset misses thin snow/sand layers. */
+    static BlockState supportState(ServerLevel level, LivingEntity entity) {
+        BlockPos atFeet = entity.blockPosition();
+        if (level.getChunkSource().getChunkNow(atFeet.getX() >> 4, atFeet.getZ() >> 4) != null) {
+            var cover = level.getBlockState(atFeet);
+            // A one-layer snow block has no collision; the supporting terrain is below it.
+            if (cover.is(Blocks.SNOW)) return cover;
+        }
+        BlockPos feet = BlockPos.containing(entity.getX(), entity.getY() - 0.001, entity.getZ());
+        if (level.getChunkSource().getChunkNow(feet.getX() >> 4, feet.getZ() >> 4) != null) {
+            var state = level.getBlockState(feet);
+            if (!state.isAir()) return state;
+        }
+        return level.getBlockState(entity.getOnPos());
+    }
+
+    static boolean isSnowOrIce(BlockState state) {
         return state.is(BlockTags.ICE) || state.is(Blocks.SNOW) || state.is(Blocks.SNOW_BLOCK)
             || state.is(Blocks.POWDER_SNOW);
     }

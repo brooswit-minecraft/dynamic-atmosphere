@@ -26,8 +26,8 @@ enum AtmosphereRenderMaterial {
     SLIME(1, 0x00FF00, 4), ZOMBIE_FOG(1, 0x808080, 4), NETHER_GAS(1, 0x6B8E23, 4),
     /** MINECRAFT-1 (B2): visual only, rendered unlit -- no real block light. */
     GLOW_GAS(0, 0xFFC83C, 2),
-    /** MINECRAFT-1 (B3): very dark red; vapor-like root level, matching its vapor-like LOD. */
-    NETHER_FOG(2, 0x400000, 1);
+    /** MINECRAFT-1 (B3): Netherrack red; vapor-like root level, matching its vapor-like LOD. */
+    NETHER_FOG(2, 0x804040, 1), MOLD(1, 0x706061, 1);
 
     final int cellSize = AtmosphereGridLayout.CELL_SIZE;
     final int rootLevel;
@@ -65,6 +65,7 @@ enum AtmosphereRenderMaterial {
             case NETHER_GAS -> config.netherGas();
             case GLOW_GAS -> config.glowGas();
             case NETHER_FOG -> config.netherFog();
+            case MOLD -> config.mold();
         };
     }
 
@@ -77,13 +78,22 @@ enum AtmosphereRenderMaterial {
     float channel(int channel, float[] fog, DynamicAtmosphereClientConfig.Snapshot config) {
         // Reads the CLIENT CONFIG colour, not this enum's own rgb literal: the literal is
         // the catalog default only (see class javadoc re: the smokeOpticalDensity trap).
-        if (this == VAPOR) return fog[channel];
+        if (this == VAPOR) return vaporChannel(channel, fog);
         int colour = tuning(config).color();
         return ((colour >> (16 - 8 * channel)) & 255) / 255f;
     }
 
+    /** Reviewable tuning: brighten value 8%, uniformly scaled to preserve RGB ratios/hue.
+     * Black remains black; near-white is limited by the strongest channel, avoiding clipping. */
+    static float vaporChannel(int channel, float[] fog) {
+        float maximum = Math.max(fog[0], Math.max(fog[1], fog[2]));
+        if (!Float.isFinite(maximum) || !Float.isFinite(fog[channel])) return 0;
+        double scale = maximum > 0 ? Math.min(1.08, 1.0 / maximum) : 1;
+        return (float) Math.clamp(fog[channel] * scale, 0, 1);
+    }
+
     /**
-     * MINECRAFT-387: Vapor keeps its fog-derived RGB untouched (see {@link #channel}); only its
+     * MINECRAFT-387: Vapor keeps its live fog-derived RGB source (see {@link #channel}); only its
      * alpha changes, and only as a function of that same fog colour's luminance. Modelled as
      * extra optical density rather than a direct alpha multiply: boosting the transmittance
      * EXPONENT is exactly equivalent to multiplying {@code opticalDensityMultiplier} by the same

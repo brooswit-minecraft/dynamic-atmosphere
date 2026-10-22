@@ -33,7 +33,6 @@ public final class DynamicAtmosphereServerConfig {
     private static final IntOption VERTICAL_MOVEMENT_DEAD_BAND;
     private static final DoubleOption VERTICAL_MOVEMENT_W;
     private static final DoubleOption VERTICAL_MOVEMENT_DRIFT_FRACTION;
-    private static final DoubleOption SIMULATION_SKIP_CHANCE;
     private static final IntOption RAIN_CLOUD_HEIGHT;
     private static final IntOption NETHER_CLOUDLINE_HEIGHT;
     private static final IntOption END_CLOUDLINE_BLOCKS_BELOW_TOP;
@@ -174,6 +173,10 @@ public final class DynamicAtmosphereServerConfig {
     private static final DoubleOption SLIME_SNOW_MATERIAL_COST;
     private static final IntOption SLIME_PRECIPITATION_SURFACE_ATTEMPTS;
 
+    private static final IntOption FLORA_SAMPLES, CAVE_VAPOR_AMOUNT, MOLD_EMISSION, MOLD_WITCH_INTERVAL;
+    private static final IntOption MOLD_SMALL_COST, MOLD_GIANT_COST, MOLD_COW_COST;
+    private static final DoubleOption MOLD_CHANCE, MOLD_HIGH_THRESHOLD, DESERT_DUST_CHANCE;
+
     private static volatile Snapshot cached;
 
     static {
@@ -183,7 +186,6 @@ public final class DynamicAtmosphereServerConfig {
         FULL_SNAPSHOT_INTERVAL = integer(builder, "fullSnapshotIntervalTicks", 200, 1, 72000);
         SIMULATION_INTERVAL = integer(builder, "simulationIntervalTicks", 200, 1, 72000);
         PRODUCER_INTERVAL = integer(builder, "producerIntervalTicks", 300, 1, 72000);
-        SIMULATION_SKIP_CHANCE = decimal(builder, "simulationSkipChance", 0.75, 0, 1);
         CHUNK_IMPORTS = integer(builder, "maxChunkImportsPerTick", 8, 1, 1024);
         PRODUCER_CHUNKS = integer(builder, "maxProducerChunksPerTick", 32, 1, 4096);
         SMOKE_PRODUCER_CHUNKS = integer(builder, "maxSmokeProducerChunksPerTick", 4, 1, 4096);
@@ -197,6 +199,21 @@ public final class DynamicAtmosphereServerConfig {
             "goes out per tick instead of all at once, while a single oversized batch still always",
             "makes progress (never deadlocked).");
         MAX_SYNC_OPERATIONS_PER_TICK = integer(builder, "maxSyncOperationsPerPlayerPerTick", 4096, 1, 1_000_000);
+        builder.pop();
+
+        builder.push("flora");
+        FLORA_SAMPLES = integer(builder, "samplesPerChunkCycle", 32, 1, 256);
+        CAVE_VAPOR_AMOUNT = integer(builder, "caveVaporEmission", 2, 0, 4096);
+        DESERT_DUST_CHANCE = decimal(builder, "desertDustChance", 0.01, 0, 1);
+        builder.pop();
+        builder.push("mold");
+        MOLD_EMISSION = integer(builder, "sourceEmission", 2, 0, 4096);
+        MOLD_WITCH_INTERVAL = integer(builder, "witchIntervalTicks", 100, 1, 72000);
+        MOLD_SMALL_COST = integer(builder, "smallMushroomCost", 16, 1, 4096);
+        MOLD_GIANT_COST = integer(builder, "giantMushroomCost", 128, 1, 4096);
+        MOLD_COW_COST = integer(builder, "mooshroomCost", 256, 1, 4096);
+        MOLD_CHANCE = decimal(builder, "transformationChance", 0.02, 0, 1);
+        MOLD_HIGH_THRESHOLD = decimal(builder, "highConcentration", 0.75, 0, 1);
         builder.pop();
 
         builder.push("verticalMovement");
@@ -336,7 +353,7 @@ public final class DynamicAtmosphereServerConfig {
         builder.comment("Maximum chance per processed turn that a high-fullness Nether Fog cell places a",
             "lava source back, mirroring Vapor's own maxCondensationChance.");
         NETHER_FOG_MAX_CONDENSATION_CHANCE = decimal(builder, "maxCondensationChance", 0.10, 0, 1);
-        // MINECRAFT-1 (B3): Nether Fog's home is the dimension's own bottom; see the note under dust.
+        // MINECRAFT-1 (B3): Nether Fog's home is the dimension's top; see the note under dust.
         builder.pop();
 
         builder.push("heavyGas");
@@ -550,7 +567,7 @@ public final class DynamicAtmosphereServerConfig {
         return new Snapshot(
             new RuntimeTuning(SYNC_INTERVAL.get(), FULL_SNAPSHOT_INTERVAL.get(), SIMULATION_INTERVAL.get(),
                 PRODUCER_INTERVAL.get(), CHUNK_IMPORTS.get(), PRODUCER_CHUNKS.get(), SMOKE_PRODUCER_CHUNKS.get(),
-                MAX_SCAN_SECTIONS_PER_CALL.get(), SIMULATION_SKIP_CHANCE.get(), MAX_SYNC_OPERATIONS_PER_TICK.get()),
+                MAX_SCAN_SECTIONS_PER_CALL.get(), MAX_SYNC_OPERATIONS_PER_TICK.get()),
             new Vapor(VAPOR_PRODUCER_CHANCE.get(),
                 HIGH_TERRAIN.get(), RAIN_CLOUD.get(), SNOW_ICE.get(), DARK_GROUND.get(),
                 SNOW_LAYER.get(), ICE_REMOVAL.get(), CONDENSATION_CHANCE.get(),
@@ -604,7 +621,10 @@ public final class DynamicAtmosphereServerConfig {
             new Dimensions(new DimensionAtmosphereConfig(
                 THE_END_HONOR_PREFERRED_ALTITUDE.get(), THE_END_GLOBAL_DISSIPATION_MULTIPLIER.get())),
             new PortalTransferSinkTuning(PORTAL_TRANSFER_THROUGHPUT.get(), PORTAL_TRANSFER_MAX_SOURCES_PER_CALL.get(),
-                PORTAL_TRANSFER_MAX_CANDIDATE_OPERATIONS_PER_CALL.get())
+                PORTAL_TRANSFER_MAX_CANDIDATE_OPERATIONS_PER_CALL.get()),
+            new Flora(FLORA_SAMPLES.get(), CAVE_VAPOR_AMOUNT.get(), DESERT_DUST_CHANCE.get()),
+            new Mold(MOLD_EMISSION.get(), MOLD_WITCH_INTERVAL.get(), MOLD_SMALL_COST.get(),
+                MOLD_GIANT_COST.get(), MOLD_COW_COST.get(), MOLD_CHANCE.get(), MOLD_HIGH_THRESHOLD.get())
         );
     }
 
@@ -667,12 +687,16 @@ public final class DynamicAtmosphereServerConfig {
                            Integrations integrations, HeavyGas heavyGas, Magma magma,
                            Lightning lightning, GhastSpawn ghastSpawn, ZombieFog zombieFog,
                            SlimePrecipitation slimePrecipitation,
-                           NetherGas netherGas, Dimensions dimensions, PortalTransferSinkTuning portalTransferSink) { }
+                           NetherGas netherGas, Dimensions dimensions, PortalTransferSinkTuning portalTransferSink, Flora flora, Mold mold) { }
+    public record Flora(int samplesPerChunkCycle, int caveVaporEmission, double desertDustChance) { }
+    public record Mold(int sourceEmission, int witchIntervalTicks, int smallMushroomCost,
+                       int giantMushroomCost, int mooshroomCost, double transformationChance,
+                       double highConcentration) { }
     public record RuntimeTuning(int syncIntervalTicks, int fullSnapshotIntervalTicks,
                                 int simulationIntervalTicks, int producerIntervalTicks,
                                 int maxChunkImportsPerTick, int maxProducerChunksPerTick,
                                 int maxSmokeProducerChunksPerTick, int maxScanSectionsPerCall,
-                                double simulationSkipChance, int maxSyncOperationsPerPlayerPerTick) { }
+                                int maxSyncOperationsPerPlayerPerTick) { }
     public record Vapor(double producerChance,
                         int highTerrainEmission, int rainCloudEmission, int snowIceEmission,
                         int maxDarkGroundEmission, int snowRemovalPerLayer, int iceRemovalEmission,
@@ -716,7 +740,7 @@ public final class DynamicAtmosphereServerConfig {
                            double endSandCondensationChance) { }
     /** MINECRAFT-1 (B2): Glow Gas's home is a literal Y=0, not configurable. */
     public record GlowGas(int glowstoneEmission) { }
-    /** MINECRAFT-1 (B3): Nether Fog's home is the dimension's own bottom, not configurable. */
+    /** MINECRAFT-1 (B3): Nether Fog's home is the dimension's top, not configurable. */
     public record NetherFog(double maxCondensationChance) { }
     /** MINECRAFT-1 (B4): the first config section whose key is read by a registered Block, not simulation code. */
     public record EndSand(int riseIntervalTicks) { }

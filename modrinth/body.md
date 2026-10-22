@@ -214,8 +214,8 @@ of intake and 256 units of output per supported material.
 
 Portal sections are palette-filtered and scanned for every portal block, emitting
 on both faces. `obsidianPowder.portalBlockEmission` defaults to 100 per block per producer
-pass; zero disables it. `runtime.simulationSkipChance` defaults to 0.75 for all
-seven materials, replacing the old Vapor-only setting.
+pass; zero disables it. Eligible due simulation cells no longer randomly skip; obsolete
+`runtime.simulationSkipChance` and `vapor.skipChance` entries are ignored. Work budgets remain bounded.
 
 Server gameplay, shared cadence, work budgets, and fan settings are in
 `config/dynamicatmosphere-server.toml` (legacy installations may use the world's

@@ -27,7 +27,8 @@ public final class AtmosphereNetwork {
         // landed, so a naive merge would have silently under-counted this ordinal too. Bumped
         // to 14 for the combined 11-material layout (AtmosphereMaterial adds an ordinal; a
         // client/server running different protocol versions must not connect).
-        var registrar = event.registrar("14");
+        // MINECRAFT-484 appends Mold; reject mismatched material layouts.
+        var registrar = event.registrar("15");
         registrar.playToClient(AtmosphereGridPayload.TYPE, AtmosphereGridPayload.STREAM_CODEC,
             (payload, context) -> clientReceiver.accept(payload, context.connection()));
         registrar.playToClient(SmokeGridPayload.TYPE, SmokeGridPayload.STREAM_CODEC,

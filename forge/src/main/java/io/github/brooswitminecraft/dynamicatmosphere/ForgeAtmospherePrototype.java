@@ -1431,6 +1431,16 @@ final class ForgeAtmospherePrototype {
                 ServerLevel cellLevel = server.getLevel(key.dimension());
                 if (cellLevel == null) return;
                 BlockPos origin = materialCellOrigin(material, key);
+                if (material == AtmosphereMaterial.MOLD) {
+                    var cell = materialGrid.get(key);
+                    if (cell != null) {
+                        int used = MoldGameplay.processCell(cellLevel, origin, cell.amount(), capacityAt.applyAsInt(key));
+                        if (used > 0) {
+                            capacities.clear();
+                            materialGrid.set(key, cell.amount() - used, serverTicks, capacityAt.applyAsInt(key));
+                        }
+                    }
+                }
                 if (material == AtmosphereMaterial.VOID_GAS) {
                     voidGasGameplay.onProcessedCell(cellLevel, origin);
                     dissipateHeavyGas(cellLevel, materialGrid, key, capacityAt);
@@ -1648,7 +1658,7 @@ final class ForgeAtmospherePrototype {
 
     private boolean shouldSimulate(MinecraftServer server, AtmosphereGrid.CellKey<ResourceKey<Level>> key) {
         ServerLevel level = server.getLevel(key.dimension());
-        return level != null && level.random.nextDouble() >= tuning().runtime().simulationSkipChance();
+        return level != null;
     }
 
     private void processFans(MinecraftServer server) {
@@ -1924,6 +1934,7 @@ final class ForgeAtmospherePrototype {
         ChunkState state = chunks.get(key);
         if (level == null || state == null || !state.readable) return;
         producerChecks++;
+        FloraProducers.sample(level, state.chunk, this);
         if (!AtmosphereProducerSchedule.passesChance(tuning().vapor().producerChance(), level.random.nextDouble())) return;
         producerSamples++;
 

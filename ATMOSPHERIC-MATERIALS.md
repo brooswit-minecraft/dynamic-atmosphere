@@ -24,7 +24,7 @@ and never force chunks to load.
 | Obsidian Powder | Dark purple cast, PROPOSED (0x1A1025) | 4x4x4 | Base cells only | 0.3x |
 | Nether Gas | Sickly green (0x6B8E23) | 4x4x4 | 1x to V, 2x to 2V | 4x |
 | Glow Gas | Gold (0xFFC83C) | 4x4x4 | Base cells only | 2x |
-| Nether Fog | Very dark red (0x400000) | 4x4x4 | 1x to V/2, 2x to V, 4x to 2V | 1x |
+| Nether Fog | Netherrack red (0x804040), TOP home | 4x4x4 | 1x to V/2, 2x to V, 4x to 2V | 1x |
 
 MINECRAFT-21 (transferred from MINECRAFT-20) made every Color/Optical density
 value above a client config default (`client.materials.<material>Color` /
@@ -213,3 +213,6 @@ can place or remove blocks, alter villagers, damage entities, spawn mobs, and br
 eligible terrain under pressure. Updating to the uniform 4x4x4 cell size discards
 saved Dust, Obsidian Powder, Exhaust, Void Gas, and Slime atmosphere; Vapor and Smoke
 were already 4x4x4 and keep their data. Downgrading does not undo world mutations.
+
+Mold: Mycelium-like `0x706061`, 4x4x4 cells, Void-Gas-style LOD, optical density 1.
+Sources and paid transformations are documented in [MINECRAFT-484](docs/MINECRAFT-484.md).

@@ -21,12 +21,12 @@ public final class AtmosphericMaterials {
 
     public static final MaterialDefinition VAPOR = new MaterialDefinition("vapor", CURRENT_FOG,
         // MINECRAFT-21: vaporOpticalDensity 1 -> 1.2.
-        new MaterialSettings(CELL_SIZE, VAPOR_LOD, 1, OptionalDouble.of(1), 1.2), Set.of(EXISTING_VAPOR_RULES, SNOW_ICE_SURFACE),
+        new MaterialSettings(CELL_SIZE, VAPOR_LOD, 1, OptionalDouble.of(1), 1.2), Set.of(EXISTING_VAPOR_RULES, SNOW_ICE_SURFACE, CAVE_FLORA),
         Set.of(MaterialDefinition.Transformation.WATER));
     public static final MaterialDefinition DUST = new MaterialDefinition("dust", BROWN,
         settings(CELL_SIZE, DUST_LOD, 1, OptionalDouble.of(1)),
         Set.of(PLAYER_WALKING, MOB_WALKING, BLOCK_BREAKING, BLOCK_PLACEMENT,
-            PLAYER_FALL_DAMAGE, MOB_FALL_DAMAGE), Set.of(MaterialDefinition.Transformation.GRAVEL));
+            PLAYER_FALL_DAMAGE, MOB_FALL_DAMAGE, DESERT_SURFACE), Set.of(MaterialDefinition.Transformation.GRAVEL));
     public static final MaterialDefinition SMOKE = new MaterialDefinition("smoke", DARK_WARM_GREY,
         // MINECRAFT-21: smokeOpticalDensity 2 -> 4.
         new MaterialSettings(CELL_SIZE, VAPOR_LOD, 1, OptionalDouble.of(1), 4),
@@ -57,13 +57,19 @@ public final class AtmosphericMaterials {
     public static final MaterialDefinition GLOW_GAS = new MaterialDefinition("glow_gas", GOLD,
         new MaterialSettings(CELL_SIZE, DUST_LOD, 1, OptionalDouble.of(1), 2),
         Set.of(GLOWSTONE), Set.of());
-    /** MINECRAFT-1 (B3): very dark red, vapor-like LOD; home is the dimension's own bottom. */
-    public static final MaterialDefinition NETHER_FOG = new MaterialDefinition("nether_fog", DARK_RED,
+    /** MINECRAFT-1 (B3): Netherrack red, vapor-like LOD; home is TOP. */
+    public static final MaterialDefinition NETHER_FOG = new MaterialDefinition("nether_fog", NETHERRACK_RED,
         settings(CELL_SIZE, VAPOR_LOD, 1, OptionalDouble.of(1)),
         Set.of(LAVA_SOURCE_HARVEST), Set.of());
 
+    public static final MaterialDefinition MOLD = new MaterialDefinition("mold", MaterialDefinition.Color.MYCELIUM,
+        settings(CELL_SIZE, VOID_GAS_LOD, 1, OptionalDouble.of(1)),
+        Set.of(MaterialDefinition.Producer.MYCELIUM, MUSHROOMS, WITCH),
+        Set.of(MaterialDefinition.Transformation.MUSHROOM, MaterialDefinition.Transformation.GIANT_MUSHROOM,
+            MaterialDefinition.Transformation.MOOSHROOM));
+
     public static final List<MaterialDefinition> ALL =
-        List.of(VAPOR, DUST, SMOKE, VOID_GAS, EXHAUST, SLIME, OBSIDIAN_POWDER, ZOMBIE_FOG, NETHER_GAS, GLOW_GAS, NETHER_FOG);
+        List.of(VAPOR, DUST, SMOKE, VOID_GAS, EXHAUST, SLIME, OBSIDIAN_POWDER, ZOMBIE_FOG, NETHER_GAS, GLOW_GAS, NETHER_FOG, MOLD);
 
     private AtmosphericMaterials() { }
 

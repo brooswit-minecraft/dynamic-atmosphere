@@ -20,7 +20,8 @@ class DynamicAtmosphereConfigTest {
         assertEquals(10.0 / 128, first.smoke().farmlandConversionChance());
         assertEquals(10.0 / 256, first.smoke().villagerConversionChance());
         assertEquals(10.0 / 64, first.smoke().dissipationChance());
-        assertEquals(0.75, first.runtime().simulationSkipChance());
+        assertFalse(flattenConfigKeys(DynamicAtmosphereServerConfig.SPEC.getValues(), "")
+            .contains("runtime.simulationskipchance"));
         assertEquals(100, first.obsidianPowder().portalBlockEmission());
         assertEquals(256, first.vapor().rainCloudHeight());
         assertEquals(120, first.vapor().netherCloudlineHeight());

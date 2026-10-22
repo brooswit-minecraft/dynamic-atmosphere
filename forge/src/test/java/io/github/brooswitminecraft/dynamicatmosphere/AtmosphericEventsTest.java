@@ -24,13 +24,13 @@ class AtmosphericEventsTest {
     ) {
         return new DynamicAtmosphereServerConfig.Snapshot(null, null, null, null, null, null, null, null, null, null,
             null, null, null, null, null, null, lightning, ghastSpawn, zombieFog, slimePrecipitation,
-            null, null, null);
+            null, null, null, null, null);
     }
 
     @Test
     void vaporEventsBuildsOneLightningEventTargetingPrecipitationSurface() {
         var config = configWith(new DynamicAtmosphereServerConfig.Lightning(0.85, 0.002, 0.03, 8),
-            null, null, null);
+            null, null, null, null, null);
         var events = AtmosphericEvents.vaporEvents(config);
         assertEquals(1, events.size());
         var lightning = events.get(0);
