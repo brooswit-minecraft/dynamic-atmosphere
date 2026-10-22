@@ -29,6 +29,8 @@ public final class WorldAcceptance {
     private static final Map<String,Object> results = new LinkedHashMap<>();
     private static int ticks, edgeReadyTick;
     private static boolean finished;
+    private static final BlockPos SAVED = new BlockPos(524,120,524);
+    private static final boolean RESTART = Files.exists(Path.of("restart-phase"));
     private static ForgeAtmospherePrototype prototype;
 
     @SubscribeEvent
@@ -42,6 +44,7 @@ public final class WorldAcceptance {
                 field.setAccessible(true);
                 prototype = (ForgeAtmospherePrototype) field.get(null);
                 loadNeighborhood(level, BASE);
+                if (RESTART) return;
                 loadNeighborhood(level, FLORA);
                 clearRoom(level);
                 prepareProducers(level);
@@ -53,9 +56,17 @@ public final class WorldAcceptance {
             }
             if (ticks == 60) {
                 check(prototype.materialState(level, AtmosphereMaterial.MOLD, BASE).isPresent(), "fixture chunks not imported");
+                if (RESTART) {
+                    check(amount(level,SAVED)==73,"Mold region-file restart balance changed");
+                    check(level.getBlockState(SAVED.below()).is(Blocks.MYCELIUM),"fixture block did not survive region-file restart");
+                    results.put("mold_region_file_process_restart_exact_balance",true);
+                    finish(server,null); return;
+                }
                 smallAndGiant(level);
                 cows(level);
                 producers(level);
+                walking(level);
+                measuredSampler(level);
                 int beforeChunks = level.getChunkSource().getLoadedChunksCount();
                 check(!level.hasChunkAt(EDGE.east()), "unloaded-edge fixture unexpectedly has its east neighbor");
                 seed(level, EDGE, 100);
@@ -73,6 +84,9 @@ public final class WorldAcceptance {
                         new BlockPos(16012,100,16012), new TargetRandom(3,0,3));
                 check(cost == 16 && amount(level,EDGE) == 84 && level.getBlockState(EDGE).is(Blocks.RED_MUSHROOM), "loaded edge did not place and debit exactly once");
                 results.put("loaded_edge_success_exact_debit", true);
+                level.setBlock(SAVED.below(),Blocks.MYCELIUM.defaultBlockState(),3);
+                seed(level,SAVED,73);
+                // Normal tick flushing and server shutdown persist this through actual region files.
                 results.put("ticks", ticks);
                 finish(server, null);
             }
@@ -166,6 +180,62 @@ public final class WorldAcceptance {
         results.put("underground_vapor_surface_only_dust_bounded_no_load",true);
     }
 
+
+    private static void walking(ServerLevel level) throws Exception {
+        var surfaces = new java.util.ArrayList<net.minecraft.world.level.block.state.BlockState>();
+        for(int layers=1;layers<=8;layers++) surfaces.add(Blocks.SNOW.defaultBlockState().setValue(net.minecraft.world.level.block.SnowLayerBlock.LAYERS,layers));
+        for(var block : new net.minecraft.world.level.block.Block[]{Blocks.SNOW_BLOCK,Blocks.ICE,Blocks.PACKED_ICE,Blocks.BLUE_ICE,Blocks.SAND,Blocks.DIRT,Blocks.DIRT_PATH,Blocks.FARMLAND}) surfaces.add(block.defaultBlockState());
+        BlockPos pos = BASE.offset(0,8,0);
+        int chunks = level.getChunkSource().getLoadedChunksCount();
+        for(var state : surfaces) {
+            level.setBlock(pos.below(),Blocks.STONE.defaultBlockState(),2);
+            level.setBlock(pos,state,2);
+            level.setBlock(pos.above(),Blocks.AIR.defaultBlockState(),2);
+            double height=state.getCollisionShape(level,pos).isEmpty()?0:state.getCollisionShape(level,pos).max(net.minecraft.core.Direction.Axis.Y);
+            var mob=EntityType.COW.create(level);
+            mob.setId((int)-Math.floorMod(level.getGameTime(),10));
+            mob.moveTo(pos.getX()+.2,pos.getY()+height,pos.getZ()+.5,0,0);
+            mob.setOnGround(true);
+            var event=new net.neoforged.neoforge.event.tick.EntityTickEvent.Post(mob);
+            prototype.dustGameplay().onEntityTick(event);
+            BlockPos emission=mob.blockPosition();
+            int vapor=vaporAmount(level,emission), dust=prototype.materialState(level,AtmosphereMaterial.DUST,emission).orElseThrow().amount();
+            mob.setPos(mob.getX()+.2,mob.getY(),mob.getZ());
+            prototype.dustGameplay().onEntityTick(event);
+            boolean snow=DustGameplay.isSnowOrIce(state);
+            check(vaporAmount(level,emission)==vapor+(snow?1:0),"wrong walking Vapor for "+state);
+            check(prototype.materialState(level,AtmosphereMaterial.DUST,emission).orElseThrow().amount()==dust+(snow?0:1),"wrong walking Dust for "+state);
+            prototype.dustGameplay().onEntityTick(event);
+            check(vaporAmount(level,emission)==vapor+(snow?1:0) && prototype.materialState(level,AtmosphereMaterial.DUST,emission).orElseThrow().amount()==dust+(snow?0:1),"stationary emission for "+state);
+            prototype.dustGameplay().onEntityLeave(new net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent(mob,level));
+        }
+        check(chunks==level.getChunkSource().getLoadedChunksCount(),"walking loaded chunks");
+        results.put("walking_snow_layers_1_to_8_ice_sand_dirt_partial_surfaces_stationary",surfaces.size());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static int vaporAmount(ServerLevel level,BlockPos pos) throws Exception {
+        var field=ForgeAtmospherePrototype.class.getDeclaredField("grid"); field.setAccessible(true);
+        var grid=(AtmosphereGrid<net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level>>)field.get(prototype);
+        var cell=grid.get(new AtmosphereGrid.CellKey<>(level.dimension(),Math.floorDiv(pos.getX(),4),Math.floorDiv(pos.getY(),4),Math.floorDiv(pos.getZ(),4)));
+        return cell==null?0:cell.amount();
+    }
+
+    private static void measuredSampler(ServerLevel level) {
+        var chunk=level.getChunk(FLORA.getX()>>4,FLORA.getZ()>>4);
+        int chunks=level.getChunkSource().getLoadedChunksCount();
+        for(int i=0;i<200;i++) FloraProducers.sample(level,chunk,prototype,new FloraRandom(level.getHeight()));
+        long[] nanos=new long[1000];
+        for(int i=0;i<nanos.length;i++) {
+            long start=System.nanoTime();
+            FloraProducers.sample(level,chunk,prototype,new FloraRandom(level.getHeight()));
+            nanos[i]=System.nanoTime()-start;
+        }
+        check(chunks==level.getChunkSource().getLoadedChunksCount(),"sampler workload loaded chunks");
+        java.util.Arrays.sort(nanos);
+        results.put("sampler_microbenchmark",Map.of("warmup_calls",200,"measured_calls",1000,"fixture_chunks",1,"candidate_attempts_per_call",32,"p50_ns",nanos[499],"p95_ns",nanos[949],"max_ns",nanos[999],"total_ns",java.util.Arrays.stream(nanos).sum()));
+    }
+
     private static void loadNeighborhood(ServerLevel level, BlockPos center) {
         for(int dx=-1;dx<=1;dx++) for(int dz=-1;dz<=1;dz++) fixtureChunk(level,(center.getX()>>4)+dx,(center.getZ()>>4)+dz);
     }
@@ -190,7 +260,7 @@ public final class WorldAcceptance {
     private static void finish(net.minecraft.server.MinecraftServer server, Throwable failure) {
         finished=true; results.put("passed",failure==null);
         if(failure!=null) { results.put("failure",failure.toString()); failure.printStackTrace(); }
-        try { Files.writeString(Path.of("world-acceptance-result.json"),new GsonBuilder().setPrettyPrinting().create().toJson(results)); }
+        try { Files.writeString(Path.of(RESTART ? "world-acceptance-restart-result.json" : "world-acceptance-result.json"),new GsonBuilder().setPrettyPrinting().create().toJson(results)); }
         catch(Exception e) { throw new RuntimeException(e); }
         System.out.println("WORLD_ACCEPTANCE_RESULT "+results);
         server.halt(false);

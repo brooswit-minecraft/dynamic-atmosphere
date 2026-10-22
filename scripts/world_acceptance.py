@@ -20,3 +20,17 @@ print(json.dumps(evidence))
 if result.returncode or not evidence.get('passed'):
     print((root / 'world-acceptance.log').read_text()[-16000:])
     raise SystemExit('World acceptance failed; inspect world-acceptance.log and result JSON')
+
+# Restart only the freshly-created fixture above, never a user-supplied world.
+(run / 'restart-phase').write_text('created-by-this-invocation\n')
+with (root / 'world-acceptance-restart.log').open('w') as log:
+    restart = subprocess.run(['./gradlew', ':forge:runAcceptanceServer', '-PworldAcceptance', '--no-daemon'], cwd=root, stdout=log, stderr=subprocess.STDOUT, timeout=600)
+restart_path = run / 'world-acceptance-restart-result.json'
+if restart.returncode or not restart_path.exists():
+    print((root / 'world-acceptance-restart.log').read_text()[-16000:])
+    raise SystemExit('Disposable restart did not finish')
+restart_evidence = json.loads(restart_path.read_text())
+print(json.dumps(restart_evidence))
+if not restart_evidence.get('passed'):
+    print((root / 'world-acceptance-restart.log').read_text()[-16000:])
+    raise SystemExit('Disposable restart assertions failed')

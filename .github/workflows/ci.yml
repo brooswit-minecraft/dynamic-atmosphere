@@ -67,7 +67,7 @@ jobs:
         with:
           name: world-acceptance
           path: |
-            world-acceptance.log
-            forge/run-world-acceptance/world-acceptance-result.json
+            world-acceptance*.log
+            forge/run-world-acceptance/world-acceptance*result.json
             forge/run-world-acceptance/logs/latest.log
           if-no-files-found: warn
