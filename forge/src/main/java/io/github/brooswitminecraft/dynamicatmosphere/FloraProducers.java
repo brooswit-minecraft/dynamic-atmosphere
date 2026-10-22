@@ -27,17 +27,22 @@ final class FloraProducers {
     }
 
     static boolean sample(ServerLevel level, LevelChunk chunk, ForgeAtmospherePrototype prototype) {
+        return sample(level, chunk, prototype, level.random);
+    }
+
+    static boolean sample(ServerLevel level, LevelChunk chunk, ForgeAtmospherePrototype prototype,
+                          net.minecraft.util.RandomSource random) {
         var config = DynamicAtmosphereServerConfig.snapshot();
         int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
         for (BlockPos pos : positions(x0, z0, level.getMinBuildHeight(), level.getHeight(),
-                config.flora().samplesPerChunkCycle(), level.random::nextInt)) {
+                config.flora().samplesPerChunkCycle(), random::nextInt)) {
             var state = chunk.getBlockState(pos);
             if (caveFlora(state)) prototype.emitVapor(level, vaporPosition(pos, state), config.flora().caveVaporEmission());
             if (moldSource(state)) prototype.emitMaterial(level, AtmosphereMaterial.MOLD, pos.above(),
                 config.mold().sourceEmission());
         }
-        if (level.random.nextDouble() < config.flora().desertDustChance()) {
-            int x = level.random.nextInt(16), z = level.random.nextInt(16);
+        if (random.nextDouble() < config.flora().desertDustChance()) {
+            int x = random.nextInt(16), z = random.nextInt(16);
             BlockPos support = new BlockPos(x0 + x,
                 chunk.getHeight(Heightmap.Types.WORLD_SURFACE, x, z), z0 + z);
             var state = chunk.getBlockState(support);

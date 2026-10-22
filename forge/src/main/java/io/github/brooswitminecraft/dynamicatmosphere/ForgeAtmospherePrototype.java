@@ -1432,14 +1432,8 @@ final class ForgeAtmospherePrototype {
                 if (cellLevel == null) return;
                 BlockPos origin = materialCellOrigin(material, key);
                 if (material == AtmosphereMaterial.MOLD) {
-                    var cell = materialGrid.get(key);
-                    if (cell != null) {
-                        int used = MoldGameplay.processCell(cellLevel, origin, cell.amount(), capacityAt.applyAsInt(key));
-                        if (used > 0) {
-                            capacities.clear();
-                            materialGrid.set(key, cell.amount() - used, serverTicks, capacityAt.applyAsInt(key));
-                        }
-                    }
+                    moldGameplay.processCellAndConsume(cellLevel, origin, cellLevel.random);
+                    capacities.clear();
                 }
                 if (material == AtmosphereMaterial.VOID_GAS) {
                     voidGasGameplay.onProcessedCell(cellLevel, origin);
@@ -1650,6 +1644,9 @@ final class ForgeAtmospherePrototype {
         materialGrid.set(key, cell.amount() - cost, serverTicks, capacity);
         return true;
     }
+
+    private final MoldGameplay moldGameplay = new MoldGameplay(this);
+    MoldGameplay moldGameplay() { return moldGameplay; }
 
     DustGameplay dustGameplay() { return dustGameplay; }
     ObsidianPowderGameplay obsidianPowderGameplay() { return obsidianPowderGameplay; }

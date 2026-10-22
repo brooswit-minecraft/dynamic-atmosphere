@@ -99,3 +99,15 @@ tasks.named("processResources", ProcessResources) {
         expand replaceProperties
     }
 }
+
+// Acceptance code is compiled only into this disposable test run, never a normal mod jar.
+if (project.hasProperty('worldAcceptance')) {
+    sourceSets.main.java.srcDir 'src/worldAcceptance/java'
+    neoForge.runs {
+        acceptanceServer {
+            server()
+            programArgument '--nogui'
+            gameDirectory = layout.projectDirectory.dir('run-world-acceptance')
+        }
+    }
+}

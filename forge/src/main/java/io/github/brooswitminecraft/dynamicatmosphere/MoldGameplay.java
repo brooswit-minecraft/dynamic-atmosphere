@@ -61,16 +61,32 @@ final class MoldGameplay {
         if (entity instanceof Witch) {
             prototype.emitMaterial(level, AtmosphereMaterial.MOLD, entity.blockPosition(), config.sourceEmission());
         } else if (entity.getType() == EntityType.COW && entity instanceof Cow cow) {
-            BlockPos pos = entity.blockPosition();
-            prototype.materialState(level, AtmosphereMaterial.MOLD, pos).ifPresent(cell -> {
-                int cost = MoldGrowth.attempt(cell.amount(), cell.capacity(), config.mooshroomCost(),
-                    config.highConcentration(), config.transformationChance(), level.random.nextDouble(),
-                    () -> {
-                        var converted = cow.convertTo(EntityType.MOOSHROOM, false);
-                        return converted != null && level.getEntity(converted.getUUID()) == converted;
-                    });
-                if (cost > 0) prototype.consumeMaterial(level, AtmosphereMaterial.MOLD, pos, cost);
-            });
+            processCow(cow, level.random);
         }
     }
+
+    /** The same successful-action debit boundary used by the ticking material simulation. */
+    int processCellAndConsume(ServerLevel level, BlockPos origin, net.minecraft.util.RandomSource random) {
+        return prototype.materialState(level, AtmosphereMaterial.MOLD, origin).map(cell -> {
+            int used = processCell(level, origin, cell.amount(), cell.capacity(), random);
+            if (used > 0) prototype.consumeMaterial(level, AtmosphereMaterial.MOLD, origin, used);
+            return used;
+        }).orElse(0);
+    }
+
+    int processCow(Cow cow, net.minecraft.util.RandomSource random) {
+        if (!(cow.level() instanceof ServerLevel level) || cow.getType() != EntityType.COW || !cow.isAlive()) return 0;
+        var config = DynamicAtmosphereServerConfig.snapshot().mold();
+        BlockPos pos = cow.blockPosition();
+        return prototype.materialState(level, AtmosphereMaterial.MOLD, pos).map(cell -> {
+            int cost = MoldGrowth.attempt(cell.amount(), cell.capacity(), config.mooshroomCost(),
+                config.highConcentration(), config.transformationChance(), random.nextDouble(), () -> {
+                    var converted = cow.convertTo(EntityType.MOOSHROOM, false);
+                    return converted != null && level.getEntity(converted.getUUID()) == converted;
+                });
+            if (cost > 0) prototype.consumeMaterial(level, AtmosphereMaterial.MOLD, pos, cost);
+            return cost;
+        }).orElse(0);
+    }
+
 }
