@@ -112,3 +112,33 @@ The existing engine source-budget tests remain the scheduling bound evidence.
 `world-acceptance-result.json` and CI logs are the pass/failure receipts; the PR
 records which exact head passed. Region-file restart persistence, client rendering,
 probability distribution and sustained server workload measurements remain gaps.
+
+## Additional runtime acceptance boundaries
+
+The disposable world fixture drives the actual movement event handler with real
+mob positions/collision heights over snow layers 1–8, snow block, three ice blocks,
+sand, dirt, dirt path and farmland (16 surfaces). It checks exact walking Vapor
+versus Dust, stationary suppression, and unchanged loaded-chunk count. Movement
+is deliberately stepped by the fixture; this is not a player-input/AI walk test.
+No modded sand-layer block is available in this harness.
+
+After normal shutdown, the script starts a second server JVM against only the
+world freshly created by that same invocation. It verifies the exact 73-unit Mold
+balance and a fixture block from real region files, through normal chunk import.
+This supplements the NBT and wire-codec tests; it does not prove real-client Mold
+packet delivery. The existing Vehicles client harness uses its pinned Atmosphere
+dependency, not this branch's new Mold protocol.
+
+The sampler microbenchmark runs on the CI server thread against one retained
+chunk: 200 warm-up calls followed by 1,000 individually timed calls, 32 candidate
+attempts per call, deterministic repeated coordinates and warmed caches. The
+fixture contains underground moss and exposed desert sand. JSON records p50,
+p95, maximum and total nanoseconds plus loaded-chunk invariance. This narrow
+sampler workload is measured evidence, not a sustained multi-world/backlog/tick
+budget benchmark; natural flora density and statistical cadence remain open.
+
+The Nether fixture calls the existing production scan, harvesting and condensation
+paths in a real Nether level. It checks ongoing lava Smoke, exact lava/Fog exchange
+in both directions, one lava placement, no added loaded chunks, actual TOP home,
+and unchanged separate Nether Gas home. Existing config/catalog tests cover the
+red color default. Visual color and settling over time remain manual checks.
