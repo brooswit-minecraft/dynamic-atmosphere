@@ -19,6 +19,11 @@ class FloraProducersTest {
         assertEquals(319, high.iterator().next().getY());
         assertEquals(-1, high.iterator().next().getX());
     }
+    @Test void solidMossEmitsAboveCellBoundaryWhileHangingFloraDoesNotEmitIntoCeiling() {
+        var source = new net.minecraft.core.BlockPos(0, 63, 0);
+        assertEquals(64, FloraProducers.vaporPosition(source, Blocks.MOSS_BLOCK.defaultBlockState()).getY());
+        assertEquals(source, FloraProducers.vaporPosition(source, Blocks.SPORE_BLOSSOM.defaultBlockState()));
+    }
     @Test void floraAndMoldSourcesAreDistinctAndExplicit() {
         assertTrue(FloraProducers.caveFlora(Blocks.CAVE_VINES.defaultBlockState()));
         assertTrue(FloraProducers.caveFlora(Blocks.MOSS_BLOCK.defaultBlockState()));

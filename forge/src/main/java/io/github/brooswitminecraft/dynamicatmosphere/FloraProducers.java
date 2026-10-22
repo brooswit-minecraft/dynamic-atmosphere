@@ -32,8 +32,8 @@ final class FloraProducers {
         for (BlockPos pos : positions(x0, z0, level.getMinBuildHeight(), level.getHeight(),
                 config.flora().samplesPerChunkCycle(), level.random::nextInt)) {
             var state = chunk.getBlockState(pos);
-            if (caveFlora(state)) prototype.emitVapor(level, pos, config.flora().caveVaporEmission());
-            if (moldSource(state)) prototype.emitMaterial(level, AtmosphereMaterial.MOLD, pos,
+            if (caveFlora(state)) prototype.emitVapor(level, vaporPosition(pos, state), config.flora().caveVaporEmission());
+            if (moldSource(state)) prototype.emitMaterial(level, AtmosphereMaterial.MOLD, pos.above(),
                 config.mold().sourceEmission());
         }
         if (level.random.nextDouble() < config.flora().desertDustChance()) {
@@ -49,6 +49,12 @@ final class FloraProducers {
             }
         }
         return true;
+    }
+
+    static BlockPos vaporPosition(BlockPos source, BlockState state) {
+        // Solid moss at y=4n+3 can occupy a completely full source cell. Emit into the
+        // cell above; hanging/non-solid plants emit where they are, not into their ceiling.
+        return state.is(Blocks.MOSS_BLOCK) ? source.above() : source;
     }
 
     static java.util.Set<BlockPos> positions(int x, int z, int minY, int height, int attempts,

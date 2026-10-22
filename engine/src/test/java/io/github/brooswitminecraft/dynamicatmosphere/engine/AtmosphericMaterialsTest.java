@@ -92,7 +92,7 @@ class AtmosphericMaterialsTest {
         var custom = new MaterialDefinition("custom", MaterialDefinition.Color.BROWN, settings, producers, transformations);
         producers.clear();
         transformations.clear();
-        assertEquals(6, custom.producers().size());
+        assertEquals(AtmosphericMaterials.DUST.producers().size(), custom.producers().size());
         assertEquals(1, custom.transformations().size());
         assertThrows(UnsupportedOperationException.class, () -> settings.lod().clear());
         assertThrows(UnsupportedOperationException.class, () -> custom.producers().clear());
